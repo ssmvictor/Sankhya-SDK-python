@@ -1,0 +1,184 @@
+# MkDocs configuration for Sankhya SDK Python
+# Documentation: https://www.mkdocs.org/
+
+site_name: Sankhya SDK Python
+site_description: SDK Python para integração com API Sankhya (ERP)
+site_author: Equipe Onix Brasil
+site_url: https://github.com/onixbrasil/Sankhya-SDK-python
+
+# Repository
+repo_name: Sankhya-SDK-python
+repo_url: https://github.com/onixbrasil/Sankhya-SDK-python
+edit_uri: edit/main/docs/
+
+# Copyright
+copyright: Copyright &copy; 2024 Equipe Onix Brasil
+
+# Theme Configuration
+theme:
+  name: material
+  language: pt-BR
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Mudar para modo escuro
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Mudar para modo claro
+  features:
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.tabs.link
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/code-braces
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+# Plugins
+plugins:
+  - search:
+      lang: pt
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            docstring_style: google
+            docstring_section_style: spacy
+            members_order: source
+            separate_signature: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            filters:
+              - "!^_"
+              - "^__init__$"
+  - mermaid2:
+      arguments:
+        theme: neutral
+
+# Markdown Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+      auto_title: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: onixbrasil
+      repo: Sankhya-SDK-python
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Navigation
+nav:
+  - Início: index.md
+  - Início Rápido:
+    - getting-started/index.md
+    - Instalação: getting-started/installation.md
+    - Início Rápido: getting-started/quick-start.md
+    - Autenticação: getting-started/authentication.md
+  - Conceitos Fundamentais:
+    - core-concepts/index.md
+    - Arquitetura: core-concepts/architecture.md
+    - Gerenciamento de Sessões: core-concepts/session-management.md
+    - Sistema de Entidades: core-concepts/entity-system.md
+    - Tratamento de Erros: core-concepts/error-handling.md
+  - Referência da API:
+    - api-reference/index.md
+    - Core: api-reference/core.md
+    - Enumerações: api-reference/enums.md
+    - Exceções: api-reference/exceptions.md
+    - Modelos: api-reference/models.md
+    - Request Wrappers: api-reference/request-wrappers.md
+    - Helpers: api-reference/helpers.md
+    - Validações: api-reference/validations.md
+  - Exemplos:
+    - examples/index.md
+    - Operações CRUD: examples/crud-operations.md
+    - Requisições Paginadas: examples/paged-requests.md
+    - Gerenciamento de Sessões: examples/session-management.md
+    - Operações com Arquivos: examples/file-operations.md
+    - Queries Avançadas: examples/advanced-queries.md
+    - Tratamento de Erros: examples/error-handling.md
+    - Entidades Customizadas: examples/custom-entities.md
+
+# Extra Configuration
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/onixbrasil
+      name: Onix Brasil no GitHub
+  generator: false
+  version:
+    provider: mike
+    default: latest
+
+# Extra CSS
+extra_css:
+  - assets/stylesheets/extra.css
+
+# Extra JavaScript
+extra_javascript:
+  - assets/javascripts/extra.js

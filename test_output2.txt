@@ -1,0 +1,207 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-8.4.2, pluggy-1.6.0 -- C:\Users\TI00\AppData\Local\Programs\Python\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: C:\git\public\Integra-odoo-snk\Sankhya-SDK-python
+configfile: pyproject.toml
+plugins: anyio-4.9.0, dash-3.2.0, Faker-37.8.0, langsmith-0.3.19, asyncio-1.2.0, cov-7.0.0, env-1.1.5, flask-1.3.0, mock-3.15.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 43 items
+
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestLifecycle::test_initialize_with_context PASSED [  2%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestLifecycle::test_initialize_without_context FAILED [  4%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestLifecycle::test_initialize_already_initialized_logs_warning PASSED [  6%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestLifecycle::test_dispose PASSED [  9%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestLifecycle::test_dispose_not_initialized PASSED [ 11%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestLifecycle::test_ensure_initialized_raises_when_not_initialized PASSED [ 13%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestLifecycle::test_context_manager PASSED [ 16%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestSessionManagement::test_get_sessions PASSED [ 18%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestSessionManagement::test_kill_session PASSED [ 20%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestMessaging::test_send_warning PASSED [ 23%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestMessaging::test_send_message PASSED [ 25%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestMessaging::test_receive_messages PASSED [ 27%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceCRUD::test_create_invoice PASSED [ 30%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceCRUD::test_create_invoice_null_header_raises PASSED [ 32%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceCRUD::test_remove_invoice PASSED [ 34%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceCRUD::test_add_invoice_items PASSED [ 37%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceCRUD::test_remove_invoice_items PASSED [ 39%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceCRUD::test_remove_invoice_items_empty_list PASSED [ 41%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestBilling::test_bill PASSED [ 44%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestBilling::test_confirm_invoice PASSED [ 46%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestBilling::test_confirm_invoice_no_items_raises PASSED [ 48%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestBilling::test_confirm_invoice_already_confirmed_silent PASSED [ 51%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestBilling::test_duplicate_invoice PASSED [ 53%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceStatus::test_flag_invoices_as_not_pending PASSED [ 55%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceStatus::test_get_invoice_accompaniments PASSED [ 58%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceStatus::test_cancel_invoices PASSED [ 60%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestInvoiceStatus::test_bind_invoice_with_order PASSED [ 62%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestNFe::test_get_fiscal_invoice_authorization PASSED [ 65%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestNFe::test_generate_lot PASSED [ 67%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFinancial::test_flag_as_payments_paid PASSED [ 69%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFinancial::test_flag_as_payments_paid_raises PASSED [ 72%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFinancial::test_reverse_payments PASSED [ 74%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFinancial::test_unlink_shipping PASSED [ 76%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFinancial::test_unlink_shipping_raises PASSED [ 79%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFileOperations::test_open_file PASSED [ 81%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFileOperations::test_delete_files PASSED [ 83%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFileOperations::test_get_file PASSED [ 86%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestFileOperations::test_get_file_async PASSED [ 88%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestImageOperations::test_get_image_none_entity_raises PASSED [ 90%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestImageOperations::test_get_image FAILED [ 93%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestImageOperations::test_get_image_async_none_entity_raises PASSED [ 95%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestServiceInvocation::test_invoke_service_no_token_raises PASSED [ 97%]
+tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestServiceInvocation::test_invoke_service_async_no_token_raises PASSED [100%]
+
+================================== FAILURES ===================================
+________________ TestLifecycle.test_initialize_without_context ________________
+tests\unit\request_wrappers\test_know_services_request_wrapper.py:118: in test_initialize_without_context
+    with patch(
+C:\Users\TI00\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1497: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+C:\Users\TI00\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1467: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'sankhya_sdk.request_wrappers.know_services_request_wrapper' from 'C:\\git\\public\\Integra-odoo-snk\\Sankhya-SDK-python\\sankhya_sdk\\request_wrappers\\know_services_request_wrapper.py'> does not have the attribute 'SankhyaContext'
+_____________________ TestImageOperations.test_get_image ______________________
+tests\unit\request_wrappers\test_know_services_request_wrapper.py:767: in test_get_image
+    with patch(
+C:\Users\TI00\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1497: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+C:\Users\TI00\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1467: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'sankhya_sdk.request_wrappers.know_services_request_wrapper' from 'C:\\git\\public\\Integra-odoo-snk\\Sankhya-SDK-python\\sankhya_sdk\\request_wrappers\\know_services_request_wrapper.py'> does not have the attribute 'extract_keys'
+============================== warnings summary ===============================
+tests/unit/request_wrappers/test_know_services_request_wrapper.py: 56 warnings
+  C:\git\public\Integra-odoo-snk\Sankhya-SDK-python\sankhya_sdk\models\base.py:18: PydanticDeprecatedSince211: Accessing this attribute on the instance is deprecated, and will be removed in Pydantic V3. Instead, you should access this attribute from the model class. Deprecated in Pydantic V2.11 to be removed in V3.0.
+    for field_name, field_info in self.model_fields.items():
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.13.7-final-0 _______________
+
+Name                                                              Stmts   Miss  Cover
+-------------------------------------------------------------------------------------
+sankhya_sdk\__init__.py                                               8      0   100%
+sankhya_sdk\attributes\__init__.py                                    4      0   100%
+sankhya_sdk\attributes\decorators.py                                 59     45    24%
+sankhya_sdk\attributes\metadata.py                                   22      0   100%
+sankhya_sdk\attributes\reflection.py                                 35     21    40%
+sankhya_sdk\attributes\validators.py                                 15      7    53%
+sankhya_sdk\config.py                                                20      3    85%
+sankhya_sdk\core\__init__.py                                          7      0   100%
+sankhya_sdk\core\constants.py                                        16      0   100%
+sankhya_sdk\core\context.py                                         223    163    27%
+sankhya_sdk\core\lock_manager.py                                     25     11    56%
+sankhya_sdk\core\low_level_wrapper.py                                89     55    38%
+sankhya_sdk\core\types.py                                            18      0   100%
+sankhya_sdk\core\wrapper.py                                         301    242    20%
+sankhya_sdk\enums\__init__.py                                        30      0   100%
+sankhya_sdk\enums\_metadata.py                                       35      6    83%
+sankhya_sdk\enums\billing_type.py                                     5      0   100%
+sankhya_sdk\enums\fiscal_classification.py                            8      0   100%
+sankhya_sdk\enums\fiscal_invoice_status.py                           13      0   100%
+sankhya_sdk\enums\fiscal_person_type.py                               4      0   100%
+sankhya_sdk\enums\freight_type.py                                     6      0   100%
+sankhya_sdk\enums\inventory_type.py                                   4      0   100%
+sankhya_sdk\enums\invoice_follow_up_reference.py                     11      0   100%
+sankhya_sdk\enums\invoice_freight_type.py                             4      0   100%
+sankhya_sdk\enums\invoice_status.py                                   5      0   100%
+sankhya_sdk\enums\movement_type.py                                   27      0   100%
+sankhya_sdk\enums\order_history_event.py                              7      0   100%
+sankhya_sdk\enums\parameter_type.py                                   5      0   100%
+sankhya_sdk\enums\product_source.py                                  11      0   100%
+sankhya_sdk\enums\product_source_type.py                              5      0   100%
+sankhya_sdk\enums\product_suggestion_type.py                          6      0   100%
+sankhya_sdk\enums\product_use.py                                     17      0   100%
+sankhya_sdk\enums\reference_level.py                                  9      0   100%
+sankhya_sdk\enums\sankhya_warning_level.py                            6      0   100%
+sankhya_sdk\enums\sankhya_warning_type.py                             5      0   100%
+sankhya_sdk\enums\seller_type.py                                     10      0   100%
+sankhya_sdk\enums\service_category.py                                 9      0   100%
+sankhya_sdk\enums\service_environment.py                              6      0   100%
+sankhya_sdk\enums\service_module.py                                   6      0   100%
+sankhya_sdk\enums\service_name.py                                    50      6    88%
+sankhya_sdk\enums\service_request_type.py                             8      0   100%
+sankhya_sdk\enums\service_response_status.py                          7      0   100%
+sankhya_sdk\enums\service_type.py                                     6      0   100%
+sankhya_sdk\enums\system_parameter_type.py                            9      0   100%
+sankhya_sdk\enums\trading_sub_type.py                                11      0   100%
+sankhya_sdk\events\__init__.py                                       75     47    37%
+sankhya_sdk\events\on_demand_request_failure_event.py                17      3    82%
+sankhya_sdk\exceptions\__init__.py                                    7      0   100%
+sankhya_sdk\exceptions\base.py                                       36     12    67%
+sankhya_sdk\exceptions\intermediate.py                               19      8    58%
+sankhya_sdk\exceptions\messages.py                                   47      0   100%
+sankhya_sdk\exceptions\operations.py                                 42     13    69%
+sankhya_sdk\exceptions\service_request.py                            84     47    44%
+sankhya_sdk\exceptions\service_request_advanced.py                   70     41    41%
+sankhya_sdk\exceptions\simple.py                                     21      7    67%
+sankhya_sdk\helpers\__init__.py                                       8      0   100%
+sankhya_sdk\helpers\entity_dynamic_serialization.py                 181    148    18%
+sankhya_sdk\helpers\entity_extensions.py                             86     63    27%
+sankhya_sdk\helpers\entity_query_options.py                          30     12    60%
+sankhya_sdk\helpers\filter_expression.py                             72     31    57%
+sankhya_sdk\helpers\generic_service_entity.py                       110     89    19%
+sankhya_sdk\helpers\service_request_extensions.py                   300    248    17%
+sankhya_sdk\helpers\status_message_helper.py                         72     47    35%
+sankhya_sdk\models\__init__.py                                        3      0   100%
+sankhya_sdk\models\base.py                                           39     20    49%
+sankhya_sdk\models\service\__init__.py                               14      0   100%
+sankhya_sdk\models\service\basic_types.py                           197    106    46%
+sankhya_sdk\models\service\constants.py                              50      0   100%
+sankhya_sdk\models\service\entity_types.py                          223    155    30%
+sankhya_sdk\models\service\event_types.py                           263    164    38%
+sankhya_sdk\models\service\invoice_types.py                         258    154    40%
+sankhya_sdk\models\service\metadata_types.py                        221    134    39%
+sankhya_sdk\models\service\query_types.py                           135     81    40%
+sankhya_sdk\models\service\request_body.py                          110     79    28%
+sankhya_sdk\models\service\response_body.py                         154    115    25%
+sankhya_sdk\models\service\service_request.py                        44     19    57%
+sankhya_sdk\models\service\service_response.py                      128     79    38%
+sankhya_sdk\models\service\user_types.py                            239    143    40%
+sankhya_sdk\models\service\xml_serialization.py                      99     63    36%
+sankhya_sdk\models\transport\__init__.py                             25     25     0%
+sankhya_sdk\models\transport\address.py                              59     59     0%
+sankhya_sdk\models\transport\base.py                                208    208     0%
+sankhya_sdk\models\transport\city.py                                 58     58     0%
+sankhya_sdk\models\transport\code_bars.py                            39     39     0%
+sankhya_sdk\models\transport\enum_helpers.py                         22     22     0%
+sankhya_sdk\models\transport\invoice_header.py                      134    134     0%
+sankhya_sdk\models\transport\neighborhood.py                         36     36     0%
+sankhya_sdk\models\transport\partner.py                             139    139     0%
+sankhya_sdk\models\transport\partner_complement.py                   60     60     0%
+sankhya_sdk\models\transport\product.py                             109    109     0%
+sankhya_sdk\models\transport\product_cost.py                         49     49     0%
+sankhya_sdk\models\transport\product_suggested_sale.py               21     21     0%
+sankhya_sdk\models\transport\region.py                               53     53     0%
+sankhya_sdk\models\transport\seller.py                               69     69     0%
+sankhya_sdk\models\transport\service_file.py                         20     20     0%
+sankhya_sdk\models\transport\state.py                                46     46     0%
+sankhya_sdk\request_helpers\__init__.py                               6      0   100%
+sankhya_sdk\request_helpers\request_behavior_options.py               4      0   100%
+sankhya_sdk\request_helpers\request_exception_details.py             11      1    91%
+sankhya_sdk\request_helpers\request_exception_handler.py             32     18    44%
+sankhya_sdk\request_helpers\request_retry_data.py                     6      0   100%
+sankhya_sdk\request_helpers\request_retry_delay.py                    6      0   100%
+sankhya_sdk\request_wrappers\__init__.py                              9      0   100%
+sankhya_sdk\request_wrappers\async_on_demand_request_factory.py      96     59    39%
+sankhya_sdk\request_wrappers\async_on_demand_request_wrapper.py     222    178    20%
+sankhya_sdk\request_wrappers\interfaces.py                           35      0   100%
+sankhya_sdk\request_wrappers\know_services_request_wrapper.py       410     37    91%
+sankhya_sdk\request_wrappers\on_demand_request_factory.py            90     55    39%
+sankhya_sdk\request_wrappers\on_demand_request_wrapper.py           211    166    21%
+sankhya_sdk\request_wrappers\paged_request_wrapper.py               369    318    14%
+sankhya_sdk\request_wrappers\simple_crud_request_wrapper.py         265    177    33%
+sankhya_sdk\value_objects\__init__.py                                 6      0   100%
+sankhya_sdk\value_objects\entity_resolver.py                         24      7    71%
+sankhya_sdk\value_objects\on_demand_request_instance.py              16      1    94%
+sankhya_sdk\value_objects\paged_request_event_args.py                30     12    60%
+sankhya_sdk\value_objects\parse_property_model.py                    22      4    82%
+sankhya_sdk\value_objects\service_file.py                            29     14    52%
+-------------------------------------------------------------------------------------
+TOTAL                                                              7687   4881    37%
+Coverage HTML written to dir htmlcov
+=========================== short test summary info ===========================
+FAILED tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestLifecycle::test_initialize_without_context
+FAILED tests/unit/request_wrappers/test_know_services_request_wrapper.py::TestImageOperations::test_get_image
+================== 2 failed, 41 passed, 56 warnings in 3.33s ==================

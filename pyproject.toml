@@ -1,0 +1,59 @@
+[project]
+name = "sankhya-sdk-python"
+version = "0.1.0"
+description = "SDK Python para API Sankhya (ERP) - Migração do Sankhya-SDK-dotnet"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Equipe Onix Brasil" }
+]
+dependencies = [
+    "requests>=2.31.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "lxml>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+]
+async = [
+    "httpx>=0.25.0",
+    "aiofiles>=23.0.0",
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.24.0",
+    "mkdocs-mermaid2-plugin>=1.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "--cov=sankhya_sdk --cov-report=html --cov-report=term"
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+disallow_untyped_defs = true
