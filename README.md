@@ -8,6 +8,10 @@ SDK Python para API Sankhya (ERP) - Migração do projeto .NET.
 
 Este projeto é uma migração idiomática do [Sankhya-SDK-dotnet](https://github.com/guibranco/Sankhya-SDK-dotnet) para Python. O objetivo é fornecer uma interface robusta, tipada e fácil de usar para integrar com os serviços do ERP Sankhya.
 
+## 📚 Documentação
+
+A documentação completa do projeto está disponível em: **[https://datavi.ia.br/docs-site-sdk/](https://datavi.ia.br/docs-site-sdk/)**
+
 ## Instalação
 
 Para instalar em modo de desenvolvimento:
