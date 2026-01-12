@@ -2,9 +2,9 @@
 """
 Exemplo de uso do SDK Sankhya para a entidade Product (Produto).
 
-Demonstra operaÃ§Ãµes de consulta:
+Demonstra operações de consulta:
 - Listar produtos ativos
-- Buscar produto por cÃ³digo
+- Buscar produto por código
 - Filtrar por grupo/marca
 
 Tabela Sankhya: TGFPRO
@@ -19,7 +19,7 @@ from typing import Optional
 from sankhya_sdk.config import settings
 
 # =============================================================================
-# ConfiguraÃ§Ã£o
+# Configuração
 # =============================================================================
 
 SANKHYA_HOST = settings.url
@@ -79,7 +79,7 @@ def listar_produtos_ativos(max_results: int = 100):
             )
         )
         
-        print("ðŸ“¦ Listando produtos ativos...")
+        print("📦 Listando produtos ativos...")
         count = 0
         
         for product in PagedRequestWrapper.get_paged_results(
@@ -93,21 +93,21 @@ def listar_produtos_ativos(max_results: int = 100):
             ref = product.reference or "-"
             print(f"  {count}. [{product.code}] {product.description} (Ref: {ref})")
         
-        print(f"\nâœ… Total: {count} produtos ativos")
+        print(f"\n✅ Total: {count} produtos ativos")
         
     finally:
         ctx.dispose()
 
 
 # =============================================================================
-# Exemplo 2: Buscar Produto por CÃ³digo
+# Exemplo 2: Buscar Produto por Código
 # =============================================================================
 
 def buscar_produto_por_codigo(codigo: int) -> Optional[dict]:
     """
-    Busca um produto especÃ­fico pelo cÃ³digo (CODPROD).
+    Busca um produto específico pelo código (CODPROD).
     
-    Retorna os dados do produto ou None se nÃ£o encontrado.
+    Retorna os dados do produto ou None se não encontrado.
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -147,16 +147,16 @@ def buscar_produto_por_codigo(codigo: int) -> Optional[dict]:
             )
         )
         
-        print(f"ðŸ” Buscando produto cÃ³digo {codigo}...")
+        print(f"🔍 Buscando produto código {codigo}...")
         
         response = ctx.service_invoker(request)
         
         if response.is_success and response.entities:
             product = response.entities[0]
-            print(f"âœ… Encontrado: {product}")
+            print(f"✅ Encontrado: {product}")
             return product
         else:
-            print(f"âŒ Produto {codigo} nÃ£o encontrado")
+            print(f"❌ Produto {codigo} não encontrado")
             return None
             
     finally:
@@ -171,7 +171,7 @@ def buscar_produtos_por_ncm(ncm: str, max_results: int = 50):
     """
     Busca produtos pelo NCM (Nomenclatura Comum do Mercosul).
     
-    Ãštil para consultas fiscais.
+    Útil para consultas fiscais.
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -211,7 +211,7 @@ def buscar_produtos_por_ncm(ncm: str, max_results: int = 50):
             )
         )
         
-        print(f"ðŸ” Buscando produtos com NCM iniciando em '{ncm}'...")
+        print(f"🔍 Buscando produtos com NCM iniciando em '{ncm}'...")
         count = 0
         
         for product in PagedRequestWrapper.get_paged_results(
@@ -224,7 +224,7 @@ def buscar_produtos_por_ncm(ncm: str, max_results: int = 50):
             count += 1
             print(f"  [{product.code}] {product.description} - NCM: {product.ncm}")
         
-        print(f"\nðŸ“Š Encontrados: {count} produtos")
+        print(f"\n📊 Encontrados: {count} produtos")
         
     finally:
         ctx.dispose()
@@ -236,7 +236,7 @@ def buscar_produtos_por_ncm(ncm: str, max_results: int = 50):
 
 def filtrar_por_grupo(codigo_grupo: int, max_results: int = 50):
     """
-    Filtra produtos por cÃ³digo de grupo (CODGRUPOPROD).
+    Filtra produtos por código de grupo (CODGRUPOPROD).
     
     Grupos organizam produtos por categoria no Sankhya.
     """
@@ -279,7 +279,7 @@ def filtrar_por_grupo(codigo_grupo: int, max_results: int = 50):
             )
         )
         
-        print(f"ðŸ“‚ Listando produtos do grupo {codigo_grupo}...")
+        print(f"📂 Listando produtos do grupo {codigo_grupo}...")
         count = 0
         
         for product in PagedRequestWrapper.get_paged_results(
@@ -290,10 +290,10 @@ def filtrar_por_grupo(codigo_grupo: int, max_results: int = 50):
             max_results=max_results,
         ):
             count += 1
-            status = "âœ…" if product.is_active else "âŒ"
+            status = "✅" if product.is_active else "❌"
             print(f"  {status} [{product.code}] {product.description}")
         
-        print(f"\nðŸ“Š Produtos no grupo: {count}")
+        print(f"\n📊 Produtos no grupo: {count}")
         
     finally:
         ctx.dispose()
@@ -312,7 +312,7 @@ if __name__ == "__main__":
     print("-" * 40)
     # listar_produtos_ativos(max_results=10)
     
-    print("\n2. Buscar Produto por CÃ³digo")
+    print("\n2. Buscar Produto por Código")
     print("-" * 40)
     # buscar_produto_por_codigo(1)
     
@@ -326,5 +326,5 @@ if __name__ == "__main__":
     
     print("\n" + "=" * 60)
     print("Descomente os exemplos para executar")
-    print("Configure as variÃ¡veis de ambiente SANKHYA_*")
+    print("Configure as variáveis de ambiente SANKHYA_*")
     print("=" * 60)

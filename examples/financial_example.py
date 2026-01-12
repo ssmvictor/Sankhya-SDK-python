@@ -2,10 +2,10 @@
 """
 Exemplo de uso do SDK Sankhya para a entidade Financeiro.
 
-Demonstra operaÃ§Ãµes de consulta:
-- Listar tÃ­tulos a receber/pagar
+Demonstra operações de consulta:
+- Listar títulos a receber/pagar
 - Filtrar por vencimento
-- Consultar tÃ­tulos em aberto
+- Consultar títulos em aberto
 
 Tabela Sankhya: TGFFIN
 """
@@ -19,7 +19,7 @@ from typing import Optional
 from sankhya_sdk.config import settings
 
 # =============================================================================
-# ConfiguraÃ§Ã£o
+# Configuração
 # =============================================================================
 
 SANKHYA_HOST = settings.url
@@ -29,14 +29,14 @@ SANKHYA_PASSWORD = settings.password
 
 
 # =============================================================================
-# Exemplo 1: Listar TÃ­tulos Financeiros
+# Exemplo 1: Listar Títulos Financeiros
 # =============================================================================
 
 def listar_titulos_financeiros(max_results: int = 100):
     """
-    Lista tÃ­tulos financeiros de forma paginada.
+    Lista títulos financeiros de forma paginada.
     
-    Retorna tÃ­tulos com informaÃ§Ãµes bÃ¡sicas do financeiro.
+    Retorna títulos com informações básicas do financeiro.
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -76,12 +76,12 @@ def listar_titulos_financeiros(max_results: int = 100):
             )
         )
         
-        print("ðŸ’° Listando tÃ­tulos financeiros...")
+        print("💰 Listando títulos financeiros...")
         count = 0
         
         for titulo in PagedRequestWrapper.get_paged_results(
             request=request,
-            entity_type=dict,  # Usando dict pois nÃ£o hÃ¡ entidade especÃ­fica
+            entity_type=dict,  # Usando dict pois não há entidade específica
             token=ctx.token,
             timeout=timedelta(minutes=5),
             max_results=max_results,
@@ -89,27 +89,27 @@ def listar_titulos_financeiros(max_results: int = 100):
             count += 1
             nufin = titulo.get("NUFIN", "-")
             valor = float(titulo.get("VLRDESDOB", 0) or 0)
-            tipo = "ðŸ“ˆ Receita" if titulo.get("RECDESP") == "R" else "ðŸ“‰ Despesa"
+            tipo = "📈 Receita" if titulo.get("RECDESP") == "R" else "📉 Despesa"
             print(f"  {count}. NUFIN:{nufin} | {tipo} | R$ {valor:.2f}")
         
-        print(f"\nâœ… Total: {count} tÃ­tulos")
+        print(f"\n✅ Total: {count} títulos")
         
     finally:
         ctx.dispose()
 
 
 # =============================================================================
-# Exemplo 2: TÃ­tulos a Receber em Aberto
+# Exemplo 2: Títulos a Receber em Aberto
 # =============================================================================
 
 def listar_a_receber_em_aberto(max_results: int = 50):
     """
-    Lista tÃ­tulos a RECEBER que estÃ£o em aberto (sem baixa).
+    Lista títulos a RECEBER que estão em aberto (sem baixa).
     
     Filtra:
     - RECDESP = 'R' (Receita)
     - DHBAIXA IS NULL (Sem data de baixa = em aberto)
-    - PROVISAO != 'S' (NÃ£o Ã© provisÃ£o)
+    - PROVISAO != 'S' (Não é provisão)
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -149,7 +149,7 @@ def listar_a_receber_em_aberto(max_results: int = 50):
             )
         )
         
-        print("ðŸ“ˆ TÃ­tulos a RECEBER em aberto...")
+        print("📈 Títulos a RECEBER em aberto...")
         count = 0
         total_valor = 0.0
         
@@ -167,19 +167,19 @@ def listar_a_receber_em_aberto(max_results: int = 50):
             total_valor += valor
             print(f"  NUFIN:{nufin} | Venc:{venc} | R$ {valor:.2f}")
         
-        print(f"\nðŸ“Š Total a receber: {count} tÃ­tulos = R$ {total_valor:.2f}")
+        print(f"\n📊 Total a receber: {count} títulos = R$ {total_valor:.2f}")
         
     finally:
         ctx.dispose()
 
 
 # =============================================================================
-# Exemplo 3: TÃ­tulos a Pagar em Aberto
+# Exemplo 3: Títulos a Pagar em Aberto
 # =============================================================================
 
 def listar_a_pagar_em_aberto(max_results: int = 50):
     """
-    Lista tÃ­tulos a PAGAR que estÃ£o em aberto (sem baixa).
+    Lista títulos a PAGAR que estão em aberto (sem baixa).
     
     Filtra:
     - RECDESP = 'D' (Despesa)
@@ -222,7 +222,7 @@ def listar_a_pagar_em_aberto(max_results: int = 50):
             )
         )
         
-        print("ðŸ“‰ TÃ­tulos a PAGAR em aberto...")
+        print("📉 Títulos a PAGAR em aberto...")
         count = 0
         total_valor = 0.0
         
@@ -240,19 +240,19 @@ def listar_a_pagar_em_aberto(max_results: int = 50):
             total_valor += valor
             print(f"  NUFIN:{nufin} | Venc:{venc} | R$ {valor:.2f}")
         
-        print(f"\nðŸ“Š Total a pagar: {count} tÃ­tulos = R$ {total_valor:.2f}")
+        print(f"\n📊 Total a pagar: {count} títulos = R$ {total_valor:.2f}")
         
     finally:
         ctx.dispose()
 
 
 # =============================================================================
-# Exemplo 4: TÃ­tulos Vencidos
+# Exemplo 4: Títulos Vencidos
 # =============================================================================
 
 def listar_titulos_vencidos(max_results: int = 50):
     """
-    Lista tÃ­tulos vencidos e nÃ£o baixados.
+    Lista títulos vencidos e não baixados.
     
     Filtra:
     - DTVENC < data atual
@@ -299,7 +299,7 @@ def listar_titulos_vencidos(max_results: int = 50):
             )
         )
         
-        print(f"âš ï¸ TÃ­tulos VENCIDOS (antes de {hoje})...")
+        print(f"⚠️ Títulos VENCIDOS (antes de {hoje})...")
         count = 0
         total_receber = 0.0
         total_pagar = 0.0
@@ -319,31 +319,31 @@ def listar_titulos_vencidos(max_results: int = 50):
             
             if tipo == "R":
                 total_receber += valor
-                emoji = "ðŸ“ˆ"
+                emoji = "📈"
             else:
                 total_pagar += valor
-                emoji = "ðŸ“‰"
+                emoji = "📉"
             
             print(f"  {emoji} NUFIN:{nufin} | Venc:{venc} | R$ {valor:.2f}")
         
-        print(f"\nðŸ“Š Vencidos:")
+        print(f"\n📊 Vencidos:")
         print(f"   A Receber: R$ {total_receber:.2f}")
         print(f"   A Pagar:   R$ {total_pagar:.2f}")
-        print(f"   Total:     {count} tÃ­tulos")
+        print(f"   Total:     {count} títulos")
         
     finally:
         ctx.dispose()
 
 
 # =============================================================================
-# Exemplo 5: TÃ­tulos por Parceiro
+# Exemplo 5: Títulos por Parceiro
 # =============================================================================
 
 def listar_titulos_por_parceiro(codigo_parceiro: int, max_results: int = 50):
     """
-    Lista todos os tÃ­tulos financeiros de um parceiro especÃ­fico.
+    Lista todos os títulos financeiros de um parceiro específico.
     
-    Ãštil para verificar posiÃ§Ã£o financeira de um cliente/fornecedor.
+    Útil para verificar posição financeira de um cliente/fornecedor.
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -383,7 +383,7 @@ def listar_titulos_por_parceiro(codigo_parceiro: int, max_results: int = 50):
             )
         )
         
-        print(f"ðŸ’¼ TÃ­tulos do parceiro {codigo_parceiro}...")
+        print(f"💼 Títulos do parceiro {codigo_parceiro}...")
         count = 0
         
         for titulo in PagedRequestWrapper.get_paged_results(
@@ -397,12 +397,12 @@ def listar_titulos_por_parceiro(codigo_parceiro: int, max_results: int = 50):
             nufin = titulo.get("NUFIN", "-")
             venc = titulo.get("DTVENC", "-")
             valor = float(titulo.get("VLRDESDOB", 0) or 0)
-            tipo = "ðŸ“ˆ" if titulo.get("RECDESP") == "R" else "ðŸ“‰"
-            status = "âœ… Baixado" if titulo.get("DHBAIXA") else "â³ Aberto"
+            tipo = "📈" if titulo.get("RECDESP") == "R" else "📉"
+            status = "✅ Baixado" if titulo.get("DHBAIXA") else "⏳ Aberto"
             
             print(f"  {tipo} NUFIN:{nufin} | Venc:{venc} | R$ {valor:.2f} | {status}")
         
-        print(f"\nðŸ“Š Total de tÃ­tulos: {count}")
+        print(f"\n📊 Total de títulos: {count}")
         
     finally:
         ctx.dispose()
@@ -417,27 +417,27 @@ if __name__ == "__main__":
     print("Exemplos de Financeiro (TGFFIN)")
     print("=" * 60)
     
-    print("\n1. Listar TÃ­tulos Financeiros")
+    print("\n1. Listar Títulos Financeiros")
     print("-" * 40)
     # listar_titulos_financeiros(max_results=10)
     
-    print("\n2. TÃ­tulos a Receber em Aberto")
+    print("\n2. Títulos a Receber em Aberto")
     print("-" * 40)
     # listar_a_receber_em_aberto(max_results=10)
     
-    print("\n3. TÃ­tulos a Pagar em Aberto")
+    print("\n3. Títulos a Pagar em Aberto")
     print("-" * 40)
     # listar_a_pagar_em_aberto(max_results=10)
     
-    print("\n4. TÃ­tulos Vencidos")
+    print("\n4. Títulos Vencidos")
     print("-" * 40)
     # listar_titulos_vencidos(max_results=10)
     
-    print("\n5. TÃ­tulos por Parceiro")
+    print("\n5. Títulos por Parceiro")
     print("-" * 40)
     # listar_titulos_por_parceiro(1)
     
     print("\n" + "=" * 60)
     print("Descomente os exemplos para executar")
-    print("Configure as variÃ¡veis de ambiente SANKHYA_*")
+    print("Configure as variáveis de ambiente SANKHYA_*")
     print("=" * 60)

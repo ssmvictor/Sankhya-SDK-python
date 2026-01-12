@@ -2,14 +2,14 @@
 """
 Exemplo de uso do SDK Sankhya para a entidade InvoiceHeader (Nota Fiscal).
 
-Demonstra operaÃ§Ãµes de consulta:
+Demonstra operações de consulta:
 - Listar notas fiscais
-- Buscar nota por nÃºmero Ãºnico (NUNOTA)
+- Buscar nota por número único (NUNOTA)
 - Verificar status de NF-e
 - JOIN com TGFITE para soma de QTDNEG
 
 Tabelas Sankhya: 
-- TGFCAB (CabeÃ§alho da Nota)
+- TGFCAB (Cabeçalho da Nota)
 - TGFITE (Itens da Nota)
 """
 
@@ -22,7 +22,7 @@ from typing import Optional
 from sankhya_sdk.config import settings
 
 # =============================================================================
-# ConfiguraÃ§Ã£o
+# Configuração
 # =============================================================================
 
 SANKHYA_HOST = settings.url
@@ -39,7 +39,7 @@ def listar_notas_fiscais(max_results: int = 100):
     """
     Lista notas fiscais de forma paginada.
     
-    Retorna notas com informaÃ§Ãµes bÃ¡sicas do cabeÃ§alho.
+    Retorna notas com informações básicas do cabeçalho.
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -79,7 +79,7 @@ def listar_notas_fiscais(max_results: int = 100):
             )
         )
         
-        print("ðŸ“‹ Listando notas fiscais...")
+        print("📋 Listando notas fiscais...")
         count = 0
         
         for invoice in PagedRequestWrapper.get_paged_results(
@@ -92,9 +92,9 @@ def listar_notas_fiscais(max_results: int = 100):
             count += 1
             status = invoice.fiscal_invoice_status or "-"
             valor = invoice.invoice_value or 0
-            print(f"  {count}. NUNOTA:{invoice.single_number} | NÂº:{invoice.invoice_number} | R$ {valor:.2f} | NFe:{status}")
+            print(f"  {count}. NUNOTA:{invoice.single_number} | Nº:{invoice.invoice_number} | R$ {valor:.2f} | NFe:{status}")
         
-        print(f"\nâœ… Total: {count} notas")
+        print(f"\n✅ Total: {count} notas")
         
     finally:
         ctx.dispose()
@@ -106,9 +106,9 @@ def listar_notas_fiscais(max_results: int = 100):
 
 def buscar_nota_por_nunota(nunota: int) -> Optional[dict]:
     """
-    Busca uma nota fiscal especÃ­fica pelo nÃºmero Ãºnico (NUNOTA).
+    Busca uma nota fiscal específica pelo número único (NUNOTA).
     
-    Retorna os dados completos da nota ou None se nÃ£o encontrada.
+    Retorna os dados completos da nota ou None se não encontrada.
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -148,16 +148,16 @@ def buscar_nota_por_nunota(nunota: int) -> Optional[dict]:
             )
         )
         
-        print(f"ðŸ” Buscando nota NUNOTA {nunota}...")
+        print(f"🔍 Buscando nota NUNOTA {nunota}...")
         
         response = ctx.service_invoker(request)
         
         if response.is_success and response.entities:
             invoice = response.entities[0]
-            print(f"âœ… Encontrada: {invoice}")
+            print(f"✅ Encontrada: {invoice}")
             return invoice
         else:
-            print(f"âŒ Nota {nunota} nÃ£o encontrada")
+            print(f"❌ Nota {nunota} não encontrada")
             return None
             
     finally:
@@ -174,7 +174,7 @@ def listar_notas_aprovadas(max_results: int = 50):
     
     STATUSNFE = 'A' significa nota aprovada na SEFAZ.
     
-    Valores possÃ­veis de STATUSNFE:
+    Valores possíveis de STATUSNFE:
     - 'A' = Aprovada
     - 'D' = Denegada
     - 'R' = Rejeitada
@@ -216,7 +216,7 @@ def listar_notas_aprovadas(max_results: int = 50):
             )
         )
         
-        print("âœ… Listando notas com NF-e APROVADA (STATUSNFE = 'A')...")
+        print("✅ Listando notas com NF-e APROVADA (STATUSNFE = 'A')...")
         count = 0
         
         for invoice in PagedRequestWrapper.get_paged_results(
@@ -228,9 +228,9 @@ def listar_notas_aprovadas(max_results: int = 50):
         ):
             count += 1
             valor = invoice.invoice_value or 0
-            print(f"  âœ… NUNOTA:{invoice.single_number} | NÂº:{invoice.invoice_number} | R$ {valor:.2f}")
+            print(f"  ✅ NUNOTA:{invoice.single_number} | Nº:{invoice.invoice_number} | R$ {valor:.2f}")
         
-        print(f"\nðŸ“Š Notas aprovadas: {count}")
+        print(f"\n📊 Notas aprovadas: {count}")
         
     finally:
         ctx.dispose()
@@ -247,7 +247,7 @@ def consultar_notas_com_quantidade_itens(max_results: int = 50):
     Faz JOIN entre TGFCAB e TGFITE para calcular SUM(QTDNEG).
     
     Esta consulta usa SQL nativo via CRUD_FIND para permitir
-    agregaÃ§Ãµes que nÃ£o sÃ£o possÃ­veis com o CRUD padrÃ£o.
+    agregações que não são possíveis com o CRUD padrão.
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -262,7 +262,7 @@ def consultar_notas_com_quantidade_itens(max_results: int = 50):
     )
     
     try:
-        # Para consultas com JOIN e agregaÃ§Ãµes, usamos DbExplorerSP.executeQuery com SQL
+        # Para consultas com JOIN e agregações, usamos DbExplorerSP.executeQuery com SQL
         request = ServiceRequest(service=ServiceName.DB_EXPLORER_EXECUTE_QUERY)
         
         # Query SQL com JOIN TGFCAB + TGFITE e SUM(QTDNEG)
@@ -273,16 +273,16 @@ def consultar_notas_com_quantidade_itens(max_results: int = 50):
         request.request_body = RequestBody()
         request.request_body.custom_query = sql_query.strip()
         
-        print("ðŸ“Š Consultando notas com soma de quantidades (JOIN TGFITE)...")
+        print("📊 Consultando notas com soma de quantidades (JOIN TGFITE)...")
         print("-" * 60)
         
         response = ctx.service_invoker(request)
         
         # Process response...
     except Exception as e:
-        print(f"âš ï¸ Aviso: A consulta SQL nativa nÃ£o pÃ´de ser executada neste servidor.")
+        print(f"⚠️ Aviso: A consulta SQL nativa não pôde ser executada neste servidor.")
         print(f"   Erro detalhado: {e}")
-        print("   Nota: O serviÃ§o 'DbExplorerSP.executeQuery' pode estar desabilitado ou requerer JSON.")
+        print("   Nota: O serviço 'DbExplorerSP.executeQuery' pode estar desabilitado ou requerer JSON.")
         return
         
         if response.is_success:
@@ -297,12 +297,12 @@ def consultar_notas_com_quantidade_itens(max_results: int = 50):
                 vlrnota = float(row.get("VLRNOTA", 0) or 0)
                 total_qtd = float(row.get("TOTAL_QTDNEG", 0) or 0)
                 
-                print(f"  NUNOTA:{nunota} | NÂº:{numnota} | R$ {vlrnota:.2f} | Qtd Total: {total_qtd:.2f}")
+                print(f"  NUNOTA:{nunota} | Nº:{numnota} | R$ {vlrnota:.2f} | Qtd Total: {total_qtd:.2f}")
             
             print("-" * 60)
-            print(f"ðŸ“‹ Exibidas: {min(count, max_results)} notas")
+            print(f"📋 Exibidas: {min(count, max_results)} notas")
         else:
-            print(f"âŒ Erro na consulta: {response.status_message}")
+            print(f"❌ Erro na consulta: {response.status_message}")
             
     finally:
         ctx.dispose()
@@ -314,9 +314,9 @@ def consultar_notas_com_quantidade_itens(max_results: int = 50):
 
 def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50):
     """
-    Filtra notas fiscais de um parceiro especÃ­fico.
+    Filtra notas fiscais de um parceiro específico.
     
-    Ãštil para verificar histÃ³rico de compras/vendas de um cliente.
+    Útil para verificar histórico de compras/vendas de um cliente.
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
@@ -357,7 +357,7 @@ def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50):
             )
         )
         
-        print(f"ðŸ“‹ Notas do parceiro {codigo_parceiro}...")
+        print(f"📋 Notas do parceiro {codigo_parceiro}...")
         count = 0
         
         for invoice in PagedRequestWrapper.get_paged_results(
@@ -372,7 +372,7 @@ def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50):
             valor = invoice.invoice_value or 0
             print(f"  NUNOTA:{invoice.single_number} | {invoice.date_traded} | R$ {valor:.2f} | NFe:{status_nfe}")
         
-        print(f"\nðŸ“Š Notas do parceiro: {count}")
+        print(f"\n📊 Notas do parceiro: {count}")
         
     finally:
         ctx.dispose()
@@ -409,5 +409,5 @@ if __name__ == "__main__":
     
     print("\n" + "=" * 60)
     print("Descomente os exemplos para executar")
-    print("Configure as variÃ¡veis de ambiente SANKHYA_*")
+    print("Configure as variáveis de ambiente SANKHYA_*")
     print("=" * 60)
