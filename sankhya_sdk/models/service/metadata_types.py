@@ -407,3 +407,37 @@ class Warnings(BaseModel):
         """Deserializa de elemento XML."""
         items = [Warning.from_xml(child) for child in element]
         return cls(items=items)
+
+
+class Pager(BaseModel):
+    """
+    Informações de paginação.
+    
+    Usado em respostas paginadas para controlar o cursor.
+    """
+    
+    model_config = ConfigDict(frozen=False)
+
+    total_pages: Optional[int] = None
+    total_records: Optional[int] = None
+    pager_id: Optional[str] = None
+    
+    def to_xml(self) -> Element:
+        """Serializa para elemento XML."""
+        elem = etree.Element("pager")
+        if self.total_pages is not None:
+            elem.set("totalPages", str(self.total_pages))
+        if self.total_records is not None:
+            elem.set("totalRecords", str(self.total_records))
+        if self.pager_id:
+            elem.set("pagerId", self.pager_id)
+        return elem
+
+    @classmethod
+    def from_xml(cls, element: Element) -> "Pager":
+        """Deserializa de elemento XML."""
+        return cls(
+            total_pages=deserialize_optional_int(get_element_attr(element, "totalPages")),
+            total_records=deserialize_optional_int(get_element_attr(element, "totalRecords")),
+            pager_id=get_element_attr(element, "pagerId")
+        )

@@ -17,11 +17,17 @@ from typing import List
 # Configuração
 # =============================================================================
 
-# Carrega variáveis de ambiente (use python-dotenv em produção)
-SANKHYA_HOST = os.environ.get("SANKHYA_HOST", "http://localhost")
-SANKHYA_PORT = int(os.environ.get("SANKHYA_PORT", "8180"))
-SANKHYA_USERNAME = os.environ.get("SANKHYA_USERNAME", "")
-SANKHYA_PASSWORD = os.environ.get("SANKHYA_PASSWORD", "")
+from sankhya_sdk.config import settings
+
+# =============================================================================
+# Configuração
+# =============================================================================
+
+# Carrega variáveis de ambiente via config
+SANKHYA_HOST = settings.url
+SANKHYA_PORT = settings.port
+SANKHYA_USERNAME = settings.username
+SANKHYA_PASSWORD = settings.password
 
 
 # =============================================================================
@@ -36,7 +42,9 @@ def exemplo_basico():
     """
     from sankhya_sdk.core.context import SankhyaContext
     from sankhya_sdk.enums.service_name import ServiceName
-    from sankhya_sdk.models.service.service_request import ServiceRequest
+    from sankhya_sdk.models.service import (
+        ServiceRequest, RequestBody, DataSet, Entity, Field
+    )
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     
     # Cria contexto autenticado
@@ -50,7 +58,19 @@ def exemplo_basico():
     try:
         # Configura requisição
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        # request.request_body = ... configurar conforme necessário
+        request.request_body = RequestBody(
+            data_set=DataSet(
+                root_entity="Parceiro",
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="CODPARC"),
+                        Field(name="NOMEPARC")
+                    ]
+                )
+            )
+        )
         
         print("Carregando parceiros...")
         count = 0

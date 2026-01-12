@@ -238,6 +238,13 @@ class ServiceName(MetadataEnum):
         service_category=ServiceCategory.INVOICE,
         service_type=ServiceType.TRANSACTIONAL
     ))
+    DB_EXPLORER_EXECUTE_QUERY = ("DbExplorerExecuteQuery", EnumMetadata(
+        internal_value="DbExplorerSP.executeQuery",
+        human_readable="Execute SQL Query",
+        service_module=ServiceModule.MGE,
+        service_category=ServiceCategory.CRUD,
+        service_type=ServiceType.RETRIEVE
+    ))
 
     @property
     def service_module(self) -> ServiceModule:
