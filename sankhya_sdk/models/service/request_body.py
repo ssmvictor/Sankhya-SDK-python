@@ -75,6 +75,9 @@ class RequestBody(EntityBase):
     # Campos de caminhos
     paths: Optional[Any] = PydanticField(default=None, alias="paths")
 
+    # Campos de consulta SQL
+    custom_query: Optional[str] = PydanticField(default=None, alias="sql")
+
     def to_xml(self) -> Element:
         """
         Serializa o RequestBody para um elemento XML.
@@ -107,6 +110,7 @@ class RequestBody(EntityBase):
             "client_events": "clientEvents",
             "notification_elem": "notificacao",
             "paths": "paths",
+            "custom_query": "sql",
         }
         
         for field_name, xml_tag in field_mappings.items():

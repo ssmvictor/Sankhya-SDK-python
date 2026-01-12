@@ -125,6 +125,8 @@ class ResponseBody(EntityBase):
         alias="msgDesvincularRemessa"
     )
 
+    pager: Optional[Any] = PydanticField(default=None, alias="pager")
+
     @property
     def code_user_internal(self) -> Optional[str]:
         """
@@ -232,6 +234,7 @@ class ResponseBody(EntityBase):
         from .metadata_types import Key, Warnings
         from .user_types import Users, SessionsResponse, Releases, MessageUnlinkShipping
         from .event_types import ClientEvents, Messages
+        from .metadata_types import Key, Warnings, Pager
         
         instance = cls()
         
@@ -322,5 +325,7 @@ class ResponseBody(EntityBase):
                 instance.releases = Releases.from_xml(child)
             elif tag == SankhyaConstants.MESSAGE_UNLINK_SHIPPING:
                 instance.message_unlink_shipping = MessageUnlinkShipping.from_xml(child)
+            elif tag == "pager":
+                instance.pager = Pager.from_xml(child)
         
         return instance

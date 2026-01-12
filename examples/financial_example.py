@@ -16,20 +16,16 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from sankhya_sdk.config import settings
 
 # =============================================================================
 # ConfiguraÃ§Ã£o
 # =============================================================================
 
-SANKHYA_HOST = os.environ.get("SANKHYA_HOST", "http://localhost")
-SANKHYA_PORT = int(os.environ.get("SANKHYA_PORT", "8180"))
-SANKHYA_USERNAME = os.environ.get("SANKHYA_USERNAME", "")
-SANKHYA_PASSWORD = os.environ.get("SANKHYA_PASSWORD", "")
+SANKHYA_HOST = settings.url
+SANKHYA_PORT = settings.port
+SANKHYA_USERNAME = settings.username
+SANKHYA_PASSWORD = settings.password
 
 
 # =============================================================================
@@ -46,7 +42,7 @@ def listar_titulos_financeiros(max_results: int = 100):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        RequestBody, DataSet, Entity
+        RequestBody, DataSet, Entity, Field
     )
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     
@@ -62,23 +58,21 @@ def listar_titulos_financeiros(max_results: int = 100):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Financeiro",
-                include_presentation_fields="S",
-                parallel_loader="false",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUFIN",        # NÃºmero Ãºnico financeiro
-                            "NUNOTA",       # NÃºmero Ãºnico da nota
-                            "DTVENC",       # Data de vencimento
-                            "VLRDESDOB",    # Valor do desdobramento
-                            "CODPARC",      # CÃ³digo do parceiro
-                            "RECDESP",      # R=Receita, D=Despesa
-                            "DHBAIXA",      # Data/hora baixa
-                            "PROVISAO",     # Ã‰ provisÃ£o?
-                        ]
-                    )
-                ]
+                include_presentation=True,
+                parallel_loader=False,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUFIN"),        # Número único financeiro
+                        Field(name="NUNOTA"),       # Número único da nota
+                        Field(name="DTVENC"),       # Data de vencimento
+                        Field(name="VLRDESDOB"),    # Valor do desdobramento
+                        Field(name="CODPARC"),      # Código do parceiro
+                        Field(name="RECDESP"),      # R=Receita, D=Despesa
+                        Field(name="DHBAIXA"),      # Data/hora baixa
+                        Field(name="PROVISAO"),     # É provisão?
+                    ]
+                )
             )
         )
         
@@ -121,7 +115,7 @@ def listar_a_receber_em_aberto(max_results: int = 50):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field
     )
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     
@@ -137,16 +131,14 @@ def listar_a_receber_em_aberto(max_results: int = 50):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Financeiro",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUFIN", "NUNOTA", "DTVENC", "VLRDESDOB",
-                            "CODPARC", "RECDESP", "DESDOBESSION"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUFIN"), Field(name="NUNOTA"), Field(name="DTVENC"), Field(name="VLRDESDOB"),
+                        Field(name="CODPARC"), Field(name="RECDESP"), Field(name="DESDOBESSION")
+                    ]
+                ),
                 criteria=LiteralCriteria(
                     expression="""
                         RECDESP = 'R' 
@@ -197,7 +189,7 @@ def listar_a_pagar_em_aberto(max_results: int = 50):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field
     )
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     
@@ -213,16 +205,14 @@ def listar_a_pagar_em_aberto(max_results: int = 50):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Financeiro",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUFIN", "NUNOTA", "DTVENC", "VLRDESDOB",
-                            "CODPARC", "RECDESP"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUFIN"), Field(name="NUNOTA"), Field(name="DTVENC"), Field(name="VLRDESDOB"),
+                        Field(name="CODPARC"), Field(name="RECDESP")
+                    ]
+                ),
                 criteria=LiteralCriteria(
                     expression="""
                         RECDESP = 'D' 
@@ -272,8 +262,9 @@ def listar_titulos_vencidos(max_results: int = 50):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
     )
+    from sankhya_sdk.enums.parameter_type import ParameterType
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     
     ctx = SankhyaContext(
@@ -291,19 +282,19 @@ def listar_titulos_vencidos(max_results: int = 50):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Financeiro",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUFIN", "NUNOTA", "DTVENC", "VLRDESDOB",
-                            "CODPARC", "RECDESP"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUFIN"), Field(name="NUNOTA"), Field(name="DTVENC"), Field(name="VLRDESDOB"),
+                        Field(name="CODPARC"), Field(name="RECDESP")
+                    ]
+                ),
                 criteria=LiteralCriteria(
-                    expression="DTVENC < :HOJE AND DHBAIXA IS NULL",
-                    parameters=[{"name": "HOJE", "value": hoje}]
+                    expression="DTVENC < ? AND DHBAIXA IS NULL",
+                    parameters=[
+                        Parameter(type=ParameterType.DATETIME, value=hoje)
+                    ]
                 )
             )
         )
@@ -358,9 +349,9 @@ def listar_titulos_por_parceiro(codigo_parceiro: int, max_results: int = 50):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
     )
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
+    from sankhya_sdk.enums.parameter_type import ParameterType
     
     ctx = SankhyaContext(
         host=SANKHYA_HOST,
@@ -374,19 +365,20 @@ def listar_titulos_por_parceiro(codigo_parceiro: int, max_results: int = 50):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Financeiro",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUFIN", "NUNOTA", "DTVENC", "VLRDESDOB",
-                            "RECDESP", "DHBAIXA"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUFIN"), Field(name="NUMNOTA"), Field(name="DTNEG"), Field(name="DTVENC"),
+                        Field(name="CODPARC"), Field(name="VLRDESDOB"), Field(name="VLRBAIXA"), 
+                        Field(name="RECDESP"), Field(name="HISTORICO"), Field(name="CODTIPOPER")
+                    ]
+                ),
                 criteria=LiteralCriteria(
-                    expression="CODPARC = :CODPARC",
-                    parameters=[{"name": "CODPARC", "value": str(codigo_parceiro)}]
+                    expression="CODPARC = ?",
+                    parameters=[
+                        Parameter(type=ParameterType.INTEGER, value=str(codigo_parceiro))
+                    ]
                 )
             )
         )

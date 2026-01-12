@@ -115,6 +115,9 @@ class EntityDynamicSerialization:
         Returns:
             Instância da entidade com valores preenchidos
         """
+        if entity_type is dict:
+            return self._dictionary  # type: ignore
+
         instance = entity_type()
         instance, _ = self._parse_entity(
             instance, 
@@ -152,6 +155,7 @@ class EntityDynamicSerialization:
             return None, False
         
         has_fields_set = False
+        # print(f"DEBUG: Parsing entity {entity_type.__name__}, fields: {list(entity_type.model_fields.keys())}")
         for field_name, field_info in entity_type.model_fields.items():
             field_set = self._parse_property(
                 instance,
@@ -220,16 +224,24 @@ class EntityDynamicSerialization:
         
         # Busca valor no dicionário
         value = self._get_value_from_dict(property_name)
+        # print(f"DEBUG: Checking property '{property_name}' for field '{field_name}'")
+        # if property_name == "CODPARC":
+        #      print(f"DEBUG: FOUND CODPARC check! Value: {value}")
+        
         if value is None:
             return False
         
         # Converte e define o valor
         converted_value = self._convert_value(value, field_info)
+        # if property_name == "CODPARC":
+        #    print(f"DEBUG: Converted value for {property_name}: {converted_value}")
+
         if converted_value is not None:
             try:
                 setattr(instance, field_name, converted_value)
                 return True
             except (ValueError, TypeError):
+                # print(f"DEBUG: Error setting {field_name}: {e}")
                 pass
         
         return False

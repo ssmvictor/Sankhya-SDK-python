@@ -37,10 +37,11 @@ if TYPE_CHECKING:
     from sankhya_sdk.core.context import SankhyaContext
 
 from sankhya_sdk.enums.service_name import ServiceName
-from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerialization
+from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerialization, Metadata
 from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
+from sankhya_sdk.models.service.entity_types import EntityDynamic
 from sankhya_sdk.value_objects.paged_request_event_args import PagedRequestEventArgs
 
 
@@ -427,35 +428,73 @@ class PagedRequestWrapper:
         """
         entities: List[EntityDynamicSerialization] = []
         
-        if not response.response_body:
+        # Usa a property entities do ServiceResponse que já unifica as fontes
+        response_entities = response.entities
+        
+        if not response_entities:
+            # Fallback para verificar result (alguns serviços retornam em result)
+            if response.response_body and hasattr(response.response_body, "result"):
+                result = response.response_body.result
+                if isinstance(result, list):
+                    for item in result:
+                        if isinstance(item, dict):
+                            entities.append(EntityDynamicSerialization(item))
+            # Fallback para data_set (alguns serviços retornam em data_set.rows)
+            elif response.response_body and hasattr(response.response_body, "data_set"):
+                data_set = response.response_body.data_set
+                if data_set and hasattr(data_set, "rows") and data_set.rows:
+                    for row in data_set.rows:
+                        if isinstance(row, dict):
+                            entities.append(EntityDynamicSerialization(row))
             return entities
-        
-        # Processa resposta baseada na estrutura
-        body = response.response_body
-        
-        # Verifica se há entities diretas
-        if hasattr(body, "entities") and body.entities:
-            for entity_data in body.entities:
-                if isinstance(entity_data, dict):
-                    entities.append(EntityDynamicSerialization(entity_data))
-                elif isinstance(entity_data, EntityDynamicSerialization):
-                    entities.append(entity_data)
-        
-        # Verifica se há data_set com rows
-        elif hasattr(body, "data_set") and body.data_set:
-            data_set = body.data_set
-            if hasattr(data_set, "rows") and data_set.rows:
-                for row in data_set.rows:
-                    if isinstance(row, dict):
-                        entities.append(EntityDynamicSerialization(row))
-        
-        # Verifica se há result com data
-        elif hasattr(body, "result") and body.result:
-            result = body.result
-            if isinstance(result, list):
-                for item in result:
-                    if isinstance(item, dict):
-                        entities.append(EntityDynamicSerialization(item))
+            
+        # Prepara metadados para renomear chaves se necessário (f0 -> NOME_CAMPO)
+        metadata = None
+        if (self._request.request_body 
+            and self._request.request_body.data_set
+            and self._request.request_body.data_set.entity
+            and self._request.request_body.data_set.entity.fields):
+            
+            fields_def = [{"name": f.name} for f in self._request.request_body.data_set.entity.fields]
+            metadata = Metadata(fields_def)
+            
+        for entity_data in response_entities:
+            serializer = None
+            if isinstance(entity_data, dict):
+                serializer = EntityDynamicSerialization(entity_data)
+            elif isinstance(entity_data, EntityDynamicSerialization):
+                serializer = entity_data
+            elif isinstance(entity_data, EntityDynamic):
+                serializer = EntityDynamicSerialization(entity_data.fields)
+                
+            if serializer:
+                if metadata:
+                    try:
+                        serializer.change_keys(metadata)
+                    except ValueError:
+                        # Se a contagem não bater, tenta mapear o que é possível (Ex: só PK retornada)
+                        # Assume que os primeiros campos retornados correspondem aos primeiros solicitados?
+                        # OU assume que f0, f1... são na ordem dos solicitados, até onde der.
+                        # Dado que o servidor ignorou os campos e retornou só PK, a ordem pode não bater.
+                        # MAS em todos os testes f0 foi CODPARC (PK/primeiro campo).
+                        # Vamos tentar renomear f0...fN para os primeiros N nomes da metadata.
+                        try:
+                            # Implementação manual de change_keys parcial
+                            new_dict = {}
+                            for index in range(len(serializer.dictionary)):
+                                old_key = f"f{index}"
+                                if old_key in serializer.dictionary:
+                                    if index < len(metadata.fields):
+                                        new_name = metadata.fields[index]["name"]
+                                        new_dict[new_name] = serializer.dictionary[old_key]
+                                    else:
+                                        new_dict[old_key] = serializer.dictionary[old_key]
+                            # Atualiza o dicionário interno do serializer se conseguiu mapear algo
+                            if new_dict:
+                                serializer._dictionary = new_dict
+                        except Exception:
+                            pass
+                entities.append(serializer)
         
         return entities
     

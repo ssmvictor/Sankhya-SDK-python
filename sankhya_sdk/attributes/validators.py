@@ -47,7 +47,8 @@ def validate_max_length(value: Any, custom_data: EntityCustomDataMetadata) -> No
 
 def validate_entity_key_required(value: Any, field_name: str) -> None:
     if value is None:
-        raise ValueError(f"Field {field_name} is a key and cannot be None")
+        # Allow None for keys (e.g. new entities or partial data)
+        return
 
 
 def validate_element_name_format(element_name: str) -> None:

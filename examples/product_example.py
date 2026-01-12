@@ -16,20 +16,16 @@ import os
 from datetime import timedelta
 from typing import Optional
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from sankhya_sdk.config import settings
 
 # =============================================================================
 # ConfiguraÃ§Ã£o
 # =============================================================================
 
-SANKHYA_HOST = os.environ.get("SANKHYA_HOST", "http://localhost")
-SANKHYA_PORT = int(os.environ.get("SANKHYA_PORT", "8180"))
-SANKHYA_USERNAME = os.environ.get("SANKHYA_USERNAME", "")
-SANKHYA_PASSWORD = os.environ.get("SANKHYA_PASSWORD", "")
+SANKHYA_HOST = settings.url
+SANKHYA_PORT = settings.port
+SANKHYA_USERNAME = settings.username
+SANKHYA_PASSWORD = settings.password
 
 
 # =============================================================================
@@ -46,7 +42,7 @@ def listar_produtos_ativos(max_results: int = 100):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field
     )
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     from sankhya_sdk.models.transport.product import Product
@@ -63,22 +59,20 @@ def listar_produtos_ativos(max_results: int = 100):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Produto",
-                include_presentation_fields="S",
-                parallel_loader="false",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "CODPROD",       # CÃ³digo do produto
-                            "DESCRPROD",     # DescriÃ§Ã£o
-                            "REFERENCIA",    # ReferÃªncia/SKU
-                            "NCM",           # NCM fiscal
-                            "CODGRUPOPROD",  # CÃ³digo do grupo
-                            "CODMARCA",      # CÃ³digo da marca
-                            "ATIVO",         # Status ativo
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                parallel_loader=False,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="CODPROD"),       # Código do produto
+                        Field(name="DESCRPROD"),     # Descrição
+                        Field(name="REFERENCIA"),    # Referência/SKU
+                        Field(name="NCM"),           # NCM fiscal
+                        Field(name="CODGRUPOPROD"),  # Código do grupo
+                        Field(name="CODMARCA"),      # Código da marca
+                        Field(name="ATIVO"),         # Status ativo
+                    ]
+                ),
                 criteria=LiteralCriteria(
                     expression="ATIVO = 'S'"
                 )
@@ -119,8 +113,9 @@ def buscar_produto_por_codigo(codigo: int) -> Optional[dict]:
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
     )
+    from sankhya_sdk.enums.parameter_type import ParameterType
     
     ctx = SankhyaContext(
         host=SANKHYA_HOST,
@@ -134,20 +129,20 @@ def buscar_produto_por_codigo(codigo: int) -> Optional[dict]:
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Produto",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "CODPROD", "DESCRPROD", "REFERENCIA", "NCM",
-                            "CODGRUPOPROD", "CODMARCA", "ATIVO",
-                            "PESOBRUTO", "PESOLIQ", "UNIDADE"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="CODPROD"), Field(name="DESCRPROD"), Field(name="REFERENCIA"), Field(name="NCM"),
+                        Field(name="CODGRUPOPROD"), Field(name="CODMARCA"), Field(name="ATIVO"),
+                        Field(name="PESOBRUTO"), Field(name="PESOLIQ"), Field(name="UNIDADE")
+                    ]
+                ),
                 criteria=LiteralCriteria(
-                    expression="CODPROD = :CODIGO",
-                    parameters=[{"name": "CODIGO", "value": str(codigo)}]
+                    expression="CODPROD = ?",
+                    parameters=[
+                        Parameter(type=ParameterType.INTEGER, value=str(codigo))
+                    ]
                 )
             )
         )
@@ -182,8 +177,9 @@ def buscar_produtos_por_ncm(ncm: str, max_results: int = 50):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
     )
+    from sankhya_sdk.enums.parameter_type import ParameterType
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     from sankhya_sdk.models.transport.product import Product
     
@@ -199,16 +195,18 @@ def buscar_produtos_por_ncm(ncm: str, max_results: int = 50):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Produto",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=["CODPROD", "DESCRPROD", "NCM", "REFERENCIA", "ATIVO"]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="CODPROD"), Field(name="DESCRPROD"), Field(name="NCM"), Field(name="REFERENCIA"), Field(name="ATIVO")
+                    ]
+                ),
                 criteria=LiteralCriteria(
-                    expression="NCM LIKE :NCM AND ATIVO = 'S'",
-                    parameters=[{"name": "NCM", "value": f"{ncm}%"}]
+                    expression="NCM LIKE ? AND ATIVO = 'S'",
+                    parameters=[
+                        Parameter(type=ParameterType.STRING, value=f"{ncm}%")
+                    ]
                 )
             )
         )
@@ -246,8 +244,9 @@ def filtrar_por_grupo(codigo_grupo: int, max_results: int = 50):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
     )
+    from sankhya_sdk.enums.parameter_type import ParameterType
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     from sankhya_sdk.models.transport.product import Product
     
@@ -263,19 +262,19 @@ def filtrar_por_grupo(codigo_grupo: int, max_results: int = 50):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="Produto",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "CODPROD", "DESCRPROD", "REFERENCIA",
-                            "CODGRUPOPROD", "ATIVO"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="CODPROD"), Field(name="DESCRPROD"), Field(name="REFERENCIA"),
+                        Field(name="CODGRUPOPROD"), Field(name="ATIVO")
+                    ]
+                ),
                 criteria=LiteralCriteria(
-                    expression="CODGRUPOPROD = :GRUPO AND ATIVO = 'S'",
-                    parameters=[{"name": "GRUPO", "value": str(codigo_grupo)}]
+                    expression="CODGRUPOPROD = ? AND ATIVO = 'S'",
+                    parameters=[
+                        Parameter(type=ParameterType.INTEGER, value=str(codigo_grupo))
+                    ]
                 )
             )
         )

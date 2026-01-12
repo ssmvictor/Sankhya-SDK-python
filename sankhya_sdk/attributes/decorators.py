@@ -36,6 +36,8 @@ def _apply_kwargs_to_field(field: FieldInfo, kwargs: Dict[str, Any]) -> None:
 
 def entity_key(field: Optional[FieldInfo] = None, **kwargs: Any) -> Any:
     if field is None:
+        if "json_schema_extra" not in kwargs:
+            kwargs["json_schema_extra"] = {}
         field = Field(**kwargs)
     else:
         _apply_kwargs_to_field(field, kwargs)
@@ -48,6 +50,8 @@ def entity_element(
 ) -> Any:
     validate_element_name_format(element_name)
     if field is None:
+        if "json_schema_extra" not in kwargs:
+            kwargs["json_schema_extra"] = {}
         field = Field(**kwargs)
     else:
         _apply_kwargs_to_field(field, kwargs)
@@ -61,6 +65,8 @@ def entity_reference(
     custom_relation_name: Optional[str] = None, field: Optional[FieldInfo] = None, **kwargs: Any
 ) -> Any:
     if field is None:
+        if "json_schema_extra" not in kwargs:
+            kwargs["json_schema_extra"] = {}
         field = Field(**kwargs)
     else:
         _apply_kwargs_to_field(field, kwargs)
@@ -72,6 +78,8 @@ def entity_reference(
 
 def entity_ignore(field: Optional[FieldInfo] = None, **kwargs: Any) -> Any:
     if field is None:
+        if "json_schema_extra" not in kwargs:
+            kwargs["json_schema_extra"] = {}
         field = Field(**kwargs)
     else:
         _apply_kwargs_to_field(field, kwargs)
@@ -84,6 +92,8 @@ def entity_custom_data(
     max_length: Optional[int] = None, field: Optional[FieldInfo] = None, **kwargs: Any
 ) -> Any:
     if field is None:
+        if "json_schema_extra" not in kwargs:
+            kwargs["json_schema_extra"] = {}
         field = Field(**kwargs)
     else:
         _apply_kwargs_to_field(field, kwargs)

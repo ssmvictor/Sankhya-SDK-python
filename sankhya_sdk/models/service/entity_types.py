@@ -64,10 +64,10 @@ class Entity(BaseModel):
         
         if self.root_entity:
             elem.set("rootEntity", self.root_entity)
-        if self.path:
+        if self.path is not None:
             elem.set("path", self.path)
         if self.include_deleted:
-            elem.set("includeDeleted", serialize_bool(self.include_deleted))
+            elem.set("includeDeleted", serialize_bool(self.include_deleted, SankhyaConstants.BOOL_FORMAT_S_N))
         if self.order_by_expression:
             elem.set("orderByExpression", self.order_by_expression)
         
@@ -177,6 +177,7 @@ class DataSet(BaseModel):
     parallel_loader: bool = False
     database_fetch_size: Optional[int] = None
     rows_limit: Optional[int] = None
+    page_number: Optional[int] = None
     data_source: Optional[str] = None
     entity: Optional[Entity] = None
     rows: List[DataRow] = PydanticField(default_factory=list)
@@ -189,13 +190,15 @@ class DataSet(BaseModel):
         if self.root_entity:
             elem.set("rootEntity", self.root_entity)
         if self.include_presentation:
-            elem.set("includePresentation", serialize_bool(self.include_presentation))
+            elem.set("includePresentation", serialize_bool(self.include_presentation, SankhyaConstants.BOOL_FORMAT_S_N))
         if self.parallel_loader:
-            elem.set("parallelLoader", serialize_bool(self.parallel_loader))
+            elem.set("parallelLoader", serialize_bool(self.parallel_loader, SankhyaConstants.BOOL_FORMAT_S_N))
         if self.database_fetch_size is not None:
             elem.set("databaseFetchSize", str(self.database_fetch_size))
         if self.rows_limit is not None:
             elem.set("rowsLimit", str(self.rows_limit))
+        if self.page_number is not None:
+            elem.set("pageNumber", str(self.page_number))
         if self.data_source:
             elem.set("dataSource", self.data_source)
         
@@ -235,6 +238,9 @@ class DataSet(BaseModel):
         rows_limit = deserialize_optional_int(
             get_element_attr(element, "rowsLimit")
         )
+        page_number = deserialize_optional_int(
+            get_element_attr(element, "pageNumber")
+        )
         
         return cls(
             root_entity=get_element_attr(element, "rootEntity"),
@@ -246,6 +252,7 @@ class DataSet(BaseModel):
             ),
             database_fetch_size=db_fetch_size,
             rows_limit=rows_limit,
+            page_number=page_number,
             data_source=get_element_attr(element, "dataSource"),
             entity=entity,
             rows=rows,

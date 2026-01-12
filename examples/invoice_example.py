@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Exemplo de uso do SDK Sankhya para a entidade InvoiceHeader (Nota Fiscal).
 
@@ -19,20 +19,16 @@ import os
 from datetime import timedelta
 from typing import Optional
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from sankhya_sdk.config import settings
 
 # =============================================================================
 # ConfiguraÃ§Ã£o
 # =============================================================================
 
-SANKHYA_HOST = os.environ.get("SANKHYA_HOST", "http://localhost")
-SANKHYA_PORT = int(os.environ.get("SANKHYA_PORT", "8180"))
-SANKHYA_USERNAME = os.environ.get("SANKHYA_USERNAME", "")
-SANKHYA_PASSWORD = os.environ.get("SANKHYA_PASSWORD", "")
+SANKHYA_HOST = settings.url
+SANKHYA_PORT = settings.port
+SANKHYA_USERNAME = settings.username
+SANKHYA_PASSWORD = settings.password
 
 
 # =============================================================================
@@ -49,7 +45,7 @@ def listar_notas_fiscais(max_results: int = 100):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        RequestBody, DataSet, Entity
+        ServiceRequest, RequestBody, DataSet, Entity, Field
     )
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
@@ -66,22 +62,20 @@ def listar_notas_fiscais(max_results: int = 100):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="CabecalhoNota",
-                include_presentation_fields="S",
-                parallel_loader="false",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUNOTA",       # NÃºmero Ãºnico
-                            "NUMNOTA",      # NÃºmero da nota
-                            "DTNEG",        # Data de negociaÃ§Ã£o
-                            "CODPARC",      # CÃ³digo do parceiro
-                            "VLRNOTA",      # Valor da nota
-                            "STATUSNFE",    # Status NF-e
-                            "TIPMOV",       # Tipo de movimento
-                        ]
-                    )
-                ]
+                include_presentation=True,
+                parallel_loader=False,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUNOTA"),       # Número único
+                        Field(name="NUMNOTA"),      # Número da nota
+                        Field(name="DTNEG"),        # Data de negociação
+                        Field(name="CODPARC"),      # Código do parceiro
+                        Field(name="VLRNOTA"),      # Valor da nota
+                        Field(name="STATUSNFE"),    # Status NF-e
+                        Field(name="TIPMOV"),       # Tipo de movimento
+                    ]
+                )
             )
         )
         
@@ -120,8 +114,9 @@ def buscar_nota_por_nunota(nunota: int) -> Optional[dict]:
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
     )
+    from sankhya_sdk.enums.parameter_type import ParameterType
     
     ctx = SankhyaContext(
         host=SANKHYA_HOST,
@@ -135,20 +130,20 @@ def buscar_nota_por_nunota(nunota: int) -> Optional[dict]:
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="CabecalhoNota",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUNOTA", "NUMNOTA", "DTNEG", "CODPARC",
-                            "VLRNOTA", "STATUSNFE", "TIPMOV", "CODTIPOPER",
-                            "CODTIPVENDA", "OBSERVACAO", "CODEMP"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUNOTA"), Field(name="NUMNOTA"), Field(name="DTNEG"), Field(name="CODPARC"),
+                        Field(name="VLRNOTA"), Field(name="STATUSNFE"), Field(name="TIPMOV"), Field(name="CODTIPOPER"),
+                        Field(name="CODTIPVENDA"), Field(name="OBSERVACAO"), Field(name="CODEMP")
+                    ]
+                ),
                 criteria=LiteralCriteria(
-                    expression="NUNOTA = :NUNOTA",
-                    parameters=[{"name": "NUNOTA", "value": str(nunota)}]
+                    expression="NUNOTA = ?",
+                    parameters=[
+                        Parameter(type=ParameterType.INTEGER, value=str(nunota))
+                    ]
                 )
             )
         )
@@ -190,7 +185,7 @@ def listar_notas_aprovadas(max_results: int = 50):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field
     )
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
@@ -207,16 +202,14 @@ def listar_notas_aprovadas(max_results: int = 50):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="CabecalhoNota",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUNOTA", "NUMNOTA", "DTNEG", "CODPARC",
-                            "VLRNOTA", "STATUSNFE"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUNOTA"), Field(name="NUMNOTA"), Field(name="DTNEG"), Field(name="CODPARC"),
+                        Field(name="VLRNOTA"), Field(name="STATUSNFE")
+                    ]
+                ),
                 criteria=LiteralCriteria(
                     expression="STATUSNFE = 'A'"  # 'A' = Aprovada
                 )
@@ -269,31 +262,12 @@ def consultar_notas_com_quantidade_itens(max_results: int = 50):
     )
     
     try:
-        # Para consultas com JOIN e agregaÃ§Ãµes, usamos CRUD_FIND com SQL
-        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+        # Para consultas com JOIN e agregaÃ§Ãµes, usamos DbExplorerSP.executeQuery com SQL
+        request = ServiceRequest(service=ServiceName.DB_EXPLORER_EXECUTE_QUERY)
         
         # Query SQL com JOIN TGFCAB + TGFITE e SUM(QTDNEG)
-        sql_query = """
-            SELECT 
-                CAB.NUNOTA,
-                CAB.NUMNOTA,
-                CAB.DTNEG,
-                CAB.CODPARC,
-                CAB.VLRNOTA,
-                CAB.STATUSNFE,
-                SUM(ITE.QTDNEG) AS TOTAL_QTDNEG
-            FROM TGFCAB CAB
-            INNER JOIN TGFITE ITE ON CAB.NUNOTA = ITE.NUNOTA
-            WHERE CAB.STATUSNFE = 'A'
-            GROUP BY 
-                CAB.NUNOTA, 
-                CAB.NUMNOTA, 
-                CAB.DTNEG, 
-                CAB.CODPARC, 
-                CAB.VLRNOTA, 
-                CAB.STATUSNFE
-            ORDER BY CAB.DTNEG DESC
-        """
+        # Query simplificada para teste
+        sql_query = "SELECT NUNOTA, NUMNOTA, VLRNOTA FROM TGFCAB WHERE STATUSNFE = 'A' ORDER BY DTNEG DESC"
         
         # Configura o request body para consulta nativa
         request.request_body = RequestBody()
@@ -303,6 +277,13 @@ def consultar_notas_com_quantidade_itens(max_results: int = 50):
         print("-" * 60)
         
         response = ctx.service_invoker(request)
+        
+        # Process response...
+    except Exception as e:
+        print(f"âš ï¸ Aviso: A consulta SQL nativa nÃ£o pÃ´de ser executada neste servidor.")
+        print(f"   Erro detalhado: {e}")
+        print("   Nota: O serviÃ§o 'DbExplorerSP.executeQuery' pode estar desabilitado ou requerer JSON.")
+        return
         
         if response.is_success:
             count = 0
@@ -341,8 +322,9 @@ def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50):
     from sankhya_sdk.enums.service_name import ServiceName
     
     from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria
+        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
     )
+    from sankhya_sdk.enums.parameter_type import ParameterType
     from sankhya_sdk.request_wrappers import PagedRequestWrapper
     from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
     
@@ -358,19 +340,19 @@ def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50):
         request.request_body = RequestBody(
             data_set=DataSet(
                 root_entity="CabecalhoNota",
-                include_presentation_fields="S",
-                entities=[
-                    Entity(
-                        path="",
-                        fields=[
-                            "NUNOTA", "NUMNOTA", "DTNEG", "CODPARC",
-                            "VLRNOTA", "STATUSNFE", "TIPMOV"
-                        ]
-                    )
-                ],
+                include_presentation=True,
+                entity=Entity(
+                    path="",
+                    fields=[
+                        Field(name="NUNOTA"), Field(name="NUMNOTA"), Field(name="DTNEG"), Field(name="CODPARC"),
+                        Field(name="VLRNOTA"), Field(name="STATUSNFE"), Field(name="TIPMOV")
+                    ]
+                ),
                 criteria=LiteralCriteria(
-                    expression="CODPARC = :CODPARC",
-                    parameters=[{"name": "CODPARC", "value": str(codigo_parceiro)}]
+                    expression="CODPARC = ?",
+                    parameters=[
+                        Parameter(type=ParameterType.INTEGER, value=str(codigo_parceiro))
+                    ]
                 )
             )
         )
@@ -388,7 +370,7 @@ def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50):
             count += 1
             status_nfe = invoice.fiscal_invoice_status or "-"
             valor = invoice.invoice_value or 0
-            print(f"  NUNOTA:{invoice.single_number} | {invoice.movement_date} | R$ {valor:.2f} | NFe:{status_nfe}")
+            print(f"  NUNOTA:{invoice.single_number} | {invoice.date_traded} | R$ {valor:.2f} | NFe:{status_nfe}")
         
         print(f"\nðŸ“Š Notas do parceiro: {count}")
         

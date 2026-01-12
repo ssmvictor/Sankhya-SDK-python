@@ -30,3 +30,15 @@ class EntityFieldMetadata:
     custom_data: Optional[EntityCustomDataMetadata] = None
     is_key: bool = False
     is_ignored: bool = False
+
+    @property
+    def element_name(self) -> Optional[str]:
+        return self.element.element_name if self.element else None
+
+    @property
+    def is_reference(self) -> bool:
+        return self.reference is not None
+
+    @property
+    def custom_relation_name(self) -> Optional[str]:
+        return self.reference.custom_relation_name if self.reference else None
