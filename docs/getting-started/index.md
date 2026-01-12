@@ -1,4 +1,4 @@
-# Início Rápido
+# Getting Started
 
 Bem-vindo à seção de início rápido do Sankhya SDK Python! Aqui você encontrará tudo o que precisa para começar a usar o SDK.
 

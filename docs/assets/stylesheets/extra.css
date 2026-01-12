@@ -1,13 +1,64 @@
 /* Custom styles for Sankhya SDK Python Documentation */
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+    --bg-base: #06070D;
+    --bg-surface: #0E1018;
+    --accent: #D4FF00; /* Electric Lime */
+    --accent-dim: rgba(212, 255, 0, 0.1);
+    --text-primary: #FFFFFF;
+    --text-secondary: #8E919E;
+    --border: rgba(255, 255, 255, 0.05);
+    --border-accent: rgba(212, 255, 0, 0.3);
+    
+    --font-heading: 'Syne', sans-serif;
+    --font-body: 'Outfit', sans-serif;
+    --font-code: 'JetBrains Mono', monospace;
+
+    /* MkDocs Material Overrides */
+    --md-text-font: var(--font-body);
+    --md-code-font: var(--font-code);
+}
+
+/* Background Texture */
+body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+/* Scroll Progress Bar */
+.scroll-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 0%;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), #FFFFFF);
+    z-index: 1000;
+    transition: width 0.1s ease;
+}
 
 /* Code blocks */
 .md-typeset code {
   font-size: 0.85em;
+  font-family: var(--font-code);
 }
 
 /* Admonitions */
 .md-typeset .admonition {
   border-radius: 4px;
+  border: 1px solid var(--border);
 }
 
 /* Tables */
@@ -18,12 +69,70 @@
 /* Navigation tabs */
 .md-tabs__link {
   font-weight: 500;
+  font-family: var(--font-heading);
 }
 
 /* Mermaid diagrams */
 .mermaid {
   text-align: center;
   margin: 1em 0;
+}
+
+/* Reveal Animation */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.reveal {
+    animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    will-change: opacity, transform;
+}
+
+/* Toast Notifications */
+.toast {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 4px;
+    padding: 1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    z-index: 2000; /* Higher than MkDocs header */
+    opacity: 0;
+    transform: translateX(100%);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    color: var(--text-primary);
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.toast-success {
+    border-left-color: #4EC9B0;
+}
+
+.toast-error {
+    border-left-color: #FF5555;
+}
+
+.toast i {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
 }
 
 /* API Reference styling */
@@ -35,4 +144,5 @@
   background-color: var(--md-code-bg-color);
   padding: 0.5em 1em;
   border-radius: 4px;
+  font-family: var(--font-code);
 }
