@@ -8,11 +8,70 @@ O Sankhya SDK suporta múltiplos métodos de autenticação:
 
 | Método | Segurança | Uso Recomendado |
 |--------|-----------|-----------------|
+| OAuth2 (Token) | ⭐⭐⭐⭐⭐ | **Recomendado** (Novas Integrações) |
 | Variáveis de ambiente | ⭐⭐⭐ | Desenvolvimento e CI/CD |
-| Arquivo .key | ⭐⭐⭐⭐ | Produção |
+| Arquivo .key | ⭐⭐⭐⭐ | Produção (Legado) |
 | Configuração direta | ⭐⭐ | Testes |
 
-## Método 1: Variáveis de Ambiente
+## Método Recomendado: OAuth2 (Bearer Token)
+
+O novo fluxo de autenticação utiliza o padrão **OAuth2** com credenciais (`client_id`, `client_secret`) e opcionalmente um token proprietário (`X-Token`). É mais seguro e performático para novas integrações.
+
+### 1. Obter Credenciais
+
+Acesse o [Portal do Desenvolvedor Sankhya](https://areadev.sankhya.com.br/):
+1. Crie uma **Solução**.
+2. Crie um **Componente de Integração**.
+3. Copie o **Client ID** e **Client Secret**.
+
+### 2. Configuração (.env)
+
+```ini
+SANKHYA_CLIENT_ID=seu_client_id
+SANKHYA_CLIENT_SECRET=seu_client_secret
+SANKHYA_AUTH_BASE_URL=https://api.sankhya.com.br
+SANKHYA_TOKEN=seu_x_token  # Opcional (se exigido pelo ambiente)
+```
+
+### 3. Uso com SankhyaSession
+
+```python
+import os
+from dotenv import load_dotenv
+from sankhya_sdk.auth.oauth_client import OAuthClient
+from sankhya_sdk.http.session import SankhyaSession
+
+# Carregar variáveis
+load_dotenv()
+
+# Inicializar Cliente OAuth
+oauth = OAuthClient(
+    base_url=os.getenv("SANKHYA_AUTH_BASE_URL"),
+    token=os.getenv("SANKHYA_TOKEN")
+)
+
+# Autenticar
+oauth.authenticate(
+    client_id=os.getenv("SANKHYA_CLIENT_ID"),
+    client_secret=os.getenv("SANKHYA_CLIENT_SECRET")
+)
+
+# Criar Sessão Autenticada
+session = SankhyaSession(oauth_client=oauth)
+
+# Realizar Requisições
+# O header 'Authorization: Bearer ...' é injetado automaticamente
+response = session.get("/gateway/v1/mge/servico/exemplo")
+
+print(response.json())
+```
+
+### Renovação de Token
+O `SankhyaSession` detecta automaticamente erros `401 Unauthorized` e tenta renovar o token usando o `refresh_token` armazenado, repetindo a requisição original de forma transparente.
+
+---
+
+## Método 1: Variáveis de Ambiente (Legado)
 
 ### Configuração
 
