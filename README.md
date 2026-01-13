@@ -33,7 +33,49 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-A forma mais simples de usar o SDK é através do `SankhyaContext`:
+## Autenticação
+ 
+### Novo: OAuth2 (Recomendado)
+
+O SDK suporta agora o fluxo de autenticação OAuth2 (Client Credentials) usando `SankhyaSession`.
+
+**Configuração (.env):**
+```bash
+SANKHYA_CLIENT_ID=seu_client_id
+SANKHYA_CLIENT_SECRET=seu_client_secret
+SANKHYA_AUTH_BASE_URL=https://api.sankhya.com.br # Opcional
+SANKHYA_TOKEN=seu_x_token # Opcional (X-Token)
+```
+
+**Uso:**
+```python
+import os
+from dotenv import load_dotenv
+from sankhya_sdk.auth.oauth_client import OAuthClient
+from sankhya_sdk.http.session import SankhyaSession
+
+load_dotenv()
+
+# 1. Autenticar
+oauth = OAuthClient(
+    base_url=os.getenv("SANKHYA_AUTH_BASE_URL", "https://api.sankhya.com.br"),
+    token=os.getenv("SANKHYA_TOKEN")
+)
+token = oauth.authenticate(
+    client_id=os.getenv("SANKHYA_CLIENT_ID"),
+    client_secret=os.getenv("SANKHYA_CLIENT_SECRET")
+)
+
+# 2. Criar sessão
+session = SankhyaSession(oauth_client=oauth)
+
+# 3. Fazer requisições
+response = session.get("/gateway/v1/mge/teste")
+```
+
+### Legado: SankhyaContext (SankhyaWrapper)
+ 
+A forma clássica de usar o SDK é através do `SankhyaContext`:
 
 ```python
 from sankhya_sdk.core import SankhyaContext
