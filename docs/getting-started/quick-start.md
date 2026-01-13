@@ -7,16 +7,31 @@ Este guia mostra como criar sua primeira integração com a API Sankhya usando o
 O exemplo mais simples de uso do SDK:
 
 ```python
-from sankhya_sdk import SankhyaContext
+from sankhya_sdk.auth.oauth_client import OAuthClient
+from sankhya_sdk.http.session import SankhyaSession
 from dotenv import load_dotenv
+import os
 
-# Carrega configurações do arquivo .env
 load_dotenv()
 
-# Conecta à API usando context manager
-with SankhyaContext.from_settings() as ctx:
-    print(f"Conectado com sucesso!")
-    print(f"Usuário: {ctx.user_code}")
+# 1. Configurar Cliente OAuth
+oauth = OAuthClient(
+    base_url=os.getenv("SANKHYA_AUTH_BASE_URL", "https://api.sankhya.com.br"),
+    token=os.getenv("SANKHYA_TOKEN")
+)
+
+# 2. Autenticar
+oauth.authenticate(
+    client_id=os.getenv("SANKHYA_CLIENT_ID"),
+    client_secret=os.getenv("SANKHYA_CLIENT_SECRET")
+)
+
+# 3. Criar Sessão
+session = SankhyaSession(oauth_client=oauth)
+
+print("Conectado com sucesso via OAuth2!")
+response = session.get("/gateway/v1/mge/teste")
+print(f"Status: {response.status_code}")
 ```
 
 ## Sua Primeira Consulta
