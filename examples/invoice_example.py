@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Exemplo de uso do SDK Sankhya para a entidade InvoiceHeader (Nota Fiscal).
+Exemplo de uso do SDK Sankhya para a entidade Nota Fiscal (JSON Gateway).
 
 Demonstra operações de consulta:
 - Listar notas fiscais
 - Buscar nota por número único (NUNOTA)
 - Verificar status de NF-e
-- JOIN com TGFITE para soma de QTDNEG
 
-Tabelas Sankhya: 
+Tabelas Sankhya:
 - TGFCAB (Cabeçalho da Nota)
 - TGFITE (Itens da Nota)
 """
@@ -16,164 +15,156 @@ Tabelas Sankhya:
 from __future__ import annotations
 
 import os
-from datetime import timedelta
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
-from sankhya_sdk.config import settings
+from dotenv import load_dotenv
 
 # =============================================================================
-# Configuração
+# Configuração OAuth2
 # =============================================================================
 
-SANKHYA_HOST = settings.url
-SANKHYA_PORT = settings.port
-SANKHYA_USERNAME = settings.username
-SANKHYA_PASSWORD = settings.password
+load_dotenv()
+
+SANKHYA_CLIENT_ID = os.getenv("SANKHYA_CLIENT_ID")
+SANKHYA_CLIENT_SECRET = os.getenv("SANKHYA_CLIENT_SECRET")
+SANKHYA_AUTH_BASE_URL = os.getenv("SANKHYA_AUTH_BASE_URL", "https://api.sankhya.com.br")
+SANKHYA_X_TOKEN = os.getenv("SANKHYA_TOKEN")
+
+
+def _create_client():
+    """Cria e retorna um GatewayClient autenticado via OAuth2."""
+    from sankhya_sdk.auth.oauth_client import OAuthClient
+    from sankhya_sdk.http import SankhyaSession, GatewayClient
+
+    oauth = OAuthClient(base_url=SANKHYA_AUTH_BASE_URL, token=SANKHYA_X_TOKEN)
+    oauth.authenticate(client_id=SANKHYA_CLIENT_ID, client_secret=SANKHYA_CLIENT_SECRET)
+
+    session = SankhyaSession(oauth_client=oauth, base_url=SANKHYA_AUTH_BASE_URL)
+    return GatewayClient(session)
+
+
+def _extract_entities(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extrai lista de entidades da resposta do Gateway."""
+    from sankhya_sdk.http import GatewayClient
+
+    return GatewayClient.extract_records(response)
 
 
 # =============================================================================
 # Exemplo 1: Listar Notas Fiscais
 # =============================================================================
 
-def listar_notas_fiscais(max_results: int = 100):
+
+def listar_notas_fiscais(max_results: int = 100) -> List[Dict[str, Any]]:
     """
-    Lista notas fiscais de forma paginada.
-    
-    Retorna notas com informações básicas do cabeçalho.
+    Lista notas fiscais recentes.
+
+    Args:
+        max_results: Limite máximo de resultados
+
+    Returns:
+        Lista de notas fiscais
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, Field
+    client = _create_client()
+
+    response = client.load_records(
+        entity="CabecalhoNota",
+        fields=["NUNOTA", "NUMNOTA", "DTNEG", "CODPARC", "VLRNOTA", "STATUSNFE", "TIPMOV"],
+        criteria="DTNEG >= SYSDATE - 30",  # Últimos 30 dias
     )
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="CabecalhoNota",
-                include_presentation=True,
-                parallel_loader=False,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="NUNOTA"),       # Número único
-                        Field(name="NUMNOTA"),      # Número da nota
-                        Field(name="DTNEG"),        # Data de negociação
-                        Field(name="CODPARC"),      # Código do parceiro
-                        Field(name="VLRNOTA"),      # Valor da nota
-                        Field(name="STATUSNFE"),    # Status NF-e
-                        Field(name="TIPMOV"),       # Tipo de movimento
-                    ]
-                )
-            )
+
+    print("📋 Listando notas fiscais...")
+
+    entities = _extract_entities(response)
+    notas = []
+
+    for i, record in enumerate(entities[:max_results], 1):
+        nunota = record.get("NUNOTA", "-")
+        numnota = record.get("NUMNOTA", "-")
+        valor = float(record.get("VLRNOTA", 0) or 0)
+        status = record.get("STATUSNFE", "-")
+
+        status_emoji = {
+            "A": "✅",  # Aprovada
+            "D": "❌",  # Denegada
+            "R": "❌",  # Rejeitada
+            "C": "⛔",  # Cancelada
+            "E": "⏳",  # Em processamento
+        }.get(status, "❓")
+
+        print(
+            f"  {i}. NUNOTA:{nunota} | Nº:{numnota} | R$ {valor:.2f} | NFe:{status_emoji} {status}"
         )
-        
-        print("📋 Listando notas fiscais...")
-        count = 0
-        
-        for invoice in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=InvoiceHeader,
-            token=ctx.token,
-            timeout=timedelta(minutes=5),
-            max_results=max_results,
-        ):
-            count += 1
-            status = invoice.fiscal_invoice_status or "-"
-            valor = invoice.invoice_value or 0
-            print(f"  {count}. NUNOTA:{invoice.single_number} | Nº:{invoice.invoice_number} | R$ {valor:.2f} | NFe:{status}")
-        
-        print(f"\n✅ Total: {count} notas")
-        
-    finally:
-        ctx.dispose()
+        notas.append(record)
+
+    print(f"\n✅ Total: {len(notas)} notas")
+    return notas
 
 
 # =============================================================================
 # Exemplo 2: Buscar Nota por NUNOTA
 # =============================================================================
 
-def buscar_nota_por_nunota(nunota: int) -> Optional[dict]:
+
+def buscar_nota_por_nunota(nunota: int) -> Optional[Dict[str, Any]]:
     """
     Busca uma nota fiscal específica pelo número único (NUNOTA).
-    
-    Retorna os dados completos da nota ou None se não encontrada.
+
+    Args:
+        nunota: Número único da nota
+
+    Returns:
+        Dados da nota ou None se não encontrada
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
+    client = _create_client()
+
+    response = client.load_records(
+        entity="CabecalhoNota",
+        fields=[
+            "NUNOTA",
+            "NUMNOTA",
+            "DTNEG",
+            "CODPARC",
+            "VLRNOTA",
+            "STATUSNFE",
+            "TIPMOV",
+            "CODTIPOPER",
+            "CODTIPVENDA",
+            "OBSERVACAO",
+            "CODEMP",
+        ],
+        criteria=f"NUNOTA = {nunota}",
     )
-    from sankhya_sdk.enums.parameter_type import ParameterType
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="CabecalhoNota",
-                include_presentation=True,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="NUNOTA"), Field(name="NUMNOTA"), Field(name="DTNEG"), Field(name="CODPARC"),
-                        Field(name="VLRNOTA"), Field(name="STATUSNFE"), Field(name="TIPMOV"), Field(name="CODTIPOPER"),
-                        Field(name="CODTIPVENDA"), Field(name="OBSERVACAO"), Field(name="CODEMP")
-                    ]
-                ),
-                criteria=LiteralCriteria(
-                    expression="NUNOTA = ?",
-                    parameters=[
-                        Parameter(type=ParameterType.INTEGER, value=str(nunota))
-                    ]
-                )
-            )
-        )
-        
-        print(f"🔍 Buscando nota NUNOTA {nunota}...")
-        
-        response = ctx.service_invoker(request)
-        
-        if response.is_success and response.entities:
-            invoice = response.entities[0]
-            print(f"✅ Encontrada: {invoice}")
-            return invoice
-        else:
-            print(f"❌ Nota {nunota} não encontrada")
-            return None
-            
-    finally:
-        ctx.dispose()
+
+    print(f"🔍 Buscando nota NUNOTA {nunota}...")
+
+    entities = _extract_entities(response)
+
+    if entities:
+        nota = entities[0]
+        print(f"✅ Encontrada:")
+        print(f"   NUNOTA: {nota.get('NUNOTA')}")
+        print(f"   Número: {nota.get('NUMNOTA')}")
+        print(f"   Valor: R$ {float(nota.get('VLRNOTA', 0) or 0):.2f}")
+        print(f"   Status NFe: {nota.get('STATUSNFE', '-')}")
+        print(f"   Data: {nota.get('DTNEG', '-')}")
+        return nota
+    else:
+        print(f"❌ Nota {nunota} não encontrada")
+        return None
 
 
 # =============================================================================
 # Exemplo 3: Filtrar Notas Aprovadas (STATUSNFE = 'A')
 # =============================================================================
 
-def listar_notas_aprovadas(max_results: int = 50):
+
+def listar_notas_aprovadas(max_results: int = 50) -> List[Dict[str, Any]]:
     """
     Lista notas fiscais com NF-e aprovada.
-    
+
     STATUSNFE = 'A' significa nota aprovada na SEFAZ.
-    
+
     Valores possíveis de STATUSNFE:
     - 'A' = Aprovada
     - 'D' = Denegada
@@ -181,201 +172,125 @@ def listar_notas_aprovadas(max_results: int = 50):
     - 'C' = Cancelada
     - 'E' = Em processamento
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field
+    client = _create_client()
+
+    response = client.load_records(
+        entity="CabecalhoNota",
+        fields=["NUNOTA", "NUMNOTA", "DTNEG", "CODPARC", "VLRNOTA", "STATUSNFE"],
+        criteria="STATUSNFE = 'A'",
     )
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
+
+    print("✅ Listando notas com NF-e APROVADA (STATUSNFE = 'A')...")
+
+    entities = _extract_entities(response)
+    notas = []
+
+    for i, record in enumerate(entities[:max_results], 1):
+        nunota = record.get("NUNOTA", "-")
+        numnota = record.get("NUMNOTA", "-")
+        valor = float(record.get("VLRNOTA", 0) or 0)
+
+        print(f"  ✅ NUNOTA:{nunota} | Nº:{numnota} | R$ {valor:.2f}")
+        notas.append(record)
+
+    print(f"\n📊 Notas aprovadas: {len(notas)}")
+    return notas
+
+
+# =============================================================================
+# Exemplo 4: Listar Itens de uma Nota
+# =============================================================================
+
+
+def listar_itens_nota(nunota: int) -> List[Dict[str, Any]]:
+    """
+    Lista os itens de uma nota fiscal específica.
+
+    Args:
+        nunota: Número único da nota
+
+    Returns:
+        Lista de itens da nota
+    """
+    client = _create_client()
+
+    response = client.load_records(
+        entity="ItemNota",
+        fields=["NUNOTA", "SEQUENCIA", "CODPROD", "QTDNEG", "VLRUNIT", "VLRTOT"],
+        criteria=f"NUNOTA = {nunota}",
     )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="CabecalhoNota",
-                include_presentation=True,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="NUNOTA"), Field(name="NUMNOTA"), Field(name="DTNEG"), Field(name="CODPARC"),
-                        Field(name="VLRNOTA"), Field(name="STATUSNFE")
-                    ]
-                ),
-                criteria=LiteralCriteria(
-                    expression="STATUSNFE = 'A'"  # 'A' = Aprovada
-                )
-            )
+
+    print(f"📦 Listando itens da nota NUNOTA {nunota}...")
+
+    entities = _extract_entities(response)
+
+    total_valor = 0.0
+    total_qtd = 0.0
+
+    for i, item in enumerate(entities, 1):
+        seq = item.get("SEQUENCIA", "-")
+        cod = item.get("CODPROD", "-")
+        qtd = float(item.get("QTDNEG", 0) or 0)
+        vlr_unit = float(item.get("VLRUNIT", 0) or 0)
+        vlr_tot = float(item.get("VLRTOT", 0) or 0)
+
+        total_qtd += qtd
+        total_valor += vlr_tot
+
+        print(
+            f"  {seq}. Produto:{cod} | Qtd:{qtd:.2f} | Unit:R$ {vlr_unit:.2f} | Total:R$ {vlr_tot:.2f}"
         )
-        
-        print("✅ Listando notas com NF-e APROVADA (STATUSNFE = 'A')...")
-        count = 0
-        
-        for invoice in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=InvoiceHeader,
-            token=ctx.token,
-            timeout=timedelta(minutes=2),
-            max_results=max_results,
-        ):
-            count += 1
-            valor = invoice.invoice_value or 0
-            print(f"  ✅ NUNOTA:{invoice.single_number} | Nº:{invoice.invoice_number} | R$ {valor:.2f}")
-        
-        print(f"\n📊 Notas aprovadas: {count}")
-        
-    finally:
-        ctx.dispose()
 
+    print(f"\n📊 Resumo:")
+    print(f"   Total de itens: {len(entities)}")
+    print(f"   Quantidade total: {total_qtd:.2f}")
+    print(f"   Valor total: R$ {total_valor:.2f}")
 
-# =============================================================================
-# Exemplo 4: Consulta com JOIN TGFITE - Soma de QTDNEG
-# =============================================================================
-
-def consultar_notas_com_quantidade_itens(max_results: int = 50):
-    """
-    Consulta notas com a soma das quantidades negociadas (QTDNEG).
-    
-    Faz JOIN entre TGFCAB e TGFITE para calcular SUM(QTDNEG).
-    
-    Esta consulta usa SQL nativo via CRUD_FIND para permitir
-    agregações que não são possíveis com o CRUD padrão.
-    """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import ServiceRequest, RequestBody
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
-    try:
-        # Para consultas com JOIN e agregações, usamos DbExplorerSP.executeQuery com SQL
-        request = ServiceRequest(service=ServiceName.DB_EXPLORER_EXECUTE_QUERY)
-        
-        # Query SQL com JOIN TGFCAB + TGFITE e SUM(QTDNEG)
-        # Query simplificada para teste
-        sql_query = "SELECT NUNOTA, NUMNOTA, VLRNOTA FROM TGFCAB WHERE STATUSNFE = 'A' ORDER BY DTNEG DESC"
-        
-        # Configura o request body para consulta nativa
-        request.request_body = RequestBody()
-        request.request_body.custom_query = sql_query.strip()
-        
-        print("📊 Consultando notas com soma de quantidades (JOIN TGFITE)...")
-        print("-" * 60)
-        
-        response = ctx.service_invoker(request)
-        
-        # Process response...
-    except Exception as e:
-        print(f"⚠️ Aviso: A consulta SQL nativa não pôde ser executada neste servidor.")
-        print(f"   Erro detalhado: {e}")
-        print("   Nota: O serviço 'DbExplorerSP.executeQuery' pode estar desabilitado ou requerer JSON.")
-        return
-        
-        if response.is_success:
-            count = 0
-            for row in response.entities or []:
-                count += 1
-                if count > max_results:
-                    break
-                    
-                nunota = row.get("NUNOTA", "-")
-                numnota = row.get("NUMNOTA", "-")
-                vlrnota = float(row.get("VLRNOTA", 0) or 0)
-                total_qtd = float(row.get("TOTAL_QTDNEG", 0) or 0)
-                
-                print(f"  NUNOTA:{nunota} | Nº:{numnota} | R$ {vlrnota:.2f} | Qtd Total: {total_qtd:.2f}")
-            
-            print("-" * 60)
-            print(f"📋 Exibidas: {min(count, max_results)} notas")
-        else:
-            print(f"❌ Erro na consulta: {response.status_message}")
-            
-    finally:
-        ctx.dispose()
+    return entities
 
 
 # =============================================================================
 # Exemplo 5: Filtrar Notas por Parceiro
 # =============================================================================
 
-def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50):
+
+def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50) -> List[Dict[str, Any]]:
     """
     Filtra notas fiscais de um parceiro específico.
-    
+
     Útil para verificar histórico de compras/vendas de um cliente.
+
+    Args:
+        codigo_parceiro: Código do parceiro
+        max_results: Limite máximo de resultados
+
+    Returns:
+        Lista de notas do parceiro
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
+    client = _create_client()
+
+    response = client.load_records(
+        entity="CabecalhoNota",
+        fields=["NUNOTA", "NUMNOTA", "DTNEG", "CODPARC", "VLRNOTA", "STATUSNFE", "TIPMOV"],
+        criteria=f"CODPARC = {codigo_parceiro}",
     )
-    from sankhya_sdk.enums.parameter_type import ParameterType
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="CabecalhoNota",
-                include_presentation=True,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="NUNOTA"), Field(name="NUMNOTA"), Field(name="DTNEG"), Field(name="CODPARC"),
-                        Field(name="VLRNOTA"), Field(name="STATUSNFE"), Field(name="TIPMOV")
-                    ]
-                ),
-                criteria=LiteralCriteria(
-                    expression="CODPARC = ?",
-                    parameters=[
-                        Parameter(type=ParameterType.INTEGER, value=str(codigo_parceiro))
-                    ]
-                )
-            )
-        )
-        
-        print(f"📋 Notas do parceiro {codigo_parceiro}...")
-        count = 0
-        
-        for invoice in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=InvoiceHeader,
-            token=ctx.token,
-            timeout=timedelta(minutes=2),
-            max_results=max_results,
-        ):
-            count += 1
-            status_nfe = invoice.fiscal_invoice_status or "-"
-            valor = invoice.invoice_value or 0
-            print(f"  NUNOTA:{invoice.single_number} | {invoice.date_traded} | R$ {valor:.2f} | NFe:{status_nfe}")
-        
-        print(f"\n📊 Notas do parceiro: {count}")
-        
-    finally:
-        ctx.dispose()
+
+    print(f"📋 Notas do parceiro {codigo_parceiro}...")
+
+    entities = _extract_entities(response)
+    notas = []
+
+    for i, record in enumerate(entities[:max_results], 1):
+        nunota = record.get("NUNOTA", "-")
+        data = record.get("DTNEG", "-")
+        valor = float(record.get("VLRNOTA", 0) or 0)
+        status = record.get("STATUSNFE", "-")
+
+        print(f"  NUNOTA:{nunota} | {data} | R$ {valor:.2f} | NFe:{status}")
+        notas.append(record)
+
+    print(f"\n📊 Notas do parceiro: {len(notas)}")
+    return notas
 
 
 # =============================================================================
@@ -384,30 +299,29 @@ def filtrar_notas_por_parceiro(codigo_parceiro: int, max_results: int = 50):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Exemplos de Notas Fiscais (TGFCAB + TGFITE)")
+    print("Exemplos de Notas Fiscais (TGFCAB + TGFITE) - JSON Gateway")
     print("=" * 60)
-    
+
     print("\n1. Listar Notas Fiscais")
     print("-" * 40)
-    # listar_notas_fiscais(max_results=10)
-    
+    listar_notas_fiscais(max_results=10)
+
     print("\n2. Buscar Nota por NUNOTA")
     print("-" * 40)
     # buscar_nota_por_nunota(12345)
-    
+
     print("\n3. Listar Notas Aprovadas (STATUSNFE = 'A')")
     print("-" * 40)
     # listar_notas_aprovadas(max_results=10)
-    
-    print("\n4. Consulta com JOIN TGFITE (SUM QTDNEG)")
+
+    print("\n4. Listar Itens de uma Nota")
     print("-" * 40)
-    # consultar_notas_com_quantidade_itens(max_results=10)
-    
+    # listar_itens_nota(12345)
+
     print("\n5. Filtrar por Parceiro")
     print("-" * 40)
     # filtrar_notas_por_parceiro(1)
-    
+
     print("\n" + "=" * 60)
-    print("Descomente os exemplos para executar")
     print("Configure as variáveis de ambiente SANKHYA_*")
     print("=" * 60)

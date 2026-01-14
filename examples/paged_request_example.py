@@ -1,390 +1,315 @@
 # -*- coding: utf-8 -*-
 """
-Exemplos de uso do PagedRequestWrapper.
+Exemplos de uso do GatewayClient com paginação.
 
-Este arquivo demonstra diferentes cenários de uso do PagedRequestWrapper
-para carregar grandes conjuntos de dados do Sankhya.
+Este arquivo demonstra diferentes cenários de consultas paginadas
+usando o GatewayClient com autenticação OAuth2.
 """
 
 from __future__ import annotations
 
-import asyncio
 import os
-from datetime import timedelta
-from typing import List
+from typing import List, Dict, Any, Callable, Optional
+
+from dotenv import load_dotenv
 
 # =============================================================================
-# Configuração
+# Configuração OAuth2
 # =============================================================================
 
-from sankhya_sdk.config import settings
+load_dotenv()
 
-# =============================================================================
-# Configuração
-# =============================================================================
-
-# Carrega variáveis de ambiente via config
-SANKHYA_HOST = settings.url
-SANKHYA_PORT = settings.port
-SANKHYA_USERNAME = settings.username
-SANKHYA_PASSWORD = settings.password
+SANKHYA_CLIENT_ID = os.getenv("SANKHYA_CLIENT_ID")
+SANKHYA_CLIENT_SECRET = os.getenv("SANKHYA_CLIENT_SECRET")
+SANKHYA_AUTH_BASE_URL = os.getenv("SANKHYA_AUTH_BASE_URL", "https://api.sankhya.com.br")
+SANKHYA_X_TOKEN = os.getenv("SANKHYA_TOKEN")
 
 
+def _create_client():
+    """Cria e retorna um GatewayClient autenticado via OAuth2."""
+    from sankhya_sdk.auth.oauth_client import OAuthClient
+    from sankhya_sdk.http import SankhyaSession, GatewayClient
+
+    oauth = OAuthClient(base_url=SANKHYA_AUTH_BASE_URL, token=SANKHYA_X_TOKEN)
+    oauth.authenticate(client_id=SANKHYA_CLIENT_ID, client_secret=SANKHYA_CLIENT_SECRET)
+
+    session = SankhyaSession(oauth_client=oauth, base_url=SANKHYA_AUTH_BASE_URL)
+    return GatewayClient(session)
+
+
+def _extract_entities(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extrai lista de entidades da resposta do Gateway."""
+    from sankhya_sdk.http import GatewayClient
+
+    return GatewayClient.extract_records(response)
+
+
 # =============================================================================
-# Exemplo 1: Uso Básico Síncrono
+# Exemplo 1: Uso Básico - Carregar Todos os Parceiros
 # =============================================================================
+
 
 def exemplo_basico():
     """
-    Exemplo básico de uso do PagedRequestWrapper.
-    
-    Carrega parceiros de forma paginada e imprime seus nomes.
+    Exemplo básico de carregamento de dados.
+
+    Carrega parceiros e imprime seus nomes.
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, Field
+    client = _create_client()
+
+    print("📋 Carregando parceiros...")
+
+    response = client.load_records(
+        entity="Parceiro", fields=["CODPARC", "NOMEPARC", "ATIVO"], criteria="ATIVO = 'S'"
     )
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    
-    # Cria contexto autenticado
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
+
+    entities = _extract_entities(response)
+
+    count = 0
+    for record in entities[:100]:  # Limita a 100
+        count += 1
+        codigo = record.get("CODPARC", "-")
+        nome = record.get("NOMEPARC", "-")
+        print(f"  {count}. [{codigo}] {nome}")
+
+    print(f"\n✅ Total carregado: {count} parceiros")
+
+
+# =============================================================================
+# Exemplo 2: Carregamento com Processamento em Lote
+# =============================================================================
+
+
+def exemplo_processamento_lote():
+    """
+    Exemplo de processamento de dados em lotes.
+
+    Carrega produtos e processa em lotes de 50.
+    """
+    client = _create_client()
+
+    print("📦 Carregando produtos em lotes...")
+
+    response = client.load_records(
+        entity="Produto",
+        fields=["CODPROD", "DESCRPROD", "REFERENCIA", "ATIVO"],
+        criteria="ATIVO = 'S'",
     )
-    
-    try:
-        # Configura requisição
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="Parceiro",
-                include_presentation=True,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="CODPARC"),
-                        Field(name="NOMEPARC")
-                    ]
-                )
-            )
-        )
-        
-        print("Carregando parceiros...")
-        count = 0
-        
-        # Itera sobre resultados paginados
-        for partner in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=object,  # Substituir por sua entidade
-            token=ctx.token,
-            timeout=timedelta(minutes=5),
-            max_results=100,
-        ):
-            count += 1
-            # print(f"Parceiro: {partner}")
-        
-        print(f"Total carregado: {count} parceiros")
-        
-    finally:
-        ctx.dispose()
+
+    entities = _extract_entities(response)
+
+    # Processa em lotes de 50
+    batch_size = 50
+    total_processado = 0
+
+    for i in range(0, len(entities), batch_size):
+        batch = entities[i : i + batch_size]
+
+        print(f"\n🔄 Processando lote {i // batch_size + 1} ({len(batch)} itens)...")
+
+        for record in batch:
+            # Simula processamento
+            total_processado += 1
+
+        print(f"✅ Lote processado! Total: {total_processado}")
+
+        if total_processado >= 200:  # Limita para exemplo
+            break
+
+    print(f"\n📊 Total processado: {total_processado} produtos")
 
 
 # =============================================================================
-# Exemplo 2: Com Callbacks de Progresso
+# Exemplo 3: Carregamento com Callback de Progresso
 # =============================================================================
 
-def exemplo_com_callbacks():
+
+def exemplo_com_callback():
     """
-    Exemplo com callbacks para monitorar progresso.
-    
-    Demonstra como usar callbacks para acompanhar o carregamento
-    de páginas em tempo real.
+    Exemplo com callback para monitorar progresso.
+
+    Demonstra como usar callbacks para acompanhar o carregamento.
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    from sankhya_sdk.models.service.service_request import ServiceRequest
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    from sankhya_sdk.value_objects import PagedRequestEventArgs
-    
-    def on_page_loaded(args: PagedRequestEventArgs):
-        """Callback quando página é carregada com sucesso."""
-        progress = args.progress_percentage or 0
-        print(
-            f"📄 Página {args.current_page}: "
-            f"{args.quantity_loaded} itens carregados "
-            f"({progress:.1f}%)"
-        )
-    
-    def on_page_error(args: PagedRequestEventArgs):
-        """Callback quando ocorre erro no carregamento."""
-        print(
-            f"❌ Erro na página {args.current_page}: "
-            f"{args.exception}"
-        )
-    
-    def on_page_processed(args: PagedRequestEventArgs):
-        """Callback quando página é processada."""
-        print(
-            f"✅ Página {args.current_page} processada. "
-            f"Total: {args.total_loaded}"
-        )
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
+
+    def on_progress(current: int, total: int, item: Dict[str, Any]):
+        """Callback de progresso."""
+        progress = (current / total * 100) if total > 0 else 0
+        nome = item.get("NOMEPARC", "-")[:30]
+        print(f"  [{progress:5.1f}%] {current}/{total} - {nome}")
+
+    client = _create_client()
+
+    print("📋 Carregando com monitoramento de progresso...")
+
+    response = client.load_records(
+        entity="Parceiro",
+        fields=["CODPARC", "NOMEPARC", "CGC_CPF", "ATIVO"],
+        criteria="ATIVO = 'S'",
     )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        
-        print("Iniciando carregamento com callbacks...\n")
-        
-        for item in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=object,
-            token=ctx.token,
-            timeout=timedelta(minutes=10),
-            on_page_loaded=on_page_loaded,
-            on_page_error=on_page_error,
-            on_page_processed=on_page_processed,
-        ):
-            pass  # Processa item
-        
-        print("\nCarregamento concluído!")
-        
-    finally:
-        ctx.dispose()
+
+    entities = _extract_entities(response)
+    total = min(len(entities), 50)  # Limita a 50 para exemplo
+
+    for i, record in enumerate(entities[:total], 1):
+        on_progress(i, total, record)
+
+    print(f"\n✅ Carregamento concluído: {total} itens")
 
 
 # =============================================================================
-# Exemplo 3: Processamento On-Demand
+# Exemplo 4: Múltiplas Consultas Paralelas
 # =============================================================================
 
-def exemplo_processamento_on_demand():
+
+def exemplo_multiplas_consultas():
     """
-    Exemplo com processamento on-demand de lotes.
-    
-    Demonstra como usar o callback process_data para enriquecer
-    dados antes de retorná-los.
+    Exemplo de múltiplas consultas em sequência.
+
+    Demonstra como fazer várias consultas usando o mesmo cliente.
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    from sankhya_sdk.models.service.service_request import ServiceRequest
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    
-    def enrich_batch(items: List):
-        """
-        Enriquece lote de itens com informações adicionais.
-        
-        Este callback é chamado para cada lote de ~50 itens.
-        """
-        print(f"🔄 Processando lote de {len(items)} itens...")
-        
-        for item in items:
-            # Simula enriquecimento de dados
-            # item.extra_info = fetch_external_data(item.code)
-            pass
-        
-        print(f"✅ Lote processado!")
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
+    client = _create_client()
+
+    print("🔄 Executando múltiplas consultas...")
+
+    # Consulta 1: Parceiros
+    print("\n📋 Consulta 1: Parceiros ativos")
+    response = client.load_records(
+        entity="Parceiro", fields=["CODPARC", "NOMEPARC"], criteria="ATIVO = 'S' AND CLIENTE = 'S'"
     )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        
-        print("Carregando com processamento on-demand...\n")
-        
-        for item in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=object,
-            token=ctx.token,
-            timeout=timedelta(minutes=5),
-            process_data=enrich_batch,
-            max_results=200,
-        ):
-            # Item já foi enriquecido pelo callback
-            pass
-        
-        print("\nProcessamento concluído!")
-        
-    finally:
-        ctx.dispose()
+    parceiros = _extract_entities(response)
+    print(f"   Encontrados: {len(parceiros)} parceiros")
 
-
-# =============================================================================
-# Exemplo 4: Versão Assíncrona
-# =============================================================================
-
-async def exemplo_async():
-    """
-    Exemplo de uso assíncrono do PagedRequestWrapper.
-    
-    Demonstra como usar async for para processar resultados
-    de forma assíncrona.
-    """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    from sankhya_sdk.models.service.service_request import ServiceRequest
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
+    # Consulta 2: Produtos
+    print("\n📦 Consulta 2: Produtos ativos")
+    response = client.load_records(
+        entity="Produto", fields=["CODPROD", "DESCRPROD"], criteria="ATIVO = 'S'"
     )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        
-        print("Carregando de forma assíncrona...\n")
-        count = 0
-        
-        async for item in PagedRequestWrapper.get_paged_results_async(
-            request=request,
-            entity_type=object,
-            token=ctx.token,
-            timeout=timedelta(minutes=5),
-            max_results=100,
-        ):
-            count += 1
-            # Simula processamento assíncrono
-            await asyncio.sleep(0.01)
-        
-        print(f"\nTotal carregado: {count} itens")
-        
-    finally:
-        ctx.dispose()
+    produtos = _extract_entities(response)
+    print(f"   Encontrados: {len(produtos)} produtos")
 
-
-# =============================================================================
-# Exemplo 5: Processamento Assíncrono com Callback
-# =============================================================================
-
-async def exemplo_async_com_processamento():
-    """
-    Exemplo de processamento assíncrono com callback.
-    
-    Demonstra como processar lotes de forma assíncrona usando
-    o callback process_data.
-    """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    from sankhya_sdk.models.service.service_request import ServiceRequest
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    
-    async def process_batch_async(items: List):
-        """Processa lote de forma assíncrona."""
-        print(f"🔄 Processando {len(items)} itens de forma assíncrona...")
-        
-        # Simula múltiplas operações assíncronas
-        tasks = [asyncio.sleep(0.01) for _ in items]
-        await asyncio.gather(*tasks)
-        
-        print(f"✅ Lote processado!")
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
+    # Consulta 3: Notas recentes
+    print("\n📄 Consulta 3: Notas dos últimos 30 dias")
+    response = client.load_records(
+        entity="CabecalhoNota",
+        fields=["NUNOTA", "NUMNOTA", "VLRNOTA"],
+        criteria="DTNEG >= SYSDATE - 30",
     )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        
-        print("Carregando com processamento assíncrono...\n")
-        
-        async for item in PagedRequestWrapper.get_paged_results_async(
-            request=request,
-            entity_type=object,
-            token=ctx.token,
-            timeout=timedelta(minutes=5),
-            process_data=process_batch_async,
-            max_results=200,
-        ):
-            pass
-        
-        print("\nProcessamento concluído!")
-        
-    finally:
-        ctx.dispose()
+    notas = _extract_entities(response)
+    print(f"   Encontradas: {len(notas)} notas")
+
+    print("\n📊 Resumo:")
+    print(f"   Parceiros: {len(parceiros)}")
+    print(f"   Produtos:  {len(produtos)}")
+    print(f"   Notas:     {len(notas)}")
+
+
+# =============================================================================
+# Exemplo 5: Filtros Avançados
+# =============================================================================
+
+
+def exemplo_filtros_avancados():
+    """
+    Exemplo com filtros SQL avançados.
+
+    Demonstra uso de LIKE, IN, BETWEEN e funções SQL.
+    """
+    client = _create_client()
+
+    print("🔍 Exemplos de filtros avançados...")
+
+    # Filtro LIKE
+    print("\n1. Filtro LIKE (nome contém 'EMPRESA'):")
+    response = client.load_records(
+        entity="Parceiro",
+        fields=["CODPARC", "NOMEPARC"],
+        criteria="UPPER(NOMEPARC) LIKE '%EMPRESA%'",
+    )
+    entities = _extract_entities(response)
+    for r in entities[:5]:
+        print(f"   [{r.get('CODPARC')}] {r.get('NOMEPARC')}")
+
+    # Filtro IN
+    print("\n2. Filtro IN (tipos específicos):")
+    response = client.load_records(
+        entity="Parceiro",
+        fields=["CODPARC", "NOMEPARC", "TIPPESSOA"],
+        criteria="TIPPESSOA IN ('J', 'F') AND ATIVO = 'S'",
+    )
+    entities = _extract_entities(response)
+    for r in entities[:5]:
+        tipo = "Jurídica" if r.get("TIPPESSOA") == "J" else "Física"
+        print(f"   [{r.get('CODPARC')}] {r.get('NOMEPARC')} ({tipo})")
+
+    # Filtro com função de data
+    print("\n3. Filtro com data (últimos 7 dias):")
+    response = client.load_records(
+        entity="CabecalhoNota",
+        fields=["NUNOTA", "NUMNOTA", "DTNEG", "VLRNOTA"],
+        criteria="DTNEG >= SYSDATE - 7",
+    )
+    entities = _extract_entities(response)
+    for r in entities[:5]:
+        valor = float(r.get("VLRNOTA", 0) or 0)
+        print(f"   NUNOTA:{r.get('NUNOTA')} | {r.get('DTNEG')} | R$ {valor:.2f}")
+
+    print("\n✅ Exemplos concluídos!")
 
 
 # =============================================================================
 # Exemplo 6: Tratamento de Erros
 # =============================================================================
 
+
 def exemplo_tratamento_erros():
     """
     Exemplo de tratamento robusto de erros.
-    
-    Demonstra como tratar erros de forma adequada durante
-    o carregamento paginado.
+
+    Demonstra como tratar erros de forma adequada.
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    from sankhya_sdk.models.service.service_request import ServiceRequest
-    from sankhya_sdk.request_wrappers import (
-        PagedRequestWrapper,
-        PagedRequestException,
+    from sankhya_sdk.exceptions import (
+        SankhyaHttpError,
+        SankhyaAuthError,
+        SankhyaNotFoundError,
     )
-    from sankhya_sdk.value_objects import PagedRequestEventArgs
-    
-    errors = []
-    
-    def on_error(args: PagedRequestEventArgs):
-        """Registra erros para análise posterior."""
-        errors.append({
-            "page": args.current_page,
-            "error": str(args.exception),
-        })
-        print(f"⚠️ Erro registrado na página {args.current_page}")
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
+    from sankhya_sdk.auth import AuthError, AuthNetworkError
+
+    print("🔧 Exemplo de tratamento de erros...")
+
     try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        
-        print("Carregando com tratamento de erros...\n")
-        
-        try:
-            for item in PagedRequestWrapper.get_paged_results(
-                request=request,
-                entity_type=object,
-                token=ctx.token,
-                timeout=timedelta(minutes=5),
-                on_page_error=on_error,
-            ):
-                pass
-                
-        except PagedRequestException as e:
-            print(f"\n❌ Erro fatal na página {e.page}: {e}")
-            if e.inner_exception:
-                print(f"   Causa: {e.inner_exception}")
-        
-        if errors:
-            print(f"\n⚠️ {len(errors)} erros registrados durante o carregamento")
-            for err in errors:
-                print(f"   - Página {err['page']}: {err['error']}")
-        
-    finally:
-        ctx.dispose()
+        client = _create_client()
+
+        # Tenta carregar uma entidade
+        response = client.load_records(
+            entity="Parceiro", fields=["CODPARC", "NOMEPARC"], criteria="ATIVO = 'S'"
+        )
+
+        entities = _extract_entities(response)
+        print(f"✅ Carregados: {len(entities)} registros")
+
+    except AuthError as e:
+        print(f"❌ Erro de autenticação: {e.message}")
+        print("   Verifique CLIENT_ID, CLIENT_SECRET e X-TOKEN")
+
+    except AuthNetworkError as e:
+        print(f"❌ Erro de rede na autenticação: {e.message}")
+        print("   Verifique sua conexão com a internet")
+
+    except SankhyaAuthError:
+        print("❌ Token expirado ou inválido")
+        print("   O SDK deveria renovar automaticamente...")
+
+    except SankhyaNotFoundError:
+        print("❌ Entidade não encontrada")
+        print("   Verifique o nome da entidade")
+
+    except SankhyaHttpError as e:
+        print(f"❌ Erro HTTP {e.status_code}: {e.message}")
+
+    except Exception as e:
+        print(f"❌ Erro inesperado: {e}")
+
+    print("\n✅ Tratamento de erros demonstrado!")
 
 
 # =============================================================================
@@ -393,34 +318,33 @@ def exemplo_tratamento_erros():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Exemplos de PagedRequestWrapper")
+    print("Exemplos de Consultas Paginadas - JSON Gateway")
     print("=" * 60)
-    
+
     print("\n1. Exemplo Básico")
     print("-" * 40)
-    # exemplo_basico()
-    
-    print("\n2. Exemplo com Callbacks")
+    exemplo_basico()
+
+    print("\n2. Processamento em Lote")
     print("-" * 40)
-    # exemplo_com_callbacks()
-    
-    print("\n3. Exemplo Processamento On-Demand")
+    # exemplo_processamento_lote()
+
+    print("\n3. Com Callback de Progresso")
     print("-" * 40)
-    # exemplo_processamento_on_demand()
-    
-    print("\n4. Exemplo Assíncrono")
+    # exemplo_com_callback()
+
+    print("\n4. Múltiplas Consultas")
     print("-" * 40)
-    # asyncio.run(exemplo_async())
-    
-    print("\n5. Exemplo Assíncrono com Processamento")
+    # exemplo_multiplas_consultas()
+
+    print("\n5. Filtros Avançados")
     print("-" * 40)
-    # asyncio.run(exemplo_async_com_processamento())
-    
-    print("\n6. Exemplo Tratamento de Erros")
+    # exemplo_filtros_avancados()
+
+    print("\n6. Tratamento de Erros")
     print("-" * 40)
     # exemplo_tratamento_erros()
-    
+
     print("\n" + "=" * 60)
-    print("Descomente os exemplos para executar")
     print("Configure as variáveis de ambiente SANKHYA_*")
     print("=" * 60)

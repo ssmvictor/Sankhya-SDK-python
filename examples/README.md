@@ -1,33 +1,47 @@
-# 📚 Exemplos do Sankhya SDK Python
+# Exemplos do Sankhya SDK Python
 
-Exemplos práticos de uso do SDK para integração com o ERP Sankhya.
+Exemplos práticos de uso do SDK para integração com o ERP Sankhya via **JSON Gateway** com autenticação **OAuth2**.
 
 ---
 
-## 🚀 Configuração
+## Configuracao
 
-### 1. Variáveis de Ambiente
+### 1. Variaveis de Ambiente (OAuth2)
 
-Configure as credenciais antes de executar:
+Configure as credenciais OAuth2 antes de executar:
 
 ```bash
 # Windows (PowerShell)
-$env:SANKHYA_HOST = "http://seu-servidor-sankhya"
-$env:SANKHYA_PORT = "8180"
-$env:SANKHYA_USERNAME = "seu_usuario"
-$env:SANKHYA_PASSWORD = "sua_senha"
+$env:SANKHYA_CLIENT_ID = "seu_client_id"
+$env:SANKHYA_CLIENT_SECRET = "seu_client_secret"
+$env:SANKHYA_AUTH_BASE_URL = "https://api.sankhya.com.br"
+$env:SANKHYA_TOKEN = "seu_x_token"  # Token de Integracao
+
+# Linux/Mac
+export SANKHYA_CLIENT_ID="seu_client_id"
+export SANKHYA_CLIENT_SECRET="seu_client_secret"
+export SANKHYA_AUTH_BASE_URL="https://api.sankhya.com.br"
+export SANKHYA_TOKEN="seu_x_token"
 ```
 
 Ou crie um arquivo `.env` na raiz do projeto:
 
 ```env
-SANKHYA_HOST=http://seu-servidor-sankhya
-SANKHYA_PORT=8180
-SANKHYA_USERNAME=seu_usuario
-SANKHYA_PASSWORD=sua_senha
+SANKHYA_CLIENT_ID=seu_client_id
+SANKHYA_CLIENT_SECRET=seu_client_secret
+SANKHYA_AUTH_BASE_URL=https://api.sankhya.com.br
+SANKHYA_TOKEN=seu_x_token
 ```
 
-### 2. Instalação
+### 2. Obtendo Credenciais
+
+| Credencial | Onde Obter |
+|------------|------------|
+| `CLIENT_ID` | [Portal do Desenvolvedor](https://areadev.sankhya.com.br/) > Minhas Solucoes |
+| `CLIENT_SECRET` | [Portal do Desenvolvedor](https://areadev.sankhya.com.br/) > Minhas Solucoes |
+| `X-TOKEN` | Sankhya OM > Configuracoes Gateway > Chave do Cliente |
+
+### 3. Instalacao
 
 ```bash
 pip install -e ".[dev]"
@@ -35,78 +49,105 @@ pip install -e ".[dev]"
 
 ---
 
-## 📂 Arquivos de Exemplo
+## Arquivos de Exemplo
 
-| Arquivo | Entidade | Tabela | Descrição |
+| Arquivo | Entidade | Tabela | Descricao |
 |---------|----------|--------|-----------|
+| `oauth_example.py` | - | - | Autenticacao OAuth2 completa |
 | `partner_example.py` | Parceiro | TGFPAR | Clientes, fornecedores, vendedores |
-| `product_example.py` | Produto | TGFPRO | Catálogo de produtos |
+| `product_example.py` | Produto | TGFPRO | Catalogo de produtos |
 | `invoice_example.py` | Nota Fiscal | TGFCAB + TGFITE | Notas fiscais e itens |
-| `financial_example.py` | Financeiro | TGFFIN | Títulos a receber/pagar |
-| `paged_request_example.py` | - | - | Carregamento paginado |
+| `financial_example.py` | Financeiro | TGFFIN | Titulos a receber/pagar |
+| `paged_request_example.py` | - | - | Consultas paginadas e filtros |
 
 ---
 
-## 📋 Entidades
+## Padrao de Autenticacao OAuth2
 
-### Parceiro (`Partner` → TGFPAR)
+Todos os exemplos usam o mesmo padrao de autenticacao:
+
+```python
+import os
+from dotenv import load_dotenv
+from sankhya_sdk.auth import OAuthClient
+from sankhya_sdk.http import SankhyaSession, GatewayClient
+
+load_dotenv()
+
+# 1. Criar cliente OAuth
+oauth = OAuthClient(
+    base_url=os.getenv("SANKHYA_AUTH_BASE_URL"),
+    token=os.getenv("SANKHYA_TOKEN")  # X-Token
+)
+
+# 2. Autenticar
+oauth.authenticate(
+    client_id=os.getenv("SANKHYA_CLIENT_ID"),
+    client_secret=os.getenv("SANKHYA_CLIENT_SECRET")
+)
+
+# 3. Criar sessao e cliente
+session = SankhyaSession(oauth_client=oauth, base_url=os.getenv("SANKHYA_AUTH_BASE_URL"))
+client = GatewayClient(session)
+
+# 4. Fazer consultas
+response = client.load_records(
+    entity="Parceiro",
+    fields=["CODPARC", "NOMEPARC"],
+    criteria="ATIVO = 'S'"
+)
+```
+
+---
+
+## Entidades
+
+### Parceiro (`Parceiro` -> TGFPAR)
 
 Representa clientes, fornecedores, vendedores e transportadoras.
 
 **Campos Principais:**
-| Campo | Descrição |
+| Campo | Descricao |
 |-------|-----------|
-| `CODPARC` | Código do parceiro (PK) |
-| `NOMEPARC` | Nome/Razão Social |
+| `CODPARC` | Codigo do parceiro (PK) |
+| `NOMEPARC` | Nome/Razao Social |
 | `CGC_CPF` | CNPJ ou CPF |
 | `EMAIL` | E-mail |
 | `TELEFONE` | Telefone |
 | `ATIVO` | Status (S/N) |
-| `CLIENTE` | É cliente? (S/N) |
-| `FORNECEDOR` | É fornecedor? (S/N) |
-
-**Exemplos Disponíveis:**
-- Listar parceiros (paginado)
-- Buscar por código
-- Filtrar por nome (LIKE)
-- Criar/Atualizar parceiro
+| `CLIENTE` | E cliente? (S/N) |
+| `FORNECEDOR` | E fornecedor? (S/N) |
 
 ---
 
-### Produto (`Product` → TGFPRO)
+### Produto (`Produto` -> TGFPRO)
 
-Catálogo de produtos e serviços.
+Catalogo de produtos e servicos.
 
 **Campos Principais:**
-| Campo | Descrição |
+| Campo | Descricao |
 |-------|-----------|
-| `CODPROD` | Código do produto (PK) |
-| `DESCRPROD` | Descrição |
-| `REFERENCIA` | Referência/SKU |
+| `CODPROD` | Codigo do produto (PK) |
+| `DESCRPROD` | Descricao |
+| `REFERENCIA` | Referencia/SKU |
 | `NCM` | NCM fiscal |
-| `CODGRUPOPROD` | Código do grupo |
+| `CODGRUPOPROD` | Codigo do grupo |
 | `ATIVO` | Status (S/N) |
 | `UNIDADE` | Unidade de medida |
 
-**Exemplos Disponíveis:**
-- Listar produtos ativos
-- Buscar por código
-- Filtrar por NCM
-- Filtrar por grupo
-
 ---
 
-### Nota Fiscal (`InvoiceHeader` → TGFCAB)
+### Nota Fiscal (`CabecalhoNota` -> TGFCAB)
 
-Cabeçalho das notas fiscais com relacionamento aos itens.
+Cabecalho das notas fiscais.
 
 **Campos Principais:**
-| Campo | Descrição |
+| Campo | Descricao |
 |-------|-----------|
-| `NUNOTA` | Número único (PK) |
-| `NUMNOTA` | Número da nota |
-| `DTNEG` | Data negociação |
-| `CODPARC` | Código parceiro |
+| `NUNOTA` | Numero unico (PK) |
+| `NUMNOTA` | Numero da nota |
+| `DTNEG` | Data negociacao |
+| `CODPARC` | Codigo parceiro |
 | `VLRNOTA` | Valor total |
 | `STATUSNFE` | Status NF-e |
 | `TIPMOV` | Tipo movimento |
@@ -114,77 +155,53 @@ Cabeçalho das notas fiscais com relacionamento aos itens.
 **Status NF-e (`STATUSNFE`):**
 | Valor | Significado |
 |-------|-------------|
-| `'A'` | ✅ Aprovada |
-| `'D'` | ❌ Denegada |
-| `'R'` | ❌ Rejeitada |
-| `'C'` | ⛔ Cancelada |
-| `'E'` | ⏳ Em processamento |
-
-**Itens da Nota (TGFITE):**
-| Campo | Descrição |
-|-------|-----------|
-| `NUNOTA` | Número único (FK) |
-| `SEQUENCIA` | Sequência do item |
-| `CODPROD` | Código produto |
-| `QTDNEG` | Quantidade negociada |
-| `VLRUNIT` | Valor unitário |
-| `VLRTOT` | Valor total |
-
-**Exemplos Disponíveis:**
-- Listar notas fiscais
-- Buscar por NUNOTA
-- Filtrar notas aprovadas (`STATUSNFE = 'A'`)
-- **JOIN com TGFITE** - Soma de `QTDNEG` por nota
-- Filtrar por parceiro
+| `'A'` | Aprovada |
+| `'D'` | Denegada |
+| `'R'` | Rejeitada |
+| `'C'` | Cancelada |
+| `'E'` | Em processamento |
 
 ---
 
-### Financeiro (TGFFIN)
+### Financeiro (`Financeiro` -> TGFFIN)
 
-Títulos a receber e a pagar.
+Titulos a receber e a pagar.
 
 **Campos Principais:**
-| Campo | Descrição |
+| Campo | Descricao |
 |-------|-----------|
-| `NUFIN` | Número único financeiro (PK) |
-| `NUNOTA` | Número da nota (FK) |
+| `NUFIN` | Numero unico financeiro (PK) |
+| `NUNOTA` | Numero da nota (FK) |
 | `DTVENC` | Data vencimento |
 | `VLRDESDOB` | Valor desdobramento |
-| `CODPARC` | Código parceiro |
+| `CODPARC` | Codigo parceiro |
 | `RECDESP` | R=Receita, D=Despesa |
 | `DHBAIXA` | Data/hora baixa |
-| `PROVISAO` | É provisão? (S/N) |
-
-**Exemplos Disponíveis:**
-- Listar títulos financeiros
-- Títulos a receber em aberto
-- Títulos a pagar em aberto
-- Títulos vencidos
-- Títulos por parceiro
+| `PROVISAO` | E provisao? (S/N) |
 
 ---
 
-## ▶️ Como Executar
+## Como Executar
 
-### Opção 1: Execução Direta (Recomendado)
+### Opcao 1: Execucao Direta (Recomendado)
 
-Execute funções diretamente via `python -c`:
+Execute funcoes diretamente via `python -c`:
 
 ```bash
+# Autenticacao OAuth2
+python examples/oauth_example.py
+
 # Parceiros
 python -c "from examples.partner_example import listar_parceiros; listar_parceiros(10)"
 python -c "from examples.partner_example import buscar_parceiro_por_codigo; buscar_parceiro_por_codigo(1)"
-python -c "from examples.partner_example import filtrar_parceiros_por_nome; filtrar_parceiros_por_nome('EMPRESA')"
 
 # Produtos
 python -c "from examples.product_example import listar_produtos_ativos; listar_produtos_ativos(10)"
 python -c "from examples.product_example import buscar_produto_por_codigo; buscar_produto_por_codigo(1)"
-python -c "from examples.product_example import buscar_produtos_por_ncm; buscar_produtos_por_ncm('8471')"
 
 # Notas Fiscais
 python -c "from examples.invoice_example import listar_notas_fiscais; listar_notas_fiscais(10)"
 python -c "from examples.invoice_example import listar_notas_aprovadas; listar_notas_aprovadas(10)"
-python -c "from examples.invoice_example import consultar_notas_com_quantidade_itens; consultar_notas_com_quantidade_itens(10)"
 
 # Financeiro
 python -c "from examples.financial_example import listar_a_receber_em_aberto; listar_a_receber_em_aberto(10)"
@@ -192,32 +209,84 @@ python -c "from examples.financial_example import listar_a_pagar_em_aberto; list
 python -c "from examples.financial_example import listar_titulos_vencidos; listar_titulos_vencidos(10)"
 ```
 
-### Opção 2: Descomentar no arquivo
-
-1. Abra o arquivo de exemplo
-2. Descomente a função desejada (remova o `#`)
-3. Execute:
+### Opcao 2: Executar Arquivo Completo
 
 ```bash
 python examples/partner_example.py
 python examples/product_example.py
 python examples/invoice_example.py
 python examples/financial_example.py
+python examples/paged_request_example.py
 ```
 
 ---
 
-## 🔧 Serviços Utilizados
+## API Utilizada
 
-| ServiceName | Descrição | Uso |
-|-------------|-----------|-----|
-| `CRUD_SERVICE_FIND` | Consulta com entidades | Listar, buscar |
-| `CRUD_SERVICE_SAVE` | Criar/Atualizar | Salvar dados |
-| `CRUD_FIND` | Consulta SQL nativa | JOINs, agregações |
+Os exemplos usam o **JSON Gateway** via `GatewayClient`:
+
+| Metodo | Servico | Descricao |
+|--------|---------|-----------|
+| `load_records()` | `CRUDServiceProvider.loadRecords` | Consulta entidades |
+| `save_record()` | `CRUDServiceProvider.saveRecord` | Criar/Atualizar |
+| `execute_service()` | Generico | Executar servico customizado |
+
+### DTOs Disponiveis
+
+| DTO | Entidade | Campos |
+|-----|----------|--------|
+| `ParceiroDTO` | Parceiro | Completo |
+| `ParceiroListDTO` | Parceiro | Listagem |
+| `ParceiroCreateDTO` | Parceiro | Criacao |
+| `ProdutoDTO` | Produto | Completo |
+| `ProdutoListDTO` | Produto | Listagem |
+| `NotaDTO` | Nota Fiscal | Completo |
+| `MovimentoDTO` | Movimento | Completo |
 
 ---
 
-## 📖 Mais Informações
+## Renovacao Automatica de Token
 
-- [Documentação Completa](https://datavi.ia.br/docs-site-sdk/)
+O SDK renova automaticamente o token OAuth2 quando necessario:
+
+```python
+# O token e renovado automaticamente a cada requisicao se necessario
+# Voce nao precisa se preocupar com isso!
+
+for i in range(100):
+    # O SDK verifica e renova o token automaticamente
+    response = client.load_records("Parceiro", ["CODPARC", "NOMEPARC"])
+```
+
+---
+
+## Tratamento de Erros
+
+```python
+from sankhya_sdk.auth import AuthError, TokenExpiredError, AuthNetworkError
+from sankhya_sdk.exceptions import SankhyaHttpError, SankhyaAuthError
+
+try:
+    response = client.load_records("Parceiro", ["CODPARC"])
+    
+except AuthError as e:
+    print(f"Erro de autenticacao: {e.message}")
+    
+except AuthNetworkError as e:
+    print(f"Erro de rede: {e.message}")
+    
+except SankhyaAuthError:
+    print("Token expirado ou invalido")
+    
+except SankhyaHttpError as e:
+    print(f"Erro HTTP {e.status_code}")
+```
+
+---
+
+## Mais Informacoes
+
+- [Documentacao Completa](../docs/)
+- [API Reference](../docs/api-reference/)
+- [Guia de Autenticacao](../docs/getting-started/authentication.md)
 - [README Principal](../README.md)
