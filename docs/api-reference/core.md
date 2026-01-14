@@ -308,3 +308,131 @@ Deserializa resposta XML.
 ```python
 response = low_level.deserialize_response(xml_string)
 ```
+
+---
+
+## Types
+
+Tipos auxiliares utilizados internamente pelo SDK.
+
+```python
+from sankhya_sdk.core.types import SessionInfo, ServiceFile, ServiceAttribute
+```
+
+### SessionInfo
+
+Informações da sessão autenticada no Sankhya.
+
+```python
+@dataclass
+class SessionInfo:
+    session_id: str    # ID da sessão (JSESSIONID)
+    user_code: int     # Código do usuário (IDUSU)
+    username: str      # Nome de usuário para reautenticação
+    password: str      # Senha para reautenticação
+```
+
+**Exemplo:**
+
+```python
+from sankhya_sdk.core.types import SessionInfo
+
+session = SessionInfo(
+    session_id="ABC123",
+    user_code=1,
+    username="admin",
+    password="secret"
+)
+print(session.session_id)  # ABC123
+```
+
+---
+
+### ServiceFile
+
+Arquivo retornado por operações de download.
+
+```python
+@dataclass
+class ServiceFile:
+    data: bytes                   # Conteúdo do arquivo em bytes
+    content_type: str             # Tipo MIME (ex: image/jpeg)
+    file_extension: str           # Extensão sem ponto (ex: jpg)
+    filename: Optional[str]       # Nome original (opcional)
+```
+
+**Exemplo:**
+
+```python
+from sankhya_sdk.core.types import ServiceFile
+
+file = ServiceFile(
+    data=b"...",
+    content_type="image/jpeg",
+    file_extension="jpg",
+    filename="foto.jpg"
+)
+
+# Salvar em disco
+with open(file.filename, "wb") as f:
+    f.write(file.data)
+```
+
+---
+
+### ServiceAttribute
+
+Atributos de metadados de um serviço do Sankhya.
+
+```python
+@dataclass
+class ServiceAttribute:
+    is_transactional: bool = False  # Se o serviço é transacional
+    is_retriable: bool = True       # Se pode ser retentado em caso de erro
+```
+
+**Exemplo:**
+
+```python
+from sankhya_sdk.core.types import ServiceAttribute
+
+attr = ServiceAttribute(is_transactional=True, is_retriable=False)
+```
+
+| Atributo | Tipo | Padrão | Descrição |
+|----------|------|--------|-----------|
+| `is_transactional` | `bool` | `False` | Se o serviço requer transação |
+| `is_retriable` | `bool` | `True` | Se erros podem ser retentados |
+
+---
+
+## LockManager
+
+Gerenciador thread-safe de locks para sessões concorrentes.
+
+```python
+from sankhya_sdk.core import LockManager
+```
+
+### Uso
+
+```python
+from sankhya_sdk.core import LockManager
+
+# Obter lock para uma sessão
+lock = LockManager.get_lock("session_123")
+
+with lock:
+    # Operação thread-safe
+    ...
+```
+
+O `LockManager` é utilizado internamente pelo `SankhyaWrapper` para garantir que operações concorrentes em múltiplas threads não causem conflitos.
+
+---
+
+## Ver Também
+
+- [Autenticação](auth.md) - OAuthClient e TokenManager
+- [Eventos](events.md) - Sistema de eventos
+- [Gateway Client](gateway-client.md) - API JSON moderna

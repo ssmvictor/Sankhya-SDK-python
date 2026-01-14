@@ -36,6 +36,60 @@ print(f"Status: {response.status_code}")
 
 ## Sua Primeira Consulta
 
+### Abordagem Moderna: Gateway Client (Recomendada)
+
+O `GatewayClient` oferece uma interface simplificada para a API JSON:
+
+```python
+from sankhya_sdk.auth import OAuthClient
+from sankhya_sdk.http import SankhyaSession, GatewayClient
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# 1. Configurar OAuth
+oauth = OAuthClient(
+    base_url=os.getenv("SANKHYA_BASE_URL", "https://api.sankhya.com.br"),
+    token=os.getenv("SANKHYA_TOKEN")
+)
+
+# 2. Autenticar
+oauth.authenticate(
+    client_id=os.getenv("SANKHYA_CLIENT_ID"),
+    client_secret=os.getenv("SANKHYA_CLIENT_SECRET")
+)
+
+# 3. Criar sessão e cliente
+session = SankhyaSession(oauth_client=oauth)
+client = GatewayClient(session)
+
+# 4. Consultar parceiros
+result = client.load_records(
+    entity="Parceiro",
+    fields=["CODPARC", "NOMEPARC", "CGC_CPF"],
+    criteria="ATIVO = 'S' AND CLIENTE = 'S'"
+)
+
+# 5. Processar resultados
+entities = result.get("responseBody", {}).get("entities", {})
+records = entities.get("entity", [])
+
+# Garantir lista
+if isinstance(records, dict):
+    records = [records]
+
+for record in records:
+    codigo = record.get("CODPARC", {}).get("$")
+    nome = record.get("NOMEPARC", {}).get("$")
+    print(f"{codigo}: {nome}")
+```
+
+!!! tip "Recomendação"
+    Para novos projetos, use o `GatewayClient` com DTOs. Esta é a abordagem mais moderna e oferece melhor performance.
+
+### Abordagem Clássica: SankhyaContext (Legado)
+
 Vamos buscar dados de parceiros (clientes/fornecedores):
 
 ```python
