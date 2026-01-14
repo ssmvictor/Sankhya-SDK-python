@@ -83,15 +83,22 @@ class SankhyaSession:
         return self.request("DELETE", url, **kwargs)
 
     def _ensure_auth_header(self, request_kwargs: Dict[str, Any]):
-        """Injects access token into headers."""
+        """
+        Injects access token into headers with automatic refresh.
+        
+        Uses get_valid_token() which automatically refreshes expired tokens,
+        preventing most 401 errors proactively.
+        """
         headers = request_kwargs.get("headers", {})
         if "Authorization" not in headers:
             try:
-                token = self.token_manager.get_token()
+                # Use get_valid_token() for automatic refresh
+                token = self.oauth_client.get_valid_token()
                 headers["Authorization"] = f"Bearer {token}"
-            except TokenExpiredError:
-                # Proceeding without token might act as anonymous or fail later
-                pass
+            except (AuthError, AuthNetworkError) as e:
+                # Log warning but allow request to proceed
+                # (will likely fail with 401, triggering retry logic)
+                logger.warning(f"Failed to obtain valid token: {e}")
         
         request_kwargs["headers"] = headers
 

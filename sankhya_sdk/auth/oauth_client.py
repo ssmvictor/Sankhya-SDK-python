@@ -68,6 +68,41 @@ class OAuthClient:
         except requests.RequestException as e:
             raise AuthNetworkError(f"Network error during authentication: {str(e)}")
 
+    def get_valid_token(self) -> str:
+        """
+        Returns a valid access token, automatically renewing if expired.
+        
+        This method implements automatic token refresh: if the current token
+        is expired or close to expiring (within 60s buffer), it will automatically
+        refresh the token before returning it.
+        
+        This is the recommended method to use for getting tokens, as it handles
+        refresh logic transparently.
+        
+        Returns:
+            str: A valid access token ready for use.
+            
+        Raises:
+            AuthError: If token refresh fails.
+            AuthNetworkError: If network error occurs during refresh.
+            
+        Example:
+            >>> token = oauth_client.get_valid_token()
+            >>> # Use token in API requests - it's guaranteed to be valid
+        """
+        try:
+            # Check if current token is still valid
+            if not self.token_manager.is_expired():
+                return self.token_manager.get_token()
+        except TokenExpiredError:
+            pass  # Token expired, will refresh below
+        
+        # Token is expired or close to expiring, refresh automatically
+        logger.info("🔄 Token expired or near expiry, refreshing automatically...")
+        new_token = self.refresh_token()
+        logger.info("✅ Token refreshed successfully")
+        return new_token
+
     def refresh_token(self) -> str:
         refresh_token = self.token_manager.get_refresh_token()
         

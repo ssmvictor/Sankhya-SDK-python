@@ -46,6 +46,36 @@ pip install sankhya-sdk-python
 
 ## Exemplo Rápido
 
+### Abordagem Moderna (Recomendada)
+
+```python
+from sankhya_sdk.auth import OAuthClient
+from sankhya_sdk.http import SankhyaSession, GatewayClient
+from sankhya_sdk.models.dtos import ParceiroDTO
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# Setup OAuth e Cliente Gateway
+oauth = OAuthClient(base_url=os.getenv("SANKHYA_BASE_URL"))
+oauth.authenticate(
+    client_id=os.getenv("SANKHYA_CLIENT_ID"),
+    client_secret=os.getenv("SANKHYA_CLIENT_SECRET")
+)
+session = SankhyaSession(oauth_client=oauth)
+client = GatewayClient(session)
+
+# Consultar parceiros
+result = client.load_records(
+    entity="Parceiro",
+    fields=["CODPARC", "NOMEPARC", "CGC_CPF"],
+    criteria="ATIVO = 'S'"
+)
+```
+
+### Abordagem Clássica (Legado)
+
 ```python
 from sankhya_sdk import SankhyaContext
 from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
@@ -65,13 +95,15 @@ with SankhyaContext.from_settings() as ctx:
 ## Recursos Principais
 
 | Recurso | Descrição |
-|---------|-----------|
+|---------|-----------|\
 | **Operações CRUD** | Find, Insert, Update, Remove com entidades tipadas |
+| **JSON Gateway** | Cliente moderno para API Gateway com DTOs Pydantic |
 | **Paginação** | Consultas paginadas para grandes volumes de dados |
 | **Sessões** | Gerenciamento de múltiplas sessões e multi-threading |
 | **Async/Await** | Suporte completo a operações assíncronas |
 | **Serviços Específicos** | NF-e, faturamento, arquivos e imagens |
 | **Validações** | Sistema de validação de entidades |
+| **Adapters** | Compatibilidade com integrações XML legadas |
 
 ## Compatibilidade
 

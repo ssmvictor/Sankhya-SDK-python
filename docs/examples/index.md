@@ -6,6 +6,14 @@ Exemplos práticos de uso do Sankhya SDK Python.
 
 <div class="grid cards" markdown>
 
+-   :material-api:{ .lg .middle } __Gateway Client__
+
+    ---
+
+    API JSON moderna com GatewayClient e DTOs.
+
+    [:octicons-arrow-right-24: Gateway](gateway-usage.md)
+
 -   :material-database:{ .lg .middle } __Operações CRUD__
 
     ---
@@ -70,7 +78,8 @@ Exemplos práticos de uso do Sankhya SDK Python.
 
 | Exemplo | Descrição |
 |---------|-----------|
-| [Hello World](crud-operations.md#exemplo-basico) | Primeira conexão |
+| [Gateway Client](gateway-usage.md#setup-inicial) | Setup e primeira consulta |
+| [Hello World](crud-operations.md#exemplo-basico) | Primeira conexão (legado) |
 | [Find simples](crud-operations.md#find) | Busca de entidades |
 | [Insert básico](crud-operations.md#insert) | Criação de entidades |
 
@@ -78,6 +87,7 @@ Exemplos práticos de uso do Sankhya SDK Python.
 
 | Exemplo | Descrição |
 |---------|-----------|
+| [DTOs e Validação](gateway-usage.md#usando-dtos) | Validação com Pydantic |
 | [Paginação](paged-requests.md) | Grandes volumes |
 | [Filtros complexos](advanced-queries.md#filtros-compostos) | FilterExpression |
 | [Tratamento de erros](error-handling.md) | Exceções e retry |
@@ -86,6 +96,7 @@ Exemplos práticos de uso do Sankhya SDK Python.
 
 | Exemplo | Descrição |
 |---------|-----------|
+| [Migração XML → JSON](gateway-usage.md#migracao-de-codigo-legado) | Converter código legado |
 | [Multi-threading](session-management.md#multi-threading) | Processamento paralelo |
 | [Async/await](session-management.md#asyncawait) | Operações assíncronas |
 | [Entidades customizadas](custom-entities.md) | Tabelas personalizadas |
@@ -96,6 +107,7 @@ Todos os exemplos estão disponíveis como arquivos Python executáveis:
 
 ```
 examples/
+├── partner_example.py           # Gateway Client com parceiros
 ├── crud_operations_example.py
 ├── paged_request_example.py
 ├── session_management_example.py

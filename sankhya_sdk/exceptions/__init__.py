@@ -60,6 +60,15 @@ from .simple import (
     ServiceRequestInvalidCredentialsException,
     TooInnerLevelsException,
 )
+from .http import (
+    SankhyaHttpError,
+    SankhyaAuthError,
+    SankhyaForbiddenError,
+    SankhyaNotFoundError,
+    SankhyaClientError,
+    SankhyaServerError,
+    raise_for_status,
+)
 
 __all__ = [
     "IXmlServiceException",
@@ -111,4 +120,11 @@ __all__ = [
     "ServiceRequestInvalidAuthorizationException",
     "ServiceRequestInvalidCredentialsException",
     "TooInnerLevelsException",
+    "SankhyaHttpError",
+    "SankhyaAuthError",
+    "SankhyaForbiddenError",
+    "SankhyaNotFoundError",
+    "SankhyaClientError",
+    "SankhyaServerError",
+    "raise_for_status",
 ]

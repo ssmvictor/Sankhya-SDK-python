@@ -1,11 +1,11 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
-Exemplo de uso do SDK Sankhya para a entidade Product (Produto).
+Exemplo de uso do SDK Sankhya para a entidade Produto (JSON Gateway).
 
-Demonstra operações de consulta:
+Demonstra operações de consulta usando GatewayClient:
 - Listar produtos ativos
 - Buscar produto por código
-- Filtrar por grupo/marca
+- Filtrar por NCM/grupo
 
 Tabela Sankhya: TGFPRO
 """
@@ -13,290 +13,237 @@ Tabela Sankhya: TGFPRO
 from __future__ import annotations
 
 import os
-from datetime import timedelta
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
-from sankhya_sdk.config import settings
+from dotenv import load_dotenv
 
 # =============================================================================
 # Configuração
 # =============================================================================
 
-SANKHYA_HOST = settings.url
-SANKHYA_PORT = settings.port
-SANKHYA_USERNAME = settings.username
-SANKHYA_PASSWORD = settings.password
+load_dotenv()
+
+SANKHYA_CLIENT_ID = os.getenv("SANKHYA_CLIENT_ID")
+SANKHYA_CLIENT_SECRET = os.getenv("SANKHYA_CLIENT_SECRET")
+SANKHYA_AUTH_BASE_URL = os.getenv("SANKHYA_AUTH_BASE_URL", "https://api.sankhya.com.br")
+# X-Token: usar APPKEY (obtido no portal do desenvolvedor)
+SANKHYA_X_TOKEN = os.getenv("SANKHYA_APPKEY")  # AppKey é usado como X-Token
+
+
+def _create_client():
+    """Cria e retorna um GatewayClient autenticado."""
+    from sankhya_sdk.auth.oauth_client import OAuthClient
+    from sankhya_sdk.http import SankhyaSession, GatewayClient
+
+    oauth = OAuthClient(
+        base_url=SANKHYA_AUTH_BASE_URL,
+        token=SANKHYA_X_TOKEN,  # None se não configurado
+    )
+    oauth.authenticate(client_id=SANKHYA_CLIENT_ID, client_secret=SANKHYA_CLIENT_SECRET)
+
+    session = SankhyaSession(oauth_client=oauth, base_url=SANKHYA_AUTH_BASE_URL)
+    return GatewayClient(session)
+
+
+def _extract_entities(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extrai lista de entidades da resposta do Gateway."""
+    from sankhya_sdk.http import GatewayClient
+
+    return GatewayClient.extract_records(response)
 
 
 # =============================================================================
 # Exemplo 1: Listar Produtos Ativos
 # =============================================================================
 
-def listar_produtos_ativos(max_results: int = 100):
+
+def listar_produtos_ativos(max_results: int = 100) -> List[Dict[str, Any]]:
     """
-    Lista produtos ativos de forma paginada.
-    
-    Filtra apenas produtos com ATIVO = 'S'.
+    Lista produtos ativos.
+
+    Args:
+        max_results: Limite máximo de resultados
+
+    Returns:
+        Lista de dicionários com dados dos produtos
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field
+    from sankhya_sdk.models.dtos import ProdutoListDTO
+
+    client = _create_client()
+
+    response = client.load_records(
+        entity="Produto",
+        fields=["CODPROD", "DESCRPROD", "REFERENCIA", "NCM", "ATIVO"],
+        criteria="ATIVO = 'S'",
     )
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    from sankhya_sdk.models.transport.product import Product
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="Produto",
-                include_presentation=True,
-                parallel_loader=False,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="CODPROD"),       # Código do produto
-                        Field(name="DESCRPROD"),     # Descrição
-                        Field(name="REFERENCIA"),    # Referência/SKU
-                        Field(name="NCM"),           # NCM fiscal
-                        Field(name="CODGRUPOPROD"),  # Código do grupo
-                        Field(name="CODMARCA"),      # Código da marca
-                        Field(name="ATIVO"),         # Status ativo
-                    ]
-                ),
-                criteria=LiteralCriteria(
-                    expression="ATIVO = 'S'"
-                )
-            )
-        )
-        
-        print("📦 Listando produtos ativos...")
-        count = 0
-        
-        for product in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=Product,
-            token=ctx.token,
-            timeout=timedelta(minutes=5),
-            max_results=max_results,
-        ):
-            count += 1
-            ref = product.reference or "-"
-            print(f"  {count}. [{product.code}] {product.description} (Ref: {ref})")
-        
-        print(f"\n✅ Total: {count} produtos ativos")
-        
-    finally:
-        ctx.dispose()
+
+    print("📦 Listando produtos ativos...")
+
+    entities = _extract_entities(response)
+    produtos = []
+
+    for i, record in enumerate(entities[:max_results], 1):
+        try:
+            produto = ProdutoListDTO.model_validate(record)
+            ref = produto.referencia or "-"
+            print(f"  {i}. [{produto.codigo}] {produto.descricao} (Ref: {ref})")
+            produtos.append(produto.model_dump())
+        except Exception:
+            codigo = record.get("CODPROD", "?")
+            desc = record.get("DESCRPROD", "?")
+            print(f"  {i}. [{codigo}] {desc}")
+
+    print(f"\n✅ Total: {len(produtos)} produtos ativos")
+    return produtos
 
 
 # =============================================================================
 # Exemplo 2: Buscar Produto por Código
 # =============================================================================
 
-def buscar_produto_por_codigo(codigo: int) -> Optional[dict]:
+
+def buscar_produto_por_codigo(codigo: int) -> Optional[Dict[str, Any]]:
     """
     Busca um produto específico pelo código (CODPROD).
-    
-    Retorna os dados do produto ou None se não encontrado.
+
+    Args:
+        codigo: Código do produto
+
+    Returns:
+        Dicionário com dados do produto ou None se não encontrado
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
+    from sankhya_sdk.models.dtos import ProdutoDTO
+
+    client = _create_client()
+
+    response = client.load_records(
+        entity="Produto",
+        fields=[
+            "CODPROD",
+            "DESCRPROD",
+            "REFERENCIA",
+            "NCM",
+            "CODGRUPOPROD",
+            "CODMARCA",
+            "UNIDADE",
+            "PESOBRUTO",
+            "PESOLIQ",
+            "ATIVO",
+        ],
+        criteria=f"CODPROD = {codigo}",
     )
-    from sankhya_sdk.enums.parameter_type import ParameterType
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="Produto",
-                include_presentation=True,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="CODPROD"), Field(name="DESCRPROD"), Field(name="REFERENCIA"), Field(name="NCM"),
-                        Field(name="CODGRUPOPROD"), Field(name="CODMARCA"), Field(name="ATIVO"),
-                        Field(name="PESOBRUTO"), Field(name="PESOLIQ"), Field(name="UNIDADE")
-                    ]
-                ),
-                criteria=LiteralCriteria(
-                    expression="CODPROD = ?",
-                    parameters=[
-                        Parameter(type=ParameterType.INTEGER, value=str(codigo))
-                    ]
-                )
-            )
-        )
-        
-        print(f"🔍 Buscando produto código {codigo}...")
-        
-        response = ctx.service_invoker(request)
-        
-        if response.is_success and response.entities:
-            product = response.entities[0]
-            print(f"✅ Encontrado: {product}")
-            return product
-        else:
-            print(f"❌ Produto {codigo} não encontrado")
-            return None
-            
-    finally:
-        ctx.dispose()
+
+    print(f"🔍 Buscando produto código {codigo}...")
+
+    entities = _extract_entities(response)
+
+    if entities:
+        record = entities[0]
+        try:
+            produto = ProdutoDTO.model_validate(record)
+            print(f"✅ Encontrado: [{produto.codigo}] {produto.descricao}")
+            print(f"   Referência: {produto.referencia or 'N/A'}")
+            print(f"   NCM: {produto.ncm or 'N/A'}")
+            print(f"   Unidade: {produto.unidade or 'N/A'}")
+            return produto.model_dump()
+        except Exception:
+            print(f"✅ Encontrado: {record}")
+            return record
+    else:
+        print(f"❌ Produto {codigo} não encontrado")
+        return None
 
 
 # =============================================================================
-# Exemplo 3: Buscar Produto por NCM
+# Exemplo 3: Buscar Produtos por NCM
 # =============================================================================
 
-def buscar_produtos_por_ncm(ncm: str, max_results: int = 50):
+
+def buscar_produtos_por_ncm(ncm: str, max_results: int = 50) -> List[Dict[str, Any]]:
     """
     Busca produtos pelo NCM (Nomenclatura Comum do Mercosul).
-    
-    Útil para consultas fiscais.
+
+    Args:
+        ncm: NCM ou início do NCM
+        max_results: Limite máximo de resultados
+
+    Returns:
+        Lista de produtos encontrados
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
+    from sankhya_sdk.models.dtos import ProdutoListDTO
+
+    client = _create_client()
+
+    response = client.load_records(
+        entity="Produto",
+        fields=["CODPROD", "DESCRPROD", "REFERENCIA", "NCM", "ATIVO"],
+        criteria=f"NCM LIKE '{ncm}%' AND ATIVO = 'S'",
     )
-    from sankhya_sdk.enums.parameter_type import ParameterType
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    from sankhya_sdk.models.transport.product import Product
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="Produto",
-                include_presentation=True,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="CODPROD"), Field(name="DESCRPROD"), Field(name="NCM"), Field(name="REFERENCIA"), Field(name="ATIVO")
-                    ]
-                ),
-                criteria=LiteralCriteria(
-                    expression="NCM LIKE ? AND ATIVO = 'S'",
-                    parameters=[
-                        Parameter(type=ParameterType.STRING, value=f"{ncm}%")
-                    ]
-                )
-            )
-        )
-        
-        print(f"🔍 Buscando produtos com NCM iniciando em '{ncm}'...")
-        count = 0
-        
-        for product in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=Product,
-            token=ctx.token,
-            timeout=timedelta(minutes=2),
-            max_results=max_results,
-        ):
-            count += 1
-            print(f"  [{product.code}] {product.description} - NCM: {product.ncm}")
-        
-        print(f"\n📊 Encontrados: {count} produtos")
-        
-    finally:
-        ctx.dispose()
+
+    print(f"🔍 Buscando produtos com NCM iniciando em '{ncm}'...")
+
+    entities = _extract_entities(response)
+    produtos = []
+
+    for i, record in enumerate(entities[:max_results], 1):
+        try:
+            produto = ProdutoListDTO.model_validate(record)
+            print(f"  [{produto.codigo}] {produto.descricao} - NCM: {produto.ncm}")
+            produtos.append(produto.model_dump())
+        except Exception:
+            codigo = record.get("CODPROD", "?")
+            desc = record.get("DESCRPROD", "?")
+            ncm_val = record.get("NCM", "?")
+            print(f"  [{codigo}] {desc} - NCM: {ncm_val}")
+
+    print(f"\n📊 Encontrados: {len(produtos)} produtos")
+    return produtos
 
 
 # =============================================================================
 # Exemplo 4: Filtrar por Grupo de Produto
 # =============================================================================
 
-def filtrar_por_grupo(codigo_grupo: int, max_results: int = 50):
+
+def filtrar_por_grupo(codigo_grupo: int, max_results: int = 50) -> List[Dict[str, Any]]:
     """
     Filtra produtos por código de grupo (CODGRUPOPROD).
-    
-    Grupos organizam produtos por categoria no Sankhya.
+
+    Args:
+        codigo_grupo: Código do grupo
+        max_results: Limite máximo de resultados
+
+    Returns:
+        Lista de produtos do grupo
     """
-    from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.enums.service_name import ServiceName
-    
-    from sankhya_sdk.models.service import (
-        ServiceRequest, RequestBody, DataSet, Entity, LiteralCriteria, Field, Parameter
+    from sankhya_sdk.models.dtos import ProdutoListDTO
+
+    client = _create_client()
+
+    response = client.load_records(
+        entity="Produto",
+        fields=["CODPROD", "DESCRPROD", "REFERENCIA", "CODGRUPOPROD", "ATIVO"],
+        criteria=f"CODGRUPOPROD = {codigo_grupo} AND ATIVO = 'S'",
     )
-    from sankhya_sdk.enums.parameter_type import ParameterType
-    from sankhya_sdk.request_wrappers import PagedRequestWrapper
-    from sankhya_sdk.models.transport.product import Product
-    
-    ctx = SankhyaContext(
-        host=SANKHYA_HOST,
-        port=SANKHYA_PORT,
-        username=SANKHYA_USERNAME,
-        password=SANKHYA_PASSWORD,
-    )
-    
-    try:
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        request.request_body = RequestBody(
-            data_set=DataSet(
-                root_entity="Produto",
-                include_presentation=True,
-                entity=Entity(
-                    path="",
-                    fields=[
-                        Field(name="CODPROD"), Field(name="DESCRPROD"), Field(name="REFERENCIA"),
-                        Field(name="CODGRUPOPROD"), Field(name="ATIVO")
-                    ]
-                ),
-                criteria=LiteralCriteria(
-                    expression="CODGRUPOPROD = ? AND ATIVO = 'S'",
-                    parameters=[
-                        Parameter(type=ParameterType.INTEGER, value=str(codigo_grupo))
-                    ]
-                )
-            )
-        )
-        
-        print(f"📂 Listando produtos do grupo {codigo_grupo}...")
-        count = 0
-        
-        for product in PagedRequestWrapper.get_paged_results(
-            request=request,
-            entity_type=Product,
-            token=ctx.token,
-            timeout=timedelta(minutes=2),
-            max_results=max_results,
-        ):
-            count += 1
-            status = "✅" if product.is_active else "❌"
-            print(f"  {status} [{product.code}] {product.description}")
-        
-        print(f"\n📊 Produtos no grupo: {count}")
-        
-    finally:
-        ctx.dispose()
+
+    print(f"📂 Listando produtos do grupo {codigo_grupo}...")
+
+    entities = _extract_entities(response)
+    produtos = []
+
+    for i, record in enumerate(entities[:max_results], 1):
+        try:
+            produto = ProdutoListDTO.model_validate(record)
+            status = "✅" if produto.ativo == "S" else "❌"
+            print(f"  {status} [{produto.codigo}] {produto.descricao}")
+            produtos.append(produto.model_dump())
+        except Exception:
+            codigo = record.get("CODPROD", "?")
+            desc = record.get("DESCRPROD", "?")
+            print(f"  ? [{codigo}] {desc}")
+
+    print(f"\n📊 Produtos no grupo: {len(produtos)}")
+    return produtos
 
 
 # =============================================================================
@@ -305,26 +252,25 @@ def filtrar_por_grupo(codigo_grupo: int, max_results: int = 50):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Exemplos de Produtos (TGFPRO)")
+    print("Exemplos de Produtos (TGFPRO) - JSON Gateway")
     print("=" * 60)
-    
+
     print("\n1. Listar Produtos Ativos")
     print("-" * 40)
-    # listar_produtos_ativos(max_results=10)
-    
+    listar_produtos_ativos(max_results=10)
+
     print("\n2. Buscar Produto por Código")
     print("-" * 40)
-    # buscar_produto_por_codigo(1)
-    
+    buscar_produto_por_codigo(1)
+
     print("\n3. Buscar por NCM")
     print("-" * 40)
     # buscar_produtos_por_ncm("8471")  # Computadores
-    
+
     print("\n4. Filtrar por Grupo")
     print("-" * 40)
     # filtrar_por_grupo(1)
-    
+
     print("\n" + "=" * 60)
-    print("Descomente os exemplos para executar")
     print("Configure as variáveis de ambiente SANKHYA_*")
     print("=" * 60)

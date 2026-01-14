@@ -7,20 +7,32 @@ Documentação completa das exceções do SDK.
 ```mermaid
 classDiagram
     Exception <|-- SankhyaException
+    Exception <|-- AuthError
     SankhyaException <|-- ServiceRequestException
+    SankhyaException <|-- SankhyaHttpError
     SankhyaException <|-- InvalidKeyFileException
     SankhyaException <|-- OperationException
     SankhyaException <|-- PagedRequestException
     ServiceRequestException <|-- ServiceRequestInvalidAuthorizationException
     ServiceRequestException <|-- ServiceRequestCompetitionException
     ServiceRequestException <|-- ServiceRequestDeadlockException
+    SankhyaHttpError <|-- SankhyaAuthError
+    SankhyaHttpError <|-- SankhyaForbiddenError
+    SankhyaHttpError <|-- SankhyaNotFoundError
+    SankhyaHttpError <|-- SankhyaClientError
+    SankhyaHttpError <|-- SankhyaServerError
+    AuthError <|-- TokenExpiredError
+    AuthError <|-- AuthNetworkError
 ```
 
 ## Importação
 
 ```python
 from sankhya_sdk.exceptions import (
+    # Base
     SankhyaException,
+    
+    # Legado (XML)
     ServiceRequestException,
     ServiceRequestInvalidAuthorizationException,
     ServiceRequestCompetitionException,
@@ -28,6 +40,22 @@ from sankhya_sdk.exceptions import (
     InvalidKeyFileException,
     OperationException,
     PagedRequestException,
+    
+    # HTTP (Gateway JSON)
+    SankhyaHttpError,
+    SankhyaAuthError,
+    SankhyaForbiddenError,
+    SankhyaNotFoundError,
+    SankhyaClientError,
+    SankhyaServerError,
+    raise_for_status,
+)
+
+# Exceções de Autenticação OAuth2
+from sankhya_sdk.auth import (
+    AuthError,
+    TokenExpiredError,
+    AuthNetworkError,
 )
 ```
 
@@ -339,3 +367,281 @@ except Exception as e:
 - [Tratamento de Erros](../core-concepts/error-handling.md) - Estratégias avançadas
 - [Request Helpers](helpers.md) - Configuração de retry
 - [Core](core.md) - Classes principais
+- [Autenticação](auth.md) - Detalhes sobre exceções de auth
+
+---
+
+## Exceções de Autenticação OAuth2
+
+Exceções específicas para o módulo de autenticação OAuth2.
+
+### AuthError
+
+Exceção base para erros de autenticação.
+
+```python
+from sankhya_sdk.auth import AuthError
+
+try:
+    oauth.authenticate(client_id, client_secret)
+except AuthError as e:
+    print(f"Erro: {e.message}")
+    print(f"Código: {e.code}")
+    print(f"Status HTTP: {e.status_code}")
+```
+
+#### Atributos
+
+| Atributo | Tipo | Descrição |
+|----------|------|-----------|
+| `message` | `str` | Mensagem de erro |
+| `code` | `Optional[str]` | Código de erro da API |
+| `status_code` | `Optional[int]` | Status HTTP da resposta |
+
+---
+
+### TokenExpiredError
+
+Exceção para tokens expirados.
+
+```python
+from sankhya_sdk.auth import TokenExpiredError
+
+try:
+    token = token_manager.get_token()
+except TokenExpiredError:
+    print("Token expirado, renovando...")
+    new_token = oauth.refresh_token()
+```
+
+**Quando ocorre:**
+
+- Token de acesso expirou
+- Nenhum token disponível
+- Token próximo de expirar (dentro do buffer de 60s)
+
+---
+
+### AuthNetworkError
+
+Exceção para erros de rede durante autenticação.
+
+```python
+from sankhya_sdk.auth import AuthNetworkError
+import time
+
+def authenticate_with_retry(oauth, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return oauth.authenticate(client_id, client_secret)
+        except AuthNetworkError as e:
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)  # Backoff exponencial
+            else:
+                raise
+```
+
+**Quando ocorre:**
+
+- Timeout de conexão
+- DNS não resolvido
+- Servidor inacessível
+- Conexão recusada
+
+---
+
+## Exceções HTTP (Gateway JSON)
+
+Exceções específicas para a API Gateway JSON, mapeadas para códigos HTTP.
+
+### SankhyaHttpError
+
+Classe base para erros HTTP do Gateway.
+
+#### Atributos
+
+| Atributo | Tipo | Descrição |
+|----------|------|-----------|
+| `message` | `str` | Mensagem de erro |
+| `status_code` | `int` | Código HTTP |
+| `response_body` | `str` | Corpo da resposta |
+
+#### Uso
+
+```python
+from sankhya_sdk.exceptions import SankhyaHttpError
+
+try:
+    result = client.load_records("Parceiro", ["CODPARC"])
+except SankhyaHttpError as e:
+    print(f"HTTP {e.status_code}: {e.message}")
+    print(f"Resposta: {e.response_body}")
+```
+
+---
+
+### SankhyaAuthError
+
+Erro de autenticação (HTTP 401).
+
+```python
+from sankhya_sdk.exceptions import SankhyaAuthError
+
+try:
+    result = client.load_records("Parceiro", ["CODPARC"])
+except SankhyaAuthError:
+    print("Token expirado ou inválido. Reautentique.")
+    oauth.authenticate(client_id="...", client_secret="...")
+```
+
+**Quando ocorre**:
+
+- Token expirado
+- Token inválido ou malformado
+- Credenciais ausentes
+
+---
+
+### SankhyaForbiddenError
+
+Erro de autorização (HTTP 403).
+
+```python
+from sankhya_sdk.exceptions import SankhyaForbiddenError
+
+try:
+    result = client.load_records("DadosSensiveis", ["CAMPO"])
+except SankhyaForbiddenError:
+    print("Usuário sem permissão para acessar este recurso.")
+```
+
+**Quando ocorre**:
+
+- Usuário autenticado mas sem permissão
+- Acesso a entidade restrita
+- Operação não autorizada
+
+---
+
+### SankhyaNotFoundError
+
+Recurso não encontrado (HTTP 404).
+
+```python
+from sankhya_sdk.exceptions import SankhyaNotFoundError
+
+try:
+    result = client.execute_service("ServicoInexistente.metodo", {})
+except SankhyaNotFoundError:
+    print("Serviço ou entidade não encontrado.")
+```
+
+**Quando ocorre**:
+
+- Entidade não existe
+- Serviço não registrado
+- Endpoint incorreto
+
+---
+
+### SankhyaClientError
+
+Erro genérico do cliente (HTTP 4xx).
+
+```python
+from sankhya_sdk.exceptions import SankhyaClientError
+
+try:
+    result = client.save_record("Parceiro", {"CAMPO_INVALIDO": "valor"})
+except SankhyaClientError as e:
+    print(f"Erro {e.status_code}: {e.message}")
+```
+
+**Quando ocorre**:
+
+- Payload inválido
+- Validação falhou
+- Parâmetros incorretos
+
+---
+
+### SankhyaServerError
+
+Erro do servidor (HTTP 5xx).
+
+```python
+from sankhya_sdk.exceptions import SankhyaServerError
+import time
+
+try:
+    result = client.load_records("Parceiro", ["CODPARC"])
+except SankhyaServerError as e:
+    print(f"Erro no servidor: {e.status_code}")
+    # Considerar retry com backoff
+    time.sleep(5)
+```
+
+**Quando ocorre**:
+
+- Erro interno no servidor Sankhya
+- Timeout no processamento
+- Serviço temporariamente indisponível
+
+---
+
+### raise_for_status
+
+Função auxiliar para levantar exceção baseada no status HTTP.
+
+```python
+from sankhya_sdk.exceptions import raise_for_status
+
+# Uso manual (normalmente não necessário)
+response = requests.get(url)
+raise_for_status(response.status_code, response.text)
+```
+
+---
+
+## Padrão de Tratamento para Gateway
+
+```python
+from sankhya_sdk.http import GatewayClient
+from sankhya_sdk.exceptions import (
+    SankhyaAuthError,
+    SankhyaForbiddenError,
+    SankhyaNotFoundError,
+    SankhyaClientError,
+    SankhyaServerError,
+)
+
+def execute_safely(client: GatewayClient, entity: str, fields: list):
+    try:
+        return client.load_records(entity, fields)
+        
+    except SankhyaAuthError:
+        # Token expirado - reautenticar
+        logging.warning("Token expirado, reautenticando...")
+        # oauth.authenticate(...)
+        raise
+        
+    except SankhyaForbiddenError:
+        # Sem permissão - não adianta retry
+        logging.error(f"Sem permissão para {entity}")
+        raise
+        
+    except SankhyaNotFoundError:
+        # Entidade não existe
+        logging.warning(f"Entidade {entity} não encontrada")
+        return None
+        
+    except SankhyaClientError as e:
+        # Erro de requisição
+        logging.error(f"Erro cliente {e.status_code}: {e.response_body}")
+        raise
+        
+    except SankhyaServerError as e:
+        # Erro servidor - pode tentar retry
+        logging.error(f"Erro servidor {e.status_code}")
+        raise
+```
