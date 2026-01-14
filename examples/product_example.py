@@ -26,8 +26,8 @@ load_dotenv()
 SANKHYA_CLIENT_ID = os.getenv("SANKHYA_CLIENT_ID")
 SANKHYA_CLIENT_SECRET = os.getenv("SANKHYA_CLIENT_SECRET")
 SANKHYA_AUTH_BASE_URL = os.getenv("SANKHYA_AUTH_BASE_URL", "https://api.sankhya.com.br")
-# X-Token: usar APPKEY (obtido no portal do desenvolvedor)
-SANKHYA_X_TOKEN = os.getenv("SANKHYA_APPKEY")  # AppKey é usado como X-Token
+SANKHYA_X_TOKEN = os.getenv("SANKHYA_TOKEN")
+
 
 
 def _create_client():

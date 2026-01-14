@@ -82,7 +82,10 @@ def listar_notas_fiscais(max_results: int = 100) -> List[Dict[str, Any]]:
         nunota = record.get("NUNOTA", "-")
         numnota = record.get("NUMNOTA", "-")
         valor = float(record.get("VLRNOTA", 0) or 0)
-        status = record.get("STATUSNFE", "-")
+        
+        # Garantir que status é string, não dict
+        status_raw = record.get("STATUSNFE", "-")
+        status = status_raw if isinstance(status_raw, str) else str(status_raw.get("$", "-") if isinstance(status_raw, dict) else "-")
 
         status_emoji = {
             "A": "✅",  # Aprovada
