@@ -73,6 +73,119 @@ session = SankhyaSession(oauth_client=oauth)
 response = session.get("/gateway/v1/mge/teste")
 ```
 
+## 🔄 Auto-Refresh de Tokens OAuth2
+
+O SDK gerencia automaticamente a renovação de tokens OAuth2, garantindo que suas aplicações funcionem continuamente sem interrupções por tokens expirados.
+
+### Características
+
+✅ **Renovação Automática**: Tokens são renovados automaticamente antes de expirar (margem de segurança de 60 segundos)  
+✅ **Thread-Safe**: Operações protegidas por locks para uso em aplicações multi-thread  
+✅ **Transparente**: Não precisa gerenciar refresh manualmente - funciona "out of the box"  
+✅ **Logging Inteligente**: Logs informativos quando renovação ocorre
+
+### Como Funciona
+
+1. **Verificação Automática**: Toda vez que você faz uma requisição, o SDK verifica se o token ainda é válido
+2. **Renovação Proativa**: Se o token está expirado ou próximo de expirar (dentro de 60s), é renovado automaticamente
+3. **Fallback Inteligente**: Se o refresh falhar, o SDK tenta re-autenticar usando credenciais armazenadas
+
+### Exemplo de Uso
+
+```python
+from sankhya_sdk.auth import OAuthClient
+from sankhya_sdk.http.session import SankhyaSession
+
+# Configure uma vez
+oauth = OAuthClient(base_url="...", token="...")
+oauth.authenticate(client_id, client_secret)
+
+session = SankhyaSession(oauth)
+
+# Faça quantas requisições quiser - o SDK cuida do resto!
+for i in range(100):
+    response = session.get("/api/endpoint")
+    # Token é renovado automaticamente quando necessário
+    # Você não precisa se preocupar com nada! 🎉
+```
+
+### Detalhamento Técnico
+
+**Margem de Segurança**: Tokens são considerados inválidos 60 segundos antes de expirarem. Isso previne race conditions e garante que o token nunca expire durante uma requisição.
+
+**Thread-Safety**: Todas as operações de token no `TokenManager` são protegidas por `threading.Lock()`, permitindo uso seguro em aplicações com múltiplas threads.
+
+**Método Recomendado**: Use `oauth_client.get_valid_token()` ao invés de `token_manager.get_token()` - ele implementa toda a lógica de auto-refresh.
+
+
+### JSON Gateway Client (Novo)
+
+O `GatewayClient` oferece uma interface de alto nível para a API Gateway JSON:
+
+```python
+from sankhya_sdk.http import GatewayClient, GatewayModule
+
+# Criar cliente
+client = GatewayClient(session)
+
+# Consultar parceiros
+result = client.load_records(
+    entity="Parceiro",
+    fields=["CODPARC", "NOMEPARC", "TIPPESSOA"],
+    criteria="ATIVO = 'S'"
+)
+
+# Inserir/Atualizar parceiro (POST)
+result = client.save_record(
+    entity="Parceiro",
+    fields={"NOMEPARC": "Novo Parceiro", "CODCID": 10, "ATIVO": "S"}
+)
+
+# Usar módulo específico (MGE para cadastros, MGECOM para notas)
+result = client.execute_service(
+    "CACSP.IncluirNota",
+    payload,
+    module=GatewayModule.MGECOM
+)
+```
+
+### DTOs Tipados
+
+Use os DTOs para validação automática de dados:
+
+```python
+from sankhya_sdk.models.dtos import ParceiroDTO, NotaDTO, MovimentoDTO
+
+# Parceiro com validação Pydantic
+parceiro = ParceiroDTO(
+    nome="Empresa Teste",
+    tipo_pessoa=TipoPessoa.JURIDICA,
+    cnpj_cpf="12.345.678/0001-90",
+    codigo_cidade=10
+)
+
+# Exportar com aliases Sankhya
+payload = parceiro.model_dump(by_alias=True, exclude_none=True)
+# {"NOMEPARC": "Empresa Teste", "TIPPESSOA": "J", ...}
+```
+
+### XML Adapter (Compatibilidade Legada)
+
+Para integrações existentes que usam XML:
+
+```python
+from sankhya_sdk.adapters import XmlAdapter
+
+adapter = XmlAdapter()
+
+# Converter XML → JSON
+json_data = adapter.xml_to_json(xml_string)
+
+# Converter JSON → XML
+xml_string = adapter.json_to_xml(json_data)
+```
+
+
 ### Legado: SankhyaContext (SankhyaWrapper)
  
 A forma clássica de usar o SDK é através do `SankhyaContext`:
@@ -164,11 +277,18 @@ Para mais detalhes, consulte a [documentação de validações](docs/validations
 ## Estrutura do Projeto
 
 - `sankhya_sdk/`: Código fonte do SDK.
+  - `auth/`: Autenticação OAuth2 (`OAuthClient`, `TokenManager`).
+  - `http/`: Cliente HTTP (`SankhyaSession`, `GatewayClient`).
+  - `adapters/`: Compatibilidade legada (`XmlAdapter`).
+  - `models/`: Entidades de transporte e DTOs.
+    - `dtos/`: DTOs JSON (`ParceiroDTO`, `NotaDTO`, `MovimentoDTO`).
+    - `transport/`: Entidades completas (`Partner`, `Product`, etc.).
+  - `exceptions/`: Exceções customizadas (HTTP, Auth, etc.).
   - `core/`: Classes base, wrappers e contexto.
-  - `models/`: Entidades de transporte e serviço.
   - `enums/`: Enumerações da API Sankhya.
 - `tests/`: Testes unitários e de integração.
 - `docs/`: Documentação adicional.
+
 
 ## Diferenças do SDK .NET
 
