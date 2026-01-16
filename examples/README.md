@@ -59,6 +59,7 @@ pip install -e ".[dev]"
 | `invoice_example.py` | Nota Fiscal | TGFCAB + TGFITE | Notas fiscais e itens |
 | `financial_example.py` | Financeiro | TGFFIN | Titulos a receber/pagar |
 | `paged_request_example.py` | - | - | Consultas paginadas e filtros |
+| `partial_update_example.py` | Varios | TGFFIN, TGFPAR | **Update parcial via DatasetSP.save** |
 
 ---
 
@@ -207,6 +208,11 @@ python -c "from examples.invoice_example import listar_notas_aprovadas; listar_n
 python -c "from examples.financial_example import listar_a_receber_em_aberto; listar_a_receber_em_aberto(10)"
 python -c "from examples.financial_example import listar_a_pagar_em_aberto; listar_a_pagar_em_aberto(10)"
 python -c "from examples.financial_example import listar_titulos_vencidos; listar_titulos_vencidos(10)"
+
+# Update Parcial (DatasetSP.save)
+python examples/partial_update_example.py
+python -c "from examples.partial_update_example import atualizar_email_parceiro; atualizar_email_parceiro(1, 'novo@email.com')"
+python -c "from examples.partial_update_example import atualizar_vencimento_titulo; atualizar_vencimento_titulo(12345, '20/02/2026')"
 ```
 
 ### Opcao 2: Executar Arquivo Completo
@@ -217,6 +223,7 @@ python examples/product_example.py
 python examples/invoice_example.py
 python examples/financial_example.py
 python examples/paged_request_example.py
+python examples/partial_update_example.py
 ```
 
 ---
@@ -228,8 +235,37 @@ Os exemplos usam o **JSON Gateway** via `GatewayClient`:
 | Metodo | Servico | Descricao |
 |--------|---------|-----------|
 | `load_records()` | `CRUDServiceProvider.loadRecords` | Consulta entidades |
-| `save_record()` | `CRUDServiceProvider.saveRecord` | Criar/Atualizar |
+| `save_record()` | `CRUDServiceProvider.saveRecord` | Criar/Atualizar (completo) |
+| `save_record(pk=...)` | `DatasetSP.save` | **Update parcial** (so campos alterados) |
 | `execute_service()` | Generico | Executar servico customizado |
+
+### Update Parcial (Novo)
+
+Quando voce precisa alterar apenas alguns campos de um registro existente, use o parametro `pk`:
+
+```python
+# UPDATE PARCIAL - altera apenas DTVENC, nao exige outros campos obrigatorios
+client.save_record(
+    entity="Financeiro",
+    fields={"DTVENC": "20/02/2026"},
+    pk={"NUFIN": 12345}
+)
+
+# UPDATE PARCIAL com PK composta
+client.save_record(
+    entity="ItemNota",
+    fields={"OBSERVACAO": "Desconto especial"},
+    pk={"NUNOTA": 100, "SEQUENCIA": 1}
+)
+
+# INSERT (sem pk) - comportamento original
+client.save_record(
+    entity="Parceiro",
+    fields={"NOMEPARC": "Novo Parceiro", "TIPPESSOA": "J", ...}
+)
+```
+
+**Vantagem**: Evita erros de validacao quando o Gateway exige campos obrigatorios que voce nao quer alterar.
 
 ### DTOs Disponiveis
 
