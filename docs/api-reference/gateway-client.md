@@ -24,14 +24,14 @@ class GatewayModule(Enum):
     MGECOM = "mgecom"  # Movimentações comerciais (Notas, Pedidos, Faturamento)
 ```
 
-### Mapeamento de Serviços
+### Mapeamento de Servicos
 
-| Prefixo do Serviço | Módulo | Uso |
+| Prefixo do Servico | Modulo | Uso |
 |--------------------|--------|-----|
-| `CRUDServiceProvider` | MGE | Operações CRUD em cadastros |
-| `DatasetSP` | MGE | Consultas de datasets |
-| `CACSP` | MGECOM | Serviços comerciais |
-| `SelecaoDocumentoSP` | MGECOM | Seleção de documentos |
+| `CRUDServiceProvider` | MGE | Operacoes CRUD em cadastros |
+| `DatasetSP` | MGE | Consultas de datasets e **UPDATE PARCIAL** |
+| `CACSP` | MGECOM | Servicos comerciais |
+| `SelecaoDocumentoSP` | MGECOM | Selecao de documentos |
 
 ---
 
@@ -163,7 +163,7 @@ for record in records:
 
 ### save_record
 
-Salva (insere ou atualiza) um registro usando `CRUDServiceProvider.saveRecord`.
+Salva (insere ou atualiza) um registro.
 
 ```python
 def save_record(
@@ -171,26 +171,41 @@ def save_record(
     entity: str,
     fields: Dict[str, Any],
     field_list: Optional[List[str]] = None,
-    module: Optional[GatewayModule] = None
+    module: Optional[GatewayModule] = None,
+    *,
+    pk: Optional[Dict[str, Any]] = None,
+    use_dataset_for_update: bool = True,
+    stand_alone: bool = False
 ) -> Dict[str, Any]
 ```
 
-| Parâmetro | Tipo | Descrição |
+| Parametro | Tipo | Descricao |
 |-----------|------|-----------|
 | `entity` | `str` | Nome da entidade |
-| `fields` | `Dict[str, Any]` | Dicionário de campos e valores |
-| `field_list` | `List[str] \| None` | Campos a retornar (padrão: chaves de fields) |
-| `module` | `GatewayModule \| None` | Módulo (padrão: MGE) |
+| `fields` | `Dict[str, Any]` | Dicionario de campos e valores |
+| `field_list` | `List[str] \| None` | Campos a retornar (CRUDService apenas) |
+| `module` | `GatewayModule \| None` | Modulo (padrao: MGE) |
+| `pk` | `Dict[str, Any] \| None` | **Chave primaria para UPDATE PARCIAL** |
+| `use_dataset_for_update` | `bool` | Usar DatasetSP.save quando pk informada (padrao: True) |
+| `stand_alone` | `bool` | Transacao independente (DatasetSP.save apenas) |
 
 **Retorno**: `Dict[str, Any]` - Resposta com registro salvo.
 
-!!! note "INSERT vs UPDATE"
-    A operação (INSERT ou UPDATE) é determinada automaticamente pela existência da chave primária no banco de dados.
+#### Comportamento
 
-#### Exemplo: Inserir
+| Situacao | Servico Usado | Descricao |
+|----------|---------------|-----------|
+| `pk=None` | `CRUDServiceProvider.saveRecord` | INSERT/UPSERT (exige campos obrigatorios) |
+| `pk={...}` | `DatasetSP.save` | **UPDATE PARCIAL** (so campos alterados) |
+| `pk={...}, use_dataset_for_update=False` | `CRUDServiceProvider.saveRecord` | Forca comportamento antigo |
+
+!!! tip "Update Parcial"
+    Quando voce fornece o parametro `pk`, o SDK usa internamente o servico `DatasetSP.save`, que permite atualizar apenas os campos especificados sem precisar enviar todos os campos obrigatorios da entidade.
+
+#### Exemplo: Inserir (INSERT)
 
 ```python
-# Novo parceiro (sem CODPARC = INSERT)
+# Novo parceiro (sem pk = INSERT)
 result = client.save_record(
     entity="Parceiro",
     fields={
@@ -203,28 +218,102 @@ result = client.save_record(
     }
 )
 
-# Capturar código gerado
+# Capturar codigo gerado
 new_code = result["responseBody"]["entities"]["entity"]["CODPARC"]["$"]
 print(f"Parceiro criado: {new_code}")
 ```
 
-#### Exemplo: Atualizar
+#### Exemplo: Update Parcial (com pk)
 
 ```python
-# Atualizar parceiro existente (com CODPARC = UPDATE)
+# Atualiza APENAS o email - nao precisa enviar outros campos
 result = client.save_record(
     entity="Parceiro",
-    fields={
-        "CODPARC": 123,  # PK existente
-        "EMAIL": "novo@email.com",
-        "TELEFONE": "(11) 99999-9999"
-    }
+    fields={"EMAIL": "novo@email.com"},
+    pk={"CODPARC": 123}
+)
+
+# Atualiza vencimento de titulo financeiro
+result = client.save_record(
+    entity="Financeiro",
+    fields={"DTVENC": "20/02/2026"},
+    pk={"NUFIN": 45678}
+)
+```
+
+#### Exemplo: PK Composta
+
+```python
+# Entidade com chave primaria composta (NUNOTA + SEQUENCIA)
+result = client.save_record(
+    entity="ItemNota",
+    fields={"OBSERVACAO": "Desconto especial"},
+    pk={"NUNOTA": 100, "SEQUENCIA": 1}
+)
+```
+
+#### Exemplo: Forcar Comportamento Antigo
+
+```python
+# Mesmo com pk, usa CRUDServiceProvider.saveRecord
+result = client.save_record(
+    entity="Parceiro",
+    fields={"CODPARC": 123, "EMAIL": "novo@email.com"},
+    pk={"CODPARC": 123},
+    use_dataset_for_update=False  # Forca CRUDServiceProvider
 )
 ```
 
 ---
 
-## Resolução Automática de Módulo
+### extract_records (static)
+
+Extrai e normaliza registros de uma resposta do Gateway.
+
+```python
+@staticmethod
+def extract_records(response: Dict[str, Any]) -> List[Dict[str, Any]]
+```
+
+O Gateway retorna dados em formato compacto (f0, f1, f2...). Este metodo mapeia para nomes reais.
+
+#### Exemplo
+
+```python
+result = client.load_records("Parceiro", ["CODPARC", "NOMEPARC"])
+
+# Extrair registros normalizados
+records = GatewayClient.extract_records(result)
+
+for record in records:
+    print(f"{record['CODPARC']}: {record['NOMEPARC']}")
+```
+
+---
+
+### is_success (static)
+
+Verifica se a resposta indica sucesso.
+
+```python
+@staticmethod
+def is_success(response: Dict[str, Any]) -> bool
+```
+
+---
+
+### get_error_message (static)
+
+Extrai mensagem de erro da resposta.
+
+```python
+@staticmethod
+def get_error_message(response: Dict[str, Any]) -> Optional[str]
+```
+
+---
+
+## Resolucao Automatica de Modulo
 
 O `GatewayClient` detecta automaticamente o módulo correto baseado no prefixo do serviço:
 

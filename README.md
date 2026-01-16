@@ -141,6 +141,14 @@ result = client.save_record(
     fields={"NOMEPARC": "Novo Parceiro", "CODCID": 10, "ATIVO": "S"}
 )
 
+# Update parcial (com PK) - usa DatasetSP.save internamente
+# Permite alterar apenas os campos especificados sem enviar todos os campos obrigatórios
+result = client.save_record(
+    entity="Financeiro",
+    fields={"DTVENC": "2026-01-20"},
+    pk={"NUFIN": 123}
+)
+
 # Usar módulo específico (MGE para cadastros, MGECOM para notas)
 result = client.execute_service(
     "CACSP.IncluirNota",
