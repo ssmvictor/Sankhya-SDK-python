@@ -1,24 +1,24 @@
-# Instalação
+# Instalacao
 
 Este guia detalha como instalar e configurar o Sankhya SDK Python em seu ambiente de desenvolvimento.
 
 ## Requisitos do Sistema
 
-| Requisito | Versão Mínima | Recomendada |
+| Requisito | Versao Minima | Recomendada |
 |-----------|---------------|-------------|
 | Python | 3.10 | 3.11+ |
-| pip | 21.0 | Última |
+| pip | 21.0 | Ultima |
 | Sistema Operacional | Windows/Linux/macOS | - |
 
-## Instalação via pip
+## Instalacao via pip
 
-### Modo Produção
+### Modo Producao
 
 ```bash
-# Instalação básica
+# Instalacao basica
 pip install sankhya-sdk-python
 
-# Com suporte a operações assíncronas
+# Com suporte a operacoes assincronas
 pip install sankhya-sdk-python[async]
 ```
 
@@ -27,8 +27,8 @@ pip install sankhya-sdk-python[async]
 Para contribuir ou desenvolver localmente:
 
 ```bash
-# Clone o repositório
-git clone https://github.com/onixbrasil/Sankhya-SDK-python.git
+# Clone o repositorio
+git clone https://github.com/ssmvictor/Sankhya-SDK-python.git
 cd Sankhya-SDK-python
 
 # Crie um ambiente virtual
@@ -44,39 +44,51 @@ source .venv/bin/activate
 pip install -e ".[dev,async,docs]"
 ```
 
-## Configuração do Ambiente
+## Configuracao do Ambiente
 
-### Variáveis de Ambiente
+### Credenciais OAuth2 (Recomendado)
+
+O SDK utiliza autenticacao **OAuth2** com `client_id` e `client_secret`. Esta e a abordagem recomendada para novas integracoes.
+
+#### 1. Obter Credenciais
+
+Acesse o [Portal do Desenvolvedor Sankhya](https://areadev.sankhya.com.br/):
+
+1. Crie uma **Solucao**
+2. Crie um **Componente de Integracao**
+3. Copie o **Client ID** e **Client Secret**
+4. Obtenha o **X-Token** no Sankhya OM > Configuracoes Gateway > Chave do Cliente
+
+#### 2. Variaveis de Ambiente
 
 Crie um arquivo `.env` na raiz do seu projeto:
 
 ```ini
 # .env
-# Configurações de Conexão Sankhya
+# Configuracoes OAuth2 Sankhya
 
-# URL base da API (sem barra final)
-SANKHYA_BASE_URL=https://api.sankhya.com.br
+# Credenciais OAuth2 (obrigatorias)
+SANKHYA_CLIENT_ID=seu_client_id
+SANKHYA_CLIENT_SECRET=seu_client_secret
 
-# Credenciais
-SANKHYA_USERNAME=seu_usuario
-SANKHYA_PASSWORD=sua_senha
+# URL base da API
+SANKHYA_AUTH_BASE_URL=https://api.sankhya.com.br
 
-# Ambiente (producao, homologacao, treinamento)
-SANKHYA_ENVIRONMENT=producao
+# Token de Integracao (X-Token)
+SANKHYA_TOKEN=seu_x_token
 
-# Configurações Opcionais
+# Configuracoes Opcionais
 SANKHYA_TIMEOUT=30
-SANKHYA_MAX_RETRIES=3
 SANKHYA_LOG_LEVEL=INFO
 ```
 
-!!! warning "Segurança"
+!!! warning "Seguranca"
     Nunca versione arquivos `.env` com credenciais reais. Adicione `.env` ao seu `.gitignore`.
 
 ### Exemplo de .gitignore
 
 ```gitignore
-# Arquivos de configuração sensíveis
+# Arquivos de configuracao sensiveis
 .env
 .env.local
 *.key
@@ -90,96 +102,148 @@ __pycache__/
 *.pyc
 ```
 
-### Configuração Alternativa: Arquivo .key
+## Verificacao da Instalacao
 
-Para ambientes mais seguros, você pode usar um arquivo de chave encriptado:
-
-```python
-from sankhya_sdk import SankhyaContext, SankhyaSettings
-
-settings = SankhyaSettings.from_key_file("caminho/para/credenciais.key")
-ctx = SankhyaContext(settings)
-```
-
-## Verificação da Instalação
-
-Execute o seguinte script para verificar se a instalação está correta:
+Execute o seguinte script para verificar se a instalacao esta correta:
 
 ```python
 #!/usr/bin/env python3
-"""Verifica a instalação do Sankhya SDK."""
+"""Verifica a instalacao do Sankhya SDK."""
 
-from sankhya_sdk import __version__
-from sankhya_sdk import SankhyaContext, SankhyaSettings
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
 
-# Carrega variáveis de ambiente
+# Carrega variaveis de ambiente
 load_dotenv()
 
+# Verifica versao
+from sankhya_sdk import __version__
 print(f"Sankhya SDK Python v{__version__}")
 print("-" * 40)
 
-# Verifica configuração
-try:
-    settings = SankhyaSettings()
-    print(f"✅ URL Base: {settings.base_url}")
-    print(f"✅ Usuário: {settings.username}")
-    print(f"✅ Ambiente: {settings.environment}")
-except Exception as e:
-    print(f"❌ Erro na configuração: {e}")
+# Verifica configuracao OAuth2
+client_id = os.getenv("SANKHYA_CLIENT_ID")
+client_secret = os.getenv("SANKHYA_CLIENT_SECRET")
+base_url = os.getenv("SANKHYA_AUTH_BASE_URL", "https://api.sankhya.com.br")
+x_token = os.getenv("SANKHYA_TOKEN")
+
+if not client_id or not client_secret:
+    print("Erro: SANKHYA_CLIENT_ID e SANKHYA_CLIENT_SECRET sao obrigatorios")
     exit(1)
 
-# Testa conexão
+print(f"Client ID: {client_id[:8]}...")
+print(f"Base URL: {base_url}")
+print(f"X-Token: {'Configurado' if x_token else 'Nao configurado'}")
+
+# Testa conexao
 try:
-    with SankhyaContext.from_settings() as ctx:
-        print(f"✅ Conexão estabelecida!")
-        print(f"✅ Código do usuário: {ctx.user_code}")
+    from sankhya_sdk.auth import OAuthClient
+    from sankhya_sdk.http import SankhyaSession, GatewayClient
+
+    oauth = OAuthClient(base_url=base_url, token=x_token)
+    oauth.authenticate(client_id=client_id, client_secret=client_secret)
+    
+    session = SankhyaSession(oauth_client=oauth, base_url=base_url)
+    client = GatewayClient(session)
+    
+    print("Conexao OAuth2 estabelecida!")
+    
+    # Teste rapido
+    result = client.load_records("Parceiro", ["CODPARC"], criteria="ROWNUM <= 1")
+    if GatewayClient.is_success(result):
+        print("Consulta de teste OK!")
+    
 except Exception as e:
-    print(f"❌ Erro de conexão: {e}")
+    print(f"Erro de conexao: {e}")
     exit(1)
 
 print("-" * 40)
-print("Instalação verificada com sucesso! 🎉")
+print("Instalacao verificada com sucesso!")
+```
+
+## Primeiro Uso: Quick Start
+
+Apos a instalacao, voce pode comecar a usar o SDK:
+
+```python
+import os
+from dotenv import load_dotenv
+from sankhya_sdk.auth import OAuthClient
+from sankhya_sdk.http import SankhyaSession, GatewayClient
+
+load_dotenv()
+
+# 1. Autenticar via OAuth2
+oauth = OAuthClient(
+    base_url=os.getenv("SANKHYA_AUTH_BASE_URL", "https://api.sankhya.com.br"),
+    token=os.getenv("SANKHYA_TOKEN")
+)
+oauth.authenticate(
+    client_id=os.getenv("SANKHYA_CLIENT_ID"),
+    client_secret=os.getenv("SANKHYA_CLIENT_SECRET")
+)
+
+# 2. Criar sessao e cliente
+session = SankhyaSession(oauth_client=oauth, base_url=os.getenv("SANKHYA_AUTH_BASE_URL"))
+client = GatewayClient(session)
+
+# 3. Consultar dados
+result = client.load_records(
+    entity="Parceiro",
+    fields=["CODPARC", "NOMEPARC", "CGC_CPF"],
+    criteria="ATIVO = 'S'"
+)
+
+# 4. Processar resultados
+records = GatewayClient.extract_records(result)
+for r in records[:5]:
+    print(f"{r['CODPARC']}: {r['NOMEPARC']}")
+
+# 5. Atualizar registro (UPDATE PARCIAL - novo!)
+client.save_record(
+    entity="Parceiro",
+    fields={"EMAIL": "novo@email.com"},
+    pk={"CODPARC": 1}  # Envia apenas campos alterados
+)
 ```
 
 ## Estrutura do Projeto Recomendada
 
 ```
 meu-projeto/
-├── .env                    # Configurações (não versionado)
-├── .gitignore
-├── requirements.txt
-├── src/
-│   ├── __init__.py
-│   └── integracao.py       # Seu código de integração
-├── tests/
-│   └── test_integracao.py
-└── README.md
+    .env                    # Configuracoes OAuth2 (nao versionado)
+    .gitignore
+    requirements.txt
+    src/
+        __init__.py
+        integracao.py       # Seu codigo de integracao
+    tests/
+        test_integracao.py
+    README.md
 ```
 
-## Dependências
+## Dependencias
 
-O SDK inclui as seguintes dependências principais:
+O SDK inclui as seguintes dependencias principais:
 
-| Pacote | Versão | Descrição |
+| Pacote | Versao | Descricao |
 |--------|--------|-----------|
-| `requests` | ≥2.31.0 | Cliente HTTP |
-| `pydantic` | ≥2.5.0 | Validação de dados |
-| `pydantic-settings` | ≥2.1.0 | Configurações |
-| `python-dotenv` | ≥1.0.0 | Variáveis de ambiente |
-| `lxml` | ≥5.0.0 | Processamento XML |
+| `requests` | >=2.31.0 | Cliente HTTP |
+| `pydantic` | >=2.5.0 | Validacao de dados |
+| `pydantic-settings` | >=2.1.0 | Configuracoes |
+| `python-dotenv` | >=1.0.0 | Variaveis de ambiente |
+| `lxml` | >=5.0.0 | Processamento XML |
 
-### Dependências Opcionais
+### Dependencias Opcionais
 
-| Pacote | Grupo | Descrição |
+| Pacote | Grupo | Descricao |
 |--------|-------|-----------|
-| `httpx` | async | Cliente HTTP assíncrono |
-| `aiofiles` | async | I/O de arquivos assíncrono |
+| `httpx` | async | Cliente HTTP assincrono |
+| `aiofiles` | async | I/O de arquivos assincrono |
 | `pytest` | dev | Framework de testes |
-| `mkdocs` | docs | Documentação |
+| `mkdocs` | docs | Documentacao |
 
-## Solução de Problemas
+## Solucao de Problemas
 
 ### Erro: ModuleNotFoundError
 
@@ -187,38 +251,69 @@ O SDK inclui as seguintes dependências principais:
 ModuleNotFoundError: No module named 'sankhya_sdk'
 ```
 
-**Solução:** Verifique se o ambiente virtual está ativado e o pacote instalado:
+**Solucao:** Verifique se o ambiente virtual esta ativado e o pacote instalado:
 
 ```bash
 pip list | grep sankhya
 ```
 
-### Erro: Conexão Recusada
+### Erro: AuthError - Invalid Credentials
+
+```
+AuthError: Authentication failed
+```
+
+**Solucoes:**
+
+1. Verifique `SANKHYA_CLIENT_ID` e `SANKHYA_CLIENT_SECRET`
+2. Confirme que o componente esta ativo no Portal do Desenvolvedor
+3. Verifique se o `X-Token` esta correto (se exigido)
+
+### Erro: Conexao Recusada
 
 ```
 ConnectionError: Unable to connect to API
 ```
 
-**Soluções:**
+**Solucoes:**
 
-1. Verifique a URL no `.env`
+1. Verifique a URL no `.env` (`SANKHYA_AUTH_BASE_URL`)
 2. Teste conectividade de rede
-3. Verifique se há firewall bloqueando
+3. Verifique se ha firewall bloqueando
 
-### Erro: Credenciais Inválidas
+### Erro: Token Expirado
 
+O SDK renova automaticamente tokens expirados. Se persistir:
+
+```python
+# Forcaar renovacao manual
+oauth.authenticate(client_id=..., client_secret=...)
 ```
-ServiceRequestInvalidAuthorizationException: Invalid credentials
+
+## Configuracao Legada (Opcional)
+
+Para compatibilidade com integracoes existentes, o SDK ainda suporta autenticacao via usuario/senha:
+
+```ini
+# .env (modo legado)
+SANKHYA_BASE_URL=https://api.sankhya.com.br
+SANKHYA_USERNAME=seu_usuario
+SANKHYA_PASSWORD=sua_senha
 ```
 
-**Soluções:**
+```python
+from sankhya_sdk import SankhyaContext
 
-1. Verifique usuário e senha
-2. Confirme que o usuário tem acesso à API
-3. Verifique o ambiente (produção vs homologação)
+with SankhyaContext.from_settings() as ctx:
+    # Usar wrappers legados...
+    pass
+```
 
-## Próximos Passos
+!!! warning "Recomendacao"
+    Para novas integracoes, sempre prefira OAuth2 (`OAuthClient` + `SankhyaSession`).
 
-- [Início Rápido](quick-start.md) - Crie sua primeira integração
-- [Autenticação](authentication.md) - Aprofunde-se em autenticação
-- [Arquitetura](../core-concepts/architecture.md) - Entenda a estrutura do SDK
+## Proximos Passos
+
+- [Inicio Rapido](quick-start.md) - Crie sua primeira integracao
+- [Autenticacao](authentication.md) - Aprofunde-se em autenticacao OAuth2
+- [Gateway Client](../api-reference/gateway-client.md) - Referencia completa da API

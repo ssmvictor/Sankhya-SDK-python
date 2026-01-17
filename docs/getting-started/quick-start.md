@@ -71,18 +71,11 @@ result = client.load_records(
     criteria="ATIVO = 'S' AND CLIENTE = 'S'"
 )
 
-# 5. Processar resultados
-entities = result.get("responseBody", {}).get("entities", {})
-records = entities.get("entity", [])
-
-# Garantir lista
-if isinstance(records, dict):
-    records = [records]
+# 5. Processar resultados (metodo recomendado)
+records = GatewayClient.extract_records(result)
 
 for record in records:
-    codigo = record.get("CODPARC", {}).get("$")
-    nome = record.get("NOMEPARC", {}).get("$")
-    print(f"{codigo}: {nome}")
+    print(f"{record['CODPARC']}: {record['NOMEPARC']}")
 ```
 
 !!! tip "Recomendação"
@@ -200,6 +193,43 @@ with SankhyaContext.from_settings() as ctx:
         result = crud.update(partner)
         print(f"Parceiro atualizado: {result}")
 ```
+
+### Update Parcial (GatewayClient - Recomendado)
+
+Para atualizar apenas alguns campos sem enviar todos os campos obrigatorios:
+
+```python
+from sankhya_sdk.auth import OAuthClient
+from sankhya_sdk.http import SankhyaSession, GatewayClient
+import os
+
+# Autenticacao OAuth2
+oauth = OAuthClient(base_url=os.getenv("SANKHYA_AUTH_BASE_URL"))
+oauth.authenticate(
+    client_id=os.getenv("SANKHYA_CLIENT_ID"),
+    client_secret=os.getenv("SANKHYA_CLIENT_SECRET")
+)
+
+session = SankhyaSession(oauth_client=oauth)
+client = GatewayClient(session)
+
+# UPDATE PARCIAL - envia apenas os campos alterados
+client.save_record(
+    entity="Parceiro",
+    fields={"EMAIL": "novo@email.com"},
+    pk={"CODPARC": 123}  # Chave primaria
+)
+
+# Funciona com qualquer entidade
+client.save_record(
+    entity="Financeiro",
+    fields={"DTVENC": "20/02/2026"},
+    pk={"NUFIN": 45678}
+)
+```
+
+!!! tip "Vantagem do Update Parcial"
+    Ao usar o parametro `pk`, o SDK utiliza internamente o servico `DatasetSP.save`, que permite atualizar apenas os campos especificados sem exigir todos os campos obrigatorios da entidade.
 
 ### Criar (Insert)
 
