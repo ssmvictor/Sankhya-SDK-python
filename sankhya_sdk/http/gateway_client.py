@@ -137,22 +137,38 @@ class GatewayClient:
         fields: Dict[str, Any],
         field_list: Optional[List[str]] = None,
         module: Optional[GatewayModule] = None,
+        *,
+        pk: Optional[Dict[str, Any]] = None,
+        use_dataset_for_update: bool = True,
+        stand_alone: bool = False,
     ) -> Dict[str, Any]:
         """
-        Save (insert/update) a record using CRUDServiceProvider.saveRecord.
+        Save (insert/update) a record.
 
-        The operation (INSERT or UPDATE) is determined by whether the primary key
-        exists in the database.
+        When ``pk`` is provided and ``use_dataset_for_update`` is True (default),
+        uses DatasetSP.save for partial update (only provided fields are updated).
+        Otherwise, uses CRUDServiceProvider.saveRecord (insert/upsert behavior).
 
         Args:
             entity: Root entity name.
-            fields: Dictionary of field values.
-            field_list: Optional list of fields to return. Defaults to fields keys.
+            fields: Dictionary of field values to save.
+            field_list: Optional list of fields to return (CRUDService only).
             module: Optional module override.
+            pk: Primary key dict for update (e.g., {"NUFIN": 123}).
+                When provided, triggers DatasetSP.save for partial update.
+            use_dataset_for_update: If True and pk is set, use DatasetSP.save.
+                Set to False to force CRUDServiceProvider.saveRecord.
+            stand_alone: Run in standalone transaction (DatasetSP.save only).
 
         Returns:
             Parsed JSON response with saved record.
         """
+        # Partial update via DatasetSP.save when pk is provided
+        if pk is not None and use_dataset_for_update:
+            request_body = self._build_dataset_save_body(entity, pk, fields, stand_alone)
+            return self.execute_service("DatasetSP.save", request_body, module or GatewayModule.MGE)
+
+        # Default: INSERT/UPSERT via CRUDServiceProvider.saveRecord
         local_fields = {key: {"$": str(value)} for key, value in fields.items()}
 
         request_body = {
@@ -183,6 +199,53 @@ class GatewayClient:
     def _build_url(self, module: GatewayModule, service_name: str) -> str:
         """Build Gateway URL with required parameters."""
         return f"/gateway/v1/{module.value}/service.sbr?serviceName={service_name}&outputType=json"
+
+    def _build_dataset_save_body(
+        self,
+        entity: str,
+        pk: Dict[str, Any],
+        values: Dict[str, Any],
+        stand_alone: bool,
+    ) -> Dict[str, Any]:
+        """
+        Build request body for DatasetSP.save (partial update).
+
+        Args:
+            entity: Entity name (e.g., "Financeiro").
+            pk: Primary key dict, e.g. {"NUFIN": 123}.
+            values: Fields to update (excluding PK fields).
+            stand_alone: Whether to run in standalone transaction mode.
+
+        Returns:
+            Request body ready for execute_service.
+        """
+        # 1. PK fields first (stable order with Python 3.7+ dict ordering)
+        pk_fields = list(pk.keys())
+        # 2. Value fields that are NOT in PK
+        value_fields = [k for k in values.keys() if k not in pk_fields]
+        # 3. Final fields list
+        fields_list = pk_fields + value_fields
+
+        # 4. Map values to indices (only value fields, not PK)
+        indexed_values: Dict[str, str] = {}
+        for field_name in value_fields:
+            idx = fields_list.index(field_name)
+            indexed_values[str(idx)] = str(values[field_name])
+
+        # 5. Build PK as strings
+        pk_str = {k: str(v) for k, v in pk.items()}
+
+        return {
+            "entityName": entity,
+            "standAlone": stand_alone,
+            "fields": fields_list,
+            "records": [
+                {
+                    "pk": pk_str,
+                    "values": indexed_values,
+                }
+            ],
+        }
 
     @staticmethod
     def extract_records(response: Dict[str, Any]) -> List[Dict[str, Any]]:
