@@ -60,6 +60,7 @@ pip install -e ".[dev]"
 | `financial_example.py` | Financeiro | TGFFIN | Titulos a receber/pagar |
 | `paged_request_example.py` | - | - | Consultas paginadas e filtros |
 | `partial_update_example.py` | Varios | TGFFIN, TGFPAR | **Update parcial via DatasetSP.save** |
+| `dbexplorer.py` | - | - | Explorador de estrutura do banco de dados |
 
 ---
 
