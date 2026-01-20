@@ -45,6 +45,11 @@ def _create_client():
     from sankhya_sdk.http import GatewayClient, SankhyaSession
 
     oauth = OAuthClient(base_url=SANKHYA_AUTH_BASE_URL, token=SANKHYA_X_TOKEN)
+    if not SANKHYA_CLIENT_ID or not SANKHYA_CLIENT_SECRET:
+        raise RuntimeError(
+            "SANKHYA_CLIENT_ID e SANKHYA_CLIENT_SECRET devem estar definidos no ambiente"
+        )
+
     oauth.authenticate(client_id=SANKHYA_CLIENT_ID, client_secret=SANKHYA_CLIENT_SECRET)
 
     session = SankhyaSession(oauth_client=oauth, base_url=SANKHYA_AUTH_BASE_URL)
@@ -251,6 +256,7 @@ def demonstrar_diferenca_insert_update():
     - Sem pk: usa CRUDServiceProvider.saveRecord (INSERT/UPSERT)
     - Com pk: usa DatasetSP.save (UPDATE parcial)
     """
+    
     print("\n" + "=" * 60)
     print("COMPARACAO: INSERT vs UPDATE PARCIAL")
     print("=" * 60)
@@ -277,13 +283,13 @@ def demonstrar_diferenca_insert_update():
     print('       pk={"CODPARC": 123},')
     print("       use_dataset_for_update=False  # Forca CRUDServiceProvider")
     print("   )")
+    
+
 
 
 # =============================================================================
 # Exemplo 6: Prorrogar Vencimentos em Lote
 # =============================================================================
-
-
 def prorrogar_vencimentos_parceiro(
     codparc: int,
     dias: int = 30,
@@ -391,3 +397,21 @@ if __name__ == "__main__":
     print("Configure as variaveis de ambiente SANKHYA_*")
     print("Descomente as chamadas acima para testar")
     print("=" * 60)
+    
+    print("\n3. teste Financeiro:")
+    client = _create_client()
+    '''
+    response = client.save_record(
+        entity="Financeiro",
+        # IMPORTANTE:
+        # No dicionario de dados do Sankhya, campos podem ser:
+        # - TIPCAMPO='D' (data): armazena somente data (hora sempre 00:00:00)
+        # - TIPCAMPO='H' (data/hora): armazena data e hora
+        #
+        # Mesmo que ambos sejam DATE no Oracle, o Sankhya valida/formata conforme TIPCAMPO.
+        # Por isso, ao atualizar AD_DTPAGO (TIPCAMPO='D') via DatasetSP.save, a hora e descartada.
+        # Para registrar data/hora, use um campo TIPCAMPO='H', ex: TIMDHBAIXA.
+        fields={"TIMDHBAIXA": "20/01/2026 14:44:15"},
+        pk={"NUFIN": 550273},
+    )
+    '''
