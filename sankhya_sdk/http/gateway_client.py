@@ -26,6 +26,7 @@ MODULE_SERVICE_MAP: Dict[str, GatewayModule] = {
     # MGE - Cadastros gerais
     "CRUDServiceProvider": GatewayModule.MGE,
     "DatasetSP": GatewayModule.MGE,
+    "DbExplorerSP": GatewayModule.MGE,
     # MGECOM - Movimentações comerciais
     "CACSP": GatewayModule.MGECOM,
     "SelecaoDocumentoSP": GatewayModule.MGECOM,
