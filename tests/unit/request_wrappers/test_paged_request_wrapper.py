@@ -23,7 +23,8 @@ from sankhya_sdk.exceptions import (
     ServiceRequestGeneralException,
 )
 from sankhya_sdk.models.base import EntityBase
-from sankhya_sdk.models.service.entity_types import DataSet
+from sankhya_sdk.models.service.basic_types import Field
+from sankhya_sdk.models.service.entity_types import DataSet, Entity
 from sankhya_sdk.models.service.request_body import RequestBody
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
@@ -557,6 +558,65 @@ class TestPagedRequestWrapper:
         assert entities[0].convert_to_type(MockEntity).code == 1
         assert entities[1].convert_to_type(MockEntity).name == "Entity 2"
     
+    @staticmethod
+    def _request_with_fields(*names: str) -> ServiceRequest:
+        """Requisição loadRecords com a lista de campos solicitados."""
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        request.request_body.data_set = DataSet(
+            root_entity="Parceiro",
+            entity=Entity(path="", fields=[Field(name=name) for name in names]),
+        )
+        return request
+
+    def test_extract_entities_does_not_rename_with_request_fields(self, mock_token):
+        """
+        As chaves não são renomeadas com os campos da requisição.
+
+        No .NET (LoadPage/ProcessCrudServiceProviderEntities) só o
+        ``<metadata>`` da resposta renomeia f0..fN; sem metadata as chaves
+        ficam como recebidas, sem supor a ordem dos campos solicitados.
+        """
+        wrapper = PagedRequestWrapper(
+            request=self._request_with_fields("CODPARC", "NOMEPARC", "CGC_CPF"),
+            entity_type=MockEntity,
+            token=mock_token,
+        )
+        response = _provider_entities_response(
+            [{"f0": "1", "f1": "Parceiro 1"}, {"f0": "2", "f1": "Parceiro 2"}]
+        )
+
+        entities = wrapper._extract_entities_from_response(response)
+
+        assert [entity.dictionary for entity in entities] == [
+            {"f0": "1", "f1": "Parceiro 1"},
+            {"f0": "2", "f1": "Parceiro 2"},
+        ]
+        assert [entity.dictionary for entity in entities] == [
+            dict(entity.fields) for entity in response.entities
+        ]
+
+    def test_extract_entities_keeps_names_from_response_metadata(self, mock_token):
+        """Nomes vêm do <metadata> da resposta, mesmo em ordem diferente da requisição."""
+        wrapper = PagedRequestWrapper(
+            request=self._request_with_fields("CODPARC", "NOMEPARC"),
+            entity_type=MockEntity,
+            token=mock_token,
+        )
+        response = ServiceResponse.from_xml_string(
+            '<serviceResponse serviceName="CRUDServiceProvider.loadRecords" status="1">'
+            '<responseBody><entities total="1">'
+            '<metadata><fields><field name="NOMEPARC"/><field name="CODPARC"/>'
+            "</fields></metadata>"
+            "<entity><f0>Parceiro 9</f0><f1>009</f1></entity>"
+            "</entities></responseBody></serviceResponse>"
+        )
+
+        entities = wrapper._extract_entities_from_response(response)
+
+        assert [entity.dictionary for entity in entities] == [
+            {"NOMEPARC": "Parceiro 9", "CODPARC": "009"}
+        ]
+
     def test_extract_entities_empty_response(self, mock_token, service_request):
         """Testa extração de entidades com resposta vazia."""
         wrapper = PagedRequestWrapper(
