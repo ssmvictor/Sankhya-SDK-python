@@ -353,6 +353,34 @@ class TestSankhyaWrapper:
         with pytest.raises(ServiceRequestInvalidCredentialsException):
             wrapper.authenticate("baduser", "badpass")
 
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_service_invoker_internal_unavailable_status_message(self, mock_request):
+        """Status de indisponibilidade deve gerar ServiceRequestUnavailableException com a resposta."""
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.content = b"""<?xml version="1.0" encoding="UTF-8"?>
+        <serviceResponse status="0">
+            <statusMessage>I/O Error: Connection reset</statusMessage>
+        </serviceResponse>"""
+        mock_request.return_value = mock_response
+
+        wrapper = SankhyaWrapper(
+            host="http://example.com",
+            port=8180,
+        )
+
+        request = ServiceRequest(service=ServiceName.LOGIN)
+        with pytest.raises(ServiceRequestUnavailableException) as exc_info:
+            wrapper._service_invoker_internal(
+                request=request,
+                service_name=ServiceName.LOGIN,
+                request_count=1,
+            )
+
+        assert exc_info.value.request is request
+        assert isinstance(exc_info.value.response, ServiceResponse)
+
     def test_dispose_marks_as_disposed(self):
         """Test that dispose marks wrapper as disposed."""
         wrapper = SankhyaWrapper(

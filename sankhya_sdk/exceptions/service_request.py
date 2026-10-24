@@ -213,21 +213,29 @@ class ServiceRequestCanceledQueryException(ServiceRequestGeneralException):
         super().__init__(SERVICE_REQUEST_CANCELED_QUERY.format(seconds), request)
 
 
-class ServiceRequestExternalException(ServiceRequestGeneralException):
+class ServiceRequestExternalException(ServiceRequestTemporarilyException):
     """
     Exception thrown when an internal Sankhya error occurs.
     """
 
-    def __init__(self, service: ServiceName, request: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        service: ServiceName,
+        request: Optional[Any] = None,
+        response: Optional[Any] = None,
+    ) -> None:
         """
         Initializes a new instance of the ServiceRequestExternalException class.
 
         Args:
             service (ServiceName): The service name.
             request (Optional[Any]): The service request.
+            response (Optional[Any]): The service response associated with the exception.
         """
         human_readable = service.metadata.human_readable if hasattr(service, "metadata") else str(service)
-        super().__init__(SERVICE_REQUEST_EXTERNAL.format(human_readable), request)
+        super().__init__(
+            SERVICE_REQUEST_EXTERNAL.format(human_readable), request, response
+        )
 
 
 class ServiceRequestForeignKeyException(ServiceRequestGeneralException):

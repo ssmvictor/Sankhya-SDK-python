@@ -89,21 +89,32 @@ class ServiceRequestTooManyResultsException(ServiceRequestGeneralException):
         )
 
 
-class ServiceRequestUnavailableException(ServiceRequestGeneralException):
+class ServiceRequestUnavailableException(ServiceRequestTemporarilyException):
     """
     Exception thrown when a service is currently unavailable.
+
+    This is a temporary condition (e.g. database connection closed, I/O error),
+    so the request may be retried.
     """
 
-    def __init__(self, service: ServiceName, request: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        service: ServiceName,
+        request: Optional[Any] = None,
+        response: Optional[Any] = None,
+    ) -> None:
         """
         Initializes a new instance of the ServiceRequestUnavailableException class.
 
         Args:
             service (ServiceName): The service name.
             request (Optional[Any]): The service request.
+            response (Optional[Any]): The service response associated with the exception.
         """
         human_readable = service.metadata.human_readable if hasattr(service, "metadata") else str(service)
-        super().__init__(SERVICE_REQUEST_UNAVAILABLE.format(human_readable), request)
+        super().__init__(
+            SERVICE_REQUEST_UNAVAILABLE.format(human_readable), request, response
+        )
 
 
 class ServiceRequestUnbalancedDelimiterException(ServiceRequestGeneralException):

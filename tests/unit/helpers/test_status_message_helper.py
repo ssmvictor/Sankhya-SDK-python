@@ -6,6 +6,15 @@ Testes unitários para status_message_helper.py
 import pytest
 from unittest.mock import Mock, MagicMock
 
+from sankhya_sdk.enums.service_name import ServiceName
+from sankhya_sdk.exceptions import (
+    ServiceRequestCompetitionException,
+    ServiceRequestDeadlockException,
+    ServiceRequestExternalException,
+    ServiceRequestInvalidCredentialsException,
+    ServiceRequestTemporarilyException,
+    ServiceRequestUnavailableException,
+)
 from sankhya_sdk.helpers.status_message_helper import (
     StatusMessageHelper,
     PROPERTY_VALUE_ERROR_PATTERN,
@@ -51,10 +60,112 @@ class TestStatusMessageHelper:
     ):
         """Não deve lançar exceção se status_message estiver vazio."""
         mock_response.status_message = Mock(decoded_value="")
-        
+
         StatusMessageHelper.process_status_message(
             mock_service, mock_request, mock_response
         )
+
+
+class TestStatusMessageHelperCommonMessages:
+    """
+    Testes do mapeamento de mensagens comuns para exceções.
+
+    Referência: Sankhya-SDK-dotnet/Src/Sankhya/Helpers/StatusMessageHelper.cs
+    (dicionário CommonMessages).
+    """
+
+    @staticmethod
+    def _response(message):
+        response = Mock()
+        response.status_message = Mock(decoded_value=message)
+        return response
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Operation not allowed after ResultSet object is closed",
+            "Falha no objeto de acesso a dados",
+            "The connection object is closed",
+            "I/O Error: Connection reset",
+            "TDS Protocol error: Invalid TDS packet header",
+            "Erro ao executar STP_SET_SESSION",
+            "java.lang.NullPointerException",
+        ],
+    )
+    def test_unavailable_messages_raise_unavailable_exception(self, message):
+        """Mensagens de indisponibilidade devem gerar ServiceRequestUnavailableException."""
+        request = Mock()
+        response = self._response(message)
+
+        with pytest.raises(ServiceRequestUnavailableException) as exc_info:
+            StatusMessageHelper.process_status_message(
+                ServiceName.CRUD_FIND, request, response
+            )
+
+        assert isinstance(exc_info.value, ServiceRequestTemporarilyException)
+        assert exc_info.value.request is request
+        assert exc_info.value.response is response
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Ocorreu uma situação de concorrência ao gravar o registro",
+            "Não foi possível gravar no log de acessos",
+            "Violação da restrição PRIMARY KEY 'PK_TSIRLG'",
+        ],
+    )
+    def test_competition_messages_raise_competition_exception(self, message):
+        """Mensagens de concorrência devem gerar ServiceRequestCompetitionException."""
+        request = Mock()
+        response = self._response(message)
+
+        with pytest.raises(ServiceRequestCompetitionException) as exc_info:
+            StatusMessageHelper.process_status_message(
+                ServiceName.CRUD_SAVE, request, response
+            )
+
+        assert exc_info.value.request is request
+        assert exc_info.value.response is response
+
+    def test_deadlock_message_raises_deadlock_exception(self):
+        """Mensagem de deadlock deve gerar ServiceRequestDeadlockException com a mensagem original."""
+        message = (
+            "Transaction (Process ID 52) was deadlocked on lock resources with "
+            "another process and has been chosen as the deadlock victim."
+        )
+        request = Mock()
+        response = self._response(message)
+
+        with pytest.raises(ServiceRequestDeadlockException) as exc_info:
+            StatusMessageHelper.process_status_message(
+                ServiceName.CRUD_SAVE, request, response
+            )
+
+        assert str(exc_info.value) == message
+        assert exc_info.value.request is request
+        assert exc_info.value.response is response
+
+    def test_internal_npe_message_raises_external_exception(self):
+        """Mensagem de erro interno (NPE) deve gerar ServiceRequestExternalException."""
+        request = Mock()
+        response = self._response("Ocorreu um erro interno (NPE) no servidor")
+
+        with pytest.raises(ServiceRequestExternalException) as exc_info:
+            StatusMessageHelper.process_status_message(
+                ServiceName.CRUD_FIND, request, response
+            )
+
+        assert exc_info.value.request is request
+        assert exc_info.value.response is response
+
+    def test_invalid_credentials_message_raises_invalid_credentials(self):
+        """Mensagem de usuário/senha inválido deve gerar ServiceRequestInvalidCredentialsException."""
+        response = self._response("Usuário/Senha inválido!")
+
+        with pytest.raises(ServiceRequestInvalidCredentialsException):
+            StatusMessageHelper.process_status_message(
+                ServiceName.LOGIN, Mock(), response
+            )
 
 
 class TestRegexPatterns:

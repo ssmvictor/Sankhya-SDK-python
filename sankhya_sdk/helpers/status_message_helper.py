@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Callable, Dict, Optional, Type
 from sankhya_sdk.exceptions import (
     ServiceRequestBusinessRuleRestrictionException,
     ServiceRequestCanceledQueryException,
+    ServiceRequestCompetitionException,
+    ServiceRequestDeadlockException,
     ServiceRequestDuplicatedDocumentException,
     ServiceRequestExpiredAuthenticationException,
     ServiceRequestExternalException,
@@ -142,16 +144,16 @@ class StatusMessageHelper:
             ServiceRequestUnbalancedDelimiterException(request=req)
         ),
         "situação de concorrência": lambda msg, svc, req, res: (
-            ServiceRequestUnavailableException(service=svc, request=req, response=res)
+            ServiceRequestCompetitionException(request=req, response=res)
         ),
         "log de acessos": lambda msg, svc, req, res: (
-            ServiceRequestUnavailableException(service=svc, request=req, response=res)
+            ServiceRequestCompetitionException(request=req, response=res)
         ),
         "violação da restrição primary key 'PK_TSIRLG'": lambda msg, svc, req, res: (
-            ServiceRequestUnavailableException(service=svc, request=req, response=res)
+            ServiceRequestCompetitionException(request=req, response=res)
         ),
         "deadlock": lambda msg, svc, req, res: (
-            ServiceRequestUnavailableException(service=svc, request=req, response=res)
+            ServiceRequestDeadlockException(message=msg, request=req, response=res)
         ),
         "não autorizado": lambda msg, svc, req, res: (
             ServiceRequestInvalidAuthorizationException()
