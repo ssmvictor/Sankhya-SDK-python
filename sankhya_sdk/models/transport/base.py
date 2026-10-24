@@ -12,7 +12,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Optional, Type, TypeVar, get_type_hints, get_origin, get_args
+from typing import Any, Dict, Optional, Type, TypeVar, get_origin, get_args
 
 from lxml import etree
 from lxml.etree import Element
@@ -136,11 +136,17 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
             # Trata entidades relacionadas (entity_reference)
             if metadata.reference is not None:
                 if value is not None and isinstance(value, TransportEntityBase):
-                    # Use custom wrapper tag if specified, otherwise use entity name
-                    wrapper_tag = metadata.reference.custom_relation_name or get_entity_name(type(value))
-                    wrapper = etree.Element(wrapper_tag)
-                    wrapper.append(value.to_xml())
-                    root.append(wrapper)
+                    custom_relation_name = metadata.reference.custom_relation_name
+                    if custom_relation_name:
+                        # Relação com nome customizado: <Relacao><Entidade>...</Entidade></Relacao>
+                        wrapper = etree.Element(custom_relation_name)
+                        wrapper.append(value.to_xml())
+                        root.append(wrapper)
+                    else:
+                        # Sem nome customizado o próprio elemento da entidade já
+                        # identifica a relação: <Entidade>...</Entidade> (sem
+                        # repetir <Entidade><Entidade>), simétrico ao from_xml.
+                        root.append(value.to_xml())
                 continue
             
             # Trata campos de lista (coleções)
@@ -210,30 +216,7 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
         Returns:
             Instância da entidade preenchida com dados do XML
         """
-        import sys
-        import typing
-        
         kwargs: Dict[str, Any] = {}
-        
-        # Build namespace for resolving forward references
-        # Include typing module for Optional, etc.
-        namespace: Dict[str, Any] = {}
-        namespace.update(vars(typing))  # Add Optional, Union, etc.
-        
-        # Add all transport entity classes
-        transport_module = sys.modules.get('sankhya_sdk.models.transport')
-        if transport_module:
-            namespace.update({
-                name: getattr(transport_module, name)
-                for name in dir(transport_module)
-                if not name.startswith('_')
-            })
-        
-        try:
-            type_hints = get_type_hints(cls, globalns=namespace, localns=namespace)
-        except NameError:
-            # Fallback if forward references can't be resolved
-            type_hints = {}
         
         for field_name, field_info in cls.model_fields.items():
             metadata = get_field_metadata(field_info)
@@ -242,8 +225,12 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
             if metadata.is_ignored:
                 continue
             
-            # Obtém o tipo do campo
-            field_type = type_hints.get(field_name, str)
+            # Obtém o tipo do campo já resolvido pelo pydantic (inclusive forward
+            # references resolvidas via model_rebuild). Usar get_type_hints com um
+            # globalns substituto descartava os imports do módulo da entidade
+            # (datetime, Decimal, enums), gerando NameError e fazendo todos os
+            # campos serem tratados como str (sem converter "S"/"N", enums, HHMMSS).
+            field_type = field_info.annotation if field_info.annotation is not None else str
             origin = get_origin(field_type)
             args = get_args(field_type)
             
