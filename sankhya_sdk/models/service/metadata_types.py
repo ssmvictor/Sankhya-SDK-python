@@ -23,6 +23,7 @@ from .xml_serialization import (
     from_base64,
     serialize_bool,
     deserialize_bool,
+    deserialize_optional_int,
 )
 from .basic_types import Field
 
