@@ -8,13 +8,16 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Service/
 
 from __future__ import annotations
 
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import BaseModel, ConfigDict, Field as PydanticField
+from pydantic import BaseModel, ConfigDict, Field as PydanticField, field_validator
 
+from sankhya_sdk.enums.billing_type import BillingType
+from .constants import SankhyaConstants
 from .xml_serialization import (
     create_xml_element,
     get_element_attr,
@@ -25,6 +28,89 @@ from .xml_serialization import (
     deserialize_optional_float,
 )
 from .basic_types import DataRow
+
+
+# Formato de DateTime.ToString(CultureInfo.InvariantCulture) do .NET
+# (padrão "G" da cultura invariante), usado em Invoices.cs nos atributos
+# dataSaida/dtFaturamento.
+_DOTNET_INVARIANT_DATETIME_FORMAT = "%m/%d/%Y %H:%M:%S"
+
+# Formato constante ("c") de TimeSpan.ToString() do .NET:
+# [-][d.]hh:mm:ss[.fffffff]
+_DOTNET_TIMESPAN_PATTERN = re.compile(
+    r"^(?P<sign>-)?(?:(?P<days>\d+)\.)?(?P<hours>\d{1,2}):(?P<minutes>\d{2})"
+    r"(?::(?P<seconds>\d{2})(?:\.(?P<fraction>\d{1,7}))?)?$"
+)
+
+
+def _format_dotnet_datetime(value: Optional[datetime]) -> str:
+    """
+    Formata uma data como o .NET faz em Invoices.cs.
+
+    Equivale a ``DateTime?.ToString(CultureInfo.InvariantCulture) ?? string.Empty``:
+    ``None`` vira string vazia.
+    """
+    if value is None:
+        return ""
+    return value.strftime(_DOTNET_INVARIANT_DATETIME_FORMAT)
+
+
+def _parse_dotnet_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Interpreta datas no formato invariante do .NET (ou ISO 8601)."""
+    if value is None or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        return datetime.strptime(text, _DOTNET_INVARIANT_DATETIME_FORMAT)
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _format_dotnet_timespan(value: Optional[timedelta]) -> str:
+    """
+    Formata um intervalo como ``TimeSpan?.ToString() ?? string.Empty`` do .NET.
+
+    Formato constante ("c"): ``[-][d.]hh:mm:ss[.fffffff]``.
+    """
+    if value is None:
+        return ""
+    total_microseconds = (
+        (value.days * 86400 + value.seconds) * 1_000_000 + value.microseconds
+    )
+    sign = "-" if total_microseconds < 0 else ""
+    total_microseconds = abs(total_microseconds)
+    total_seconds, microseconds = divmod(total_microseconds, 1_000_000)
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    result = sign + (f"{days}." if days else "")
+    result += f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    if microseconds:
+        # Ticks do .NET têm resolução de 100ns (7 casas decimais)
+        result += f".{microseconds * 10:07d}"
+    return result
+
+
+def _parse_dotnet_timespan(value: Optional[str]) -> Optional[timedelta]:
+    """Interpreta um intervalo no formato constante ("c") do .NET."""
+    if value is None or not value.strip():
+        return None
+    match = _DOTNET_TIMESPAN_PATTERN.match(value.strip())
+    if match is None:
+        return None
+    fraction = match.group("fraction") or ""
+    result = timedelta(
+        days=int(match.group("days") or 0),
+        hours=int(match.group("hours")),
+        minutes=int(match.group("minutes")),
+        seconds=int(match.group("seconds") or 0),
+        microseconds=int(fraction.ljust(7, "0")[:6]) if fraction else 0,
+    )
+    return -result if match.group("sign") else result
 
 
 class InvoiceItem(BaseModel):
@@ -214,6 +300,18 @@ class Invoice(BaseModel):
     Nota fiscal.
     
     Representa uma nota fiscal completa com cabeçalho e itens.
+
+    Campos portados de Sankhya-SDK-dotnet/Src/Sankhya/Service/Invoice.cs:
+
+    - ``value``: texto do elemento ``<nota>`` (.NET ``Value``, ``[XmlText]``),
+      ex.: o NUNOTA retornado pelo faturamento (``<nota>123</nota>``);
+    - ``single_number_duplication``: atributo ``NUNOTA``
+      (.NET ``SingleNumberDuplication``);
+    - ``single_number_duplication_destiny``: atributo ``nuNota``
+      (.NET ``SingleNumberDuplicationDestiny``), NUNOTA da nota gerada na
+      duplicação;
+    - ``single_number_duplication_source``: atributo ``nuNotaOrig``
+      (.NET ``SingleNumberDuplicationSource``), NUNOTA da nota de origem.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -228,14 +326,28 @@ class Invoice(BaseModel):
     issue_date: Optional[str] = None
     movement_date: Optional[str] = None
     total_value: Optional[float] = None
+    value: Optional[str] = None
+    single_number_duplication: Optional[int] = None
+    single_number_duplication_destiny: Optional[int] = None
+    single_number_duplication_source: Optional[int] = None
     items: List[InvoiceItem] = PydanticField(default_factory=list)
     accompaniments: List[Accompaniment] = PydanticField(default_factory=list)
     extra_data: Dict[str, Any] = PydanticField(default_factory=dict)
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _coerce_value(cls, value: Any) -> Any:
+        """Aceita inteiros (o .NET tipa ``Value`` como int) convertendo para texto."""
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        return value
 
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("nota")
         
+        if self.value is not None:
+            elem.text = str(self.value)
         if self.number is not None:
             elem.set("numero", str(self.number))
         if self.unique_number is not None:
@@ -248,6 +360,12 @@ class Invoice(BaseModel):
             elem.set("codparc", str(self.partner_code))
         if self.top_code is not None:
             elem.set("codtipoper", str(self.top_code))
+        if self.single_number_duplication is not None:
+            elem.set("NUNOTA", str(self.single_number_duplication))
+        if self.single_number_duplication_destiny is not None:
+            elem.set("nuNota", str(self.single_number_duplication_destiny))
+        if self.single_number_duplication_source is not None:
+            elem.set("nuNotaOrig", str(self.single_number_duplication_source))
         
         if self.issue_date:
             create_xml_element("dtEmissao", self.issue_date, parent=elem)
@@ -306,6 +424,16 @@ class Invoice(BaseModel):
             issue_date=get_element_text(element.find("dtEmissao")),
             movement_date=get_element_text(element.find("dtMov")),
             total_value=deserialize_optional_float(get_element_text(element.find("vlrNota"))),
+            value=(element.text or "").strip() or None,
+            single_number_duplication=deserialize_optional_int(
+                get_element_attr(element, "NUNOTA")
+            ),
+            single_number_duplication_destiny=deserialize_optional_int(
+                get_element_attr(element, "nuNota")
+            ),
+            single_number_duplication_source=deserialize_optional_int(
+                get_element_attr(element, "nuNotaOrig")
+            ),
             items=items,
             accompaniments=accompaniments,
             extra_data=extra_data,
@@ -313,15 +441,107 @@ class Invoice(BaseModel):
 
 
 class Invoices(BaseModel):
-    """Lista de notas fiscais."""
+    """
+    Lista de notas fiscais (elemento ``<notas>``).
+
+    Além das notas (``items``, elementos ``<nota>``), carrega os parâmetros de
+    faturamento/duplicação que o .NET serializa como ATRIBUTOS de ``<notas>``
+    (Sankhya-SDK-dotnet/Src/Sankhya/Service/Invoices.cs). Cada atributo só é
+    serializado quando o campo foi informado (equivalente aos ``ShouldSerialize*``
+    do .NET):
+
+    - ``code_operation_type`` -> ``codTipOper``
+    - ``code_operation_type_duplication`` -> ``top``
+    - ``series`` -> ``serie``
+    - ``return_disapproved_invoices`` -> ``retNotasReprovadas`` (``S``/``N``)
+    - ``should_update_price`` -> ``atualizaPreco`` (``true``/``false``)
+    - ``should_duplicate_all_items`` -> ``duplicarTodosItens`` (``true``/``false``)
+    - ``is_date_validated`` -> ``dataValidada`` (``S``/``N``)
+    - ``one_invoice_for_each`` -> ``umaNotaParaCada`` (``S``/``N``)
+    - ``date_exit_duplication`` -> ``dataSaida``
+    - ``date_billing`` -> ``dtFaturamento``
+    - ``date_exit`` -> ``dtSaida``
+    - ``time_exit`` -> ``hrSaida`` (formato ``TimeSpan`` ``[-][d.]hh:mm:ss``)
+    - ``billing_type`` -> ``tipoFaturamento`` (valor interno de ``BillingType``)
+
+    Datas usam o formato de ``DateTime.ToString(CultureInfo.InvariantCulture)``
+    (``MM/dd/yyyy HH:mm:ss``). Como no .NET (que define ``*Nullable = null``
+    no faturamento), um campo de data/hora informado explicitamente como
+    ``None`` é serializado como atributo vazio (ex.: ``dtFaturamento=""``).
+
+    Elementos filhos, na ordem do .NET: ``single_numbers`` (``<nunota>``),
+    ``invoices_with_currency`` (``<notasComMoeda>``) e ``items`` (``<nota>``).
+    """
 
     model_config = ConfigDict(frozen=False)
 
+    single_numbers: List[int] = PydanticField(default_factory=list)
+    code_operation_type: Optional[int] = None
+    code_operation_type_duplication: Optional[int] = None
+    series: Optional[int] = None
+    return_disapproved_invoices: Optional[bool] = None
+    should_update_price: Optional[bool] = None
+    should_duplicate_all_items: Optional[bool] = None
+    is_date_validated: Optional[bool] = None
+    one_invoice_for_each: Optional[bool] = None
+    date_exit_duplication: Optional[datetime] = None
+    date_billing: Optional[datetime] = None
+    date_exit: Optional[datetime] = None
+    time_exit: Optional[timedelta] = None
+    billing_type: Optional[BillingType] = None
+    invoices_with_currency: Optional["InvoicesWithCurrency"] = None
     items: List[Invoice] = PydanticField(default_factory=list)
 
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("notas")
+
+        if self.code_operation_type is not None:
+            elem.set("codTipOper", str(self.code_operation_type))
+        if self.code_operation_type_duplication is not None:
+            elem.set("top", str(self.code_operation_type_duplication))
+        if self.series is not None:
+            elem.set("serie", str(self.series))
+        if self.return_disapproved_invoices is not None:
+            elem.set(
+                "retNotasReprovadas",
+                serialize_bool(
+                    self.return_disapproved_invoices, SankhyaConstants.BOOL_FORMAT_S_N
+                ),
+            )
+        if self.should_update_price is not None:
+            elem.set("atualizaPreco", serialize_bool(self.should_update_price))
+        if self.should_duplicate_all_items is not None:
+            elem.set("duplicarTodosItens", serialize_bool(self.should_duplicate_all_items))
+        if self.is_date_validated is not None:
+            elem.set(
+                "dataValidada",
+                serialize_bool(self.is_date_validated, SankhyaConstants.BOOL_FORMAT_S_N),
+            )
+        if self.one_invoice_for_each is not None:
+            elem.set(
+                "umaNotaParaCada",
+                serialize_bool(self.one_invoice_for_each, SankhyaConstants.BOOL_FORMAT_S_N),
+            )
+
+        # Datas/horas: serializadas quando informadas, mesmo que como None
+        fields_set = self.model_fields_set
+        if self.date_exit_duplication is not None or "date_exit_duplication" in fields_set:
+            elem.set("dataSaida", _format_dotnet_datetime(self.date_exit_duplication))
+        if self.date_billing is not None or "date_billing" in fields_set:
+            elem.set("dtFaturamento", _format_dotnet_datetime(self.date_billing))
+        if self.date_exit is not None or "date_exit" in fields_set:
+            elem.set("dtSaida", _format_dotnet_datetime(self.date_exit))
+        if self.time_exit is not None or "time_exit" in fields_set:
+            elem.set("hrSaida", _format_dotnet_timespan(self.time_exit))
+
+        if self.billing_type is not None:
+            elem.set("tipoFaturamento", self.billing_type.internal_value)
+
+        for single_number in self.single_numbers:
+            create_xml_element("nunota", str(single_number), parent=elem)
+        if self.invoices_with_currency is not None:
+            elem.append(self.invoices_with_currency.to_xml())
         for item in self.items:
             elem.append(item.to_xml())
         return elem
@@ -330,14 +550,84 @@ class Invoices(BaseModel):
     def from_xml(cls, element: Element) -> "Invoices":
         """Deserializa de elemento XML."""
         items = [Invoice.from_xml(child) for child in element.findall("nota")]
-        return cls(items=items)
+
+        data: Dict[str, Any] = {"items": items}
+
+        single_numbers = [
+            number
+            for number in (
+                deserialize_optional_int(get_element_text(child))
+                for child in element.findall("nunota")
+            )
+            if number is not None
+        ]
+        if single_numbers:
+            data["single_numbers"] = single_numbers
+
+        currency_elem = element.find("notasComMoeda")
+        if currency_elem is not None:
+            data["invoices_with_currency"] = InvoicesWithCurrency.from_xml(currency_elem)
+
+        int_attributes = {
+            "codTipOper": "code_operation_type",
+            "top": "code_operation_type_duplication",
+            "serie": "series",
+        }
+        for attr_name, field_name in int_attributes.items():
+            attr_value = deserialize_optional_int(get_element_attr(element, attr_name))
+            if attr_value is not None:
+                data[field_name] = attr_value
+
+        bool_attributes = {
+            "retNotasReprovadas": "return_disapproved_invoices",
+            "atualizaPreco": "should_update_price",
+            "duplicarTodosItens": "should_duplicate_all_items",
+            "dataValidada": "is_date_validated",
+            "umaNotaParaCada": "one_invoice_for_each",
+        }
+        for attr_name, field_name in bool_attributes.items():
+            attr_value = get_element_attr(element, attr_name)
+            if attr_value is not None:
+                data[field_name] = deserialize_bool(attr_value)
+
+        # Atributos de data/hora presentes (mesmo vazios) são considerados
+        # informados, preservando o "ShouldSerialize" na reserialização
+        date_attributes = {
+            "dataSaida": "date_exit_duplication",
+            "dtFaturamento": "date_billing",
+            "dtSaida": "date_exit",
+        }
+        for attr_name, field_name in date_attributes.items():
+            attr_value = get_element_attr(element, attr_name)
+            if attr_value is not None:
+                data[field_name] = _parse_dotnet_datetime(attr_value)
+
+        time_exit = get_element_attr(element, "hrSaida")
+        if time_exit is not None:
+            data["time_exit"] = _parse_dotnet_timespan(time_exit)
+
+        billing_type = get_element_attr(element, "tipoFaturamento")
+        if billing_type is not None:
+            try:
+                data["billing_type"] = BillingType.from_internal_value(billing_type)
+            except ValueError:
+                pass
+
+        return cls(**data)
 
 
 class InvoicesWithCurrency(BaseModel):
-    """Notas fiscais com informações de moeda."""
+    """
+    Notas fiscais com informações de moeda (elemento ``<notasComMoeda>``).
+
+    ``currency_value`` corresponde ao atributo ``valorMoeda`` do .NET
+    (Sankhya-SDK-dotnet/Src/Sankhya/Service/InvoicesWithCurrency.cs), enviado
+    como ``"undefined"`` no faturamento.
+    """
 
     model_config = ConfigDict(frozen=False)
 
+    currency_value: Optional[str] = None
     currency_code: Optional[str] = None
     exchange_rate: Optional[float] = None
     invoices: List[Invoice] = PydanticField(default_factory=list)
@@ -346,6 +636,8 @@ class InvoicesWithCurrency(BaseModel):
         """Serializa para elemento XML."""
         elem = etree.Element("notasComMoeda")
         
+        if self.currency_value is not None:
+            elem.set("valorMoeda", self.currency_value)
         if self.currency_code:
             elem.set("codMoeda", self.currency_code)
         if self.exchange_rate is not None:
@@ -362,12 +654,17 @@ class InvoicesWithCurrency(BaseModel):
         invoices = [Invoice.from_xml(child) for child in element.findall("nota")]
         
         return cls(
+            currency_value=get_element_attr(element, "valorMoeda"),
             currency_code=get_element_attr(element, "codMoeda"),
             exchange_rate=deserialize_optional_float(
                 get_element_attr(element, "taxaCambio")
             ),
             invoices=invoices,
         )
+
+
+# Invoices referencia InvoicesWithCurrency (definida depois dela)
+Invoices.model_rebuild()
 
 
 class CancelledInvoice(BaseModel):
