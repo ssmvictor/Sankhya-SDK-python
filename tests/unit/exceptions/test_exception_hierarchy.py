@@ -6,6 +6,7 @@ from sankhya_sdk.exceptions import (
     ServiceRequestTimeoutException,
     ServiceRequestExternalException,
     ServiceRequestUnavailableException,
+    ServiceRequestInaccessibleException,
     IXmlServiceException,
 )
 from sankhya_sdk.enums.service_name import ServiceName
@@ -56,3 +57,20 @@ def test_external_exception_is_temporarily_and_keeps_response() -> None:
     assert exc.request is request
     assert exc.response is response
     assert "Internal Sankhya error (NPE) on call to the CRUD - Retrieve service" in str(exc)
+
+def test_inaccessible_exception_is_temporarily_and_keeps_inner_exception() -> None:
+    """Paridade com .NET: ServiceRequestInaccessibleException(host, port, request,
+    innerException) deriva de ServiceRequestTemporarilyException."""
+    request: object = object()
+    inner: Exception = ConnectionError("Connection refused")
+    exc = ServiceRequestInaccessibleException("sankhya.local", 8180, request, inner)
+
+    assert isinstance(exc, ServiceRequestTemporarilyException)
+    assert isinstance(exc, ServiceRequestGeneralException)
+    assert exc.request is request
+    assert exc.__cause__ is inner
+    assert str(exc) == "Unable to connect to Sankhya server at address sankhya.local:8180"
+
+    exc_without_inner = ServiceRequestInaccessibleException("sankhya.local", 8180)
+    assert exc_without_inner.request is None
+    assert exc_without_inner.__cause__ is None

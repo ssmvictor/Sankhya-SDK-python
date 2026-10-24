@@ -39,7 +39,7 @@ SERVICE_REQUEST_DUPLICATED_DOCUMENT = "The partner {0} has the document duplicat
 SERVICE_REQUEST_FULL_TRANSACTION_LOGS = "The transaction logs of '{0}' database is full"
 SERVICE_REQUEST_INVALID_RELATION = "The relation {0} of entity {1} cannot be found on Sankhya"
 SERVICE_REQUEST_INVALID_OPERATION = "Unable to process the service response"
-SERVICE_REQUEST_COMPETITION = "A competition/concurrency error occurred during the service request"
+SERVICE_REQUEST_COMPETITION = "The session has been identified as duplicated by Sankhya"
 SERVICE_REQUEST_DEADLOCK = "A deadlock occurred during the transaction"
 
 # Operation specific messages

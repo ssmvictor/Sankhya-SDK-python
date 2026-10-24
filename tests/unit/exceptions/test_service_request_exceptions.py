@@ -80,3 +80,193 @@ def test_other_advanced_exceptions() -> None:
     assert "The partner John Doe has the document duplicated with another partner" in str(ServiceRequestDuplicatedDocumentException("John Doe"))
     assert "The transaction logs of 'SANKHYA' database is full" in str(ServiceRequestFullTransactionLogsException("SANKHYA"))
     assert "The relation Items of entity Invoice cannot be found on Sankhya" in str(ServiceRequestInvalidRelationException("Items", "Invoice"))
+
+
+# =============================================================================
+# Paridade de construtores com o .NET (Src/Sankhya/GoodPractices/*.cs)
+# =============================================================================
+
+from sankhya_sdk.exceptions import (
+    ServiceRequestBusinessRuleRestrictionException,
+    ServiceRequestCanceledQueryException,
+    ServiceRequestCompetitionException,
+    ServiceRequestFileNotFoundException,
+    ServiceRequestForeignKeyException,
+    ServiceRequestInvalidExpressionException,
+)
+from sankhya_sdk.models.service.basic_types import LiteralCriteria
+from sankhya_sdk.models.service.entity_types import DataSet, Entity
+from sankhya_sdk.models.service.metadata_types import Config
+from sankhya_sdk.models.service.service_request import ServiceRequest
+
+
+class MockDataSet:
+    def __init__(self, root_entity: str) -> None:
+        self.root_entity: str = root_entity
+
+
+def test_property_value_exception_resolves_entity_from_request() -> None:
+    """.NET: ServiceRequestPropertyValueException(propertyName, request) obtém a
+    entidade de RequestBody.Entity?.Name ?? Entity?.RootEntity ?? DataSet.RootEntity."""
+    mock_request: MockRequest = MockRequest(ServiceName.CRUD_FIND, entity_name="Parceiro")
+
+    exc = ServiceRequestPropertyValueException("CODPARC", request=mock_request)
+
+    assert str(exc) == "The call to the service CRUD - Retrieve couldn't find the field CODPARC on entity Parceiro"
+    assert exc.property_name == "CODPARC"
+    assert exc.request is mock_request
+
+
+def test_property_value_exception_falls_back_to_data_set_root_entity() -> None:
+    mock_request: MockRequest = MockRequest(
+        ServiceName.CRUD_SERVICE_FIND, data_set=MockDataSet("Produto")
+    )
+
+    exc = ServiceRequestPropertyValueException("CODPROD", request=mock_request)
+
+    assert str(exc) == (
+        "The call to the service CRUD Service Provider - Retrieve couldn't find the field CODPROD on entity Produto"
+    )
+
+
+def test_property_value_exception_keeps_explicit_entity_name() -> None:
+    exc = ServiceRequestPropertyValueException("Code", "Partner", MockRequest(ServiceName.CRUD_FIND, entity_name="Other"))
+
+    assert "couldn't find the field Code on entity Partner" in str(exc)
+    assert exc.property_name == "Code"
+
+
+def test_invalid_expression_exception_resolves_expression_from_data_set() -> None:
+    """.NET: ServiceRequestInvalidExpressionException(request, response) usa
+    RequestBody.DataSet.LiteralCriteria.Expression no CRUDServiceProvider.loadRecords."""
+    request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+    request.request_body.data_set = DataSet(
+        root_entity="Parceiro", literal_criteria=LiteralCriteria(expression="CODPARC = ")
+    )
+    response: object = object()
+
+    exc = ServiceRequestInvalidExpressionException(request=request, response=response)
+
+    assert str(exc) == "The filter expression 'CODPARC = ' is invalid, check if it is a valid SQL expression!"
+    assert exc.request is request
+    assert exc.response is response
+
+
+def test_invalid_expression_exception_resolves_expression_from_entity() -> None:
+    """.NET: nos demais serviços usa RequestBody.Entity.LiteralCriteria.Expression."""
+    request = ServiceRequest(service=ServiceName.CRUD_FIND)
+    request.request_body.entity = Entity(
+        name="Parceiro", literal_criteria=LiteralCriteria(expression="NOMEPARC LIKE")
+    )
+
+    exc = ServiceRequestInvalidExpressionException(request=request)
+
+    assert "The filter expression 'NOMEPARC LIKE' is invalid" in str(exc)
+
+
+def test_invalid_expression_exception_keeps_explicit_expression() -> None:
+    exc = ServiceRequestInvalidExpressionException("A = B", None)
+
+    assert "The filter expression 'A = B' is invalid" in str(exc)
+
+
+def test_canceled_query_exception_uses_message_as_is() -> None:
+    """.NET: ServiceRequestCanceledQueryException(message, request) usa a mensagem
+    de status recebida, sem formatação."""
+    request: object = object()
+    response: object = object()
+
+    exc = ServiceRequestCanceledQueryException(
+        message="A consulta foi cancelada.", request=request, response=response
+    )
+
+    assert str(exc) == "A consulta foi cancelada."
+    assert exc.request is request
+    assert exc.response is response
+
+
+def test_canceled_query_exception_keeps_seconds_message() -> None:
+    exc = ServiceRequestCanceledQueryException(15)
+
+    assert str(exc) == "Query canceled, probably overloaded on server. Taking 15 seconds to retry."
+
+
+def test_file_not_found_exception_resolves_path_from_request() -> None:
+    """.NET: ServiceRequestFileNotFoundException(request) usa RequestBody.Config.Path."""
+    request = ServiceRequest(service=ServiceName.CRUD_FIND)
+    request.request_body.config = Config(path="Repo/Contratos/contrato.pdf")
+
+    exc = ServiceRequestFileNotFoundException(request=request)
+
+    assert str(exc) == "Unable to load the file from path Repo/Contratos/contrato.pdf. File or directory not found."
+    assert exc.request is request
+
+
+def test_file_not_found_exception_keeps_explicit_path() -> None:
+    exc = ServiceRequestFileNotFoundException("ABC123")
+
+    assert str(exc) == "Unable to load the file from path ABC123. File or directory not found."
+
+
+def test_file_not_found_exception_without_request() -> None:
+    exc = ServiceRequestFileNotFoundException(request=None)
+
+    assert str(exc) == "Unable to load the file from path . File or directory not found."
+
+
+def test_foreign_key_exception_keeps_response() -> None:
+    """.NET: ServiceRequestForeignKeyException(table, column, request, response)."""
+    request: object = object()
+    response: object = object()
+
+    exc = ServiceRequestForeignKeyException("TGFPAR", "CODCID", request, response)
+
+    assert str(exc) == "The value supplied to TGFPAR.CODCID reference isn't valid."
+    assert exc.request is request
+    assert exc.response is response
+
+
+def test_duplicated_document_exception_keeps_response() -> None:
+    """.NET: ServiceRequestDuplicatedDocumentException(name, request, response)."""
+    response: object = object()
+
+    exc = ServiceRequestDuplicatedDocumentException("João", None, response)
+
+    assert str(exc) == "The partner João has the document duplicated with another partner"
+    assert exc.response is response
+
+
+def test_business_rule_restriction_exception_keeps_response_and_properties() -> None:
+    """.NET: ServiceRequestBusinessRuleRestrictionException(businessRuleName, errorMessage,
+    request, response) expõe BusinessRuleName e ErrorMessage."""
+    response: object = object()
+
+    exc = ServiceRequestBusinessRuleRestrictionException(
+        "Validação de Crédito", "Limite excedido.", None, response
+    )
+
+    assert str(exc) == (
+        "The business rule Validação de Crédito doesn't allow the request to be completed. "
+        "Error message: Limite excedido."
+    )
+    assert exc.business_rule_name == "Validação de Crédito"
+    assert exc.error_message == "Limite excedido."
+    assert exc.response is response
+
+
+def test_full_transaction_logs_exception_keeps_response_and_database() -> None:
+    """.NET: ServiceRequestFullTransactionLogsException(database, request, response)
+    expõe Database."""
+    response: object = object()
+
+    exc = ServiceRequestFullTransactionLogsException("SANKHYA", None, response)
+
+    assert exc.database == "SANKHYA"
+    assert exc.response is response
+
+
+def test_competition_exception_message_matches_dotnet() -> None:
+    """.NET Resources.resx: ServiceRequestCompetitionException."""
+    exc = ServiceRequestCompetitionException()
+
+    assert str(exc) == "The session has been identified as duplicated by Sankhya"

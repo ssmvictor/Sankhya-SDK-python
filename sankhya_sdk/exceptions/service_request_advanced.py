@@ -189,16 +189,22 @@ class ServiceRequestDuplicatedDocumentException(ServiceRequestGeneralException):
     Exception thrown when a partner has a duplicated document.
     """
 
-    def __init__(self, partner_name: str, request: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        partner_name: str,
+        request: Optional[Any] = None,
+        response: Optional[Any] = None,
+    ) -> None:
         """
         Initializes a new instance of the ServiceRequestDuplicatedDocumentException class.
 
         Args:
             partner_name (str): The name of the partner.
             request (Optional[Any]): The service request.
+            response (Optional[Any]): The service response associated with the exception.
         """
         super().__init__(
-            SERVICE_REQUEST_DUPLICATED_DOCUMENT.format(partner_name), request
+            SERVICE_REQUEST_DUPLICATED_DOCUMENT.format(partner_name), request, response
         )
 
 
@@ -207,17 +213,24 @@ class ServiceRequestFullTransactionLogsException(ServiceRequestGeneralException)
     Exception thrown when the transaction logs of a database are full.
     """
 
-    def __init__(self, database_name: str, request: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        database_name: str,
+        request: Optional[Any] = None,
+        response: Optional[Any] = None,
+    ) -> None:
         """
         Initializes a new instance of the ServiceRequestFullTransactionLogsException class.
 
         Args:
             database_name (str): The name of the database.
             request (Optional[Any]): The service request.
+            response (Optional[Any]): The service response associated with the exception.
         """
         super().__init__(
-            SERVICE_REQUEST_FULL_TRANSACTION_LOGS.format(database_name), request
+            SERVICE_REQUEST_FULL_TRANSACTION_LOGS.format(database_name), request, response
         )
+        self.database = database_name
 
 
 class ServiceRequestInvalidRelationException(ServiceRequestGeneralException):

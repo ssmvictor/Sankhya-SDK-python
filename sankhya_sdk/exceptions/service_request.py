@@ -28,6 +28,36 @@ from .messages import (
 from ..enums.service_name import ServiceName
 
 
+def _get_request_entity_name(request: Optional[Any]) -> str:
+    """
+    Resolves the entity name of a service request, as the .NET SDK does with
+    ``RequestBody.Entity?.Name ?? RequestBody.Entity?.RootEntity ?? RequestBody.DataSet.RootEntity``.
+
+    Args:
+        request (Optional[Any]): The service request.
+
+    Returns:
+        str: The entity name, or an empty string when it cannot be resolved.
+    """
+    body = getattr(request, "request_body", None)
+    if body is None:
+        return ""
+
+    entity = getattr(body, "entity", None)
+    if entity is not None:
+        name = getattr(entity, "name", None) or getattr(entity, "root_entity", None)
+        if name:
+            return str(name)
+
+    data_set = getattr(body, "data_set", None)
+    if data_set is not None:
+        root_entity = getattr(data_set, "root_entity", None)
+        if root_entity:
+            return str(root_entity)
+
+    return ""
+
+
 class ServiceRequestTimeoutException(ServiceRequestTemporarilyException):
     """
     Exception thrown when a service request times out.
@@ -90,24 +120,33 @@ class ServiceRequestPropertyValueException(ServiceRequestGeneralException):
     """
 
     def __init__(
-        self, property_name: str, entity_name: str, request: Optional[Any] = None
+        self,
+        property_name: str,
+        entity_name: Optional[str] = None,
+        request: Optional[Any] = None,
     ) -> None:
         """
         Initializes a new instance of the ServiceRequestPropertyValueException class.
 
         Args:
             property_name (str): The name of the property.
-            entity_name (str): The name of the entity.
+            entity_name (Optional[str]): The name of the entity. When omitted, it is
+                resolved from the request (Entity.Name, Entity.RootEntity or
+                DataSet.RootEntity), as in the .NET SDK.
             request (Optional[Any]): The service request.
         """
         service_name = "Unknown"
         if request is not None and hasattr(request, "service") and isinstance(request.service, ServiceName):
             service_name = request.service.metadata.human_readable
-            
+
+        if entity_name is None:
+            entity_name = _get_request_entity_name(request)
+
         super().__init__(
             SERVICE_REQUEST_PROPERTY_VALUE.format(service_name, property_name, entity_name),
             request,
         )
+        self.property_name = property_name
 
 
 class ServiceRequestPropertyWidthException(ServiceRequestGeneralException):
@@ -182,7 +221,11 @@ class ServiceRequestBusinessRuleRestrictionException(ServiceRequestGeneralExcept
     """
 
     def __init__(
-        self, rule_name: str, message: str, request: Optional[Any] = None
+        self,
+        rule_name: str,
+        message: str,
+        request: Optional[Any] = None,
+        response: Optional[Any] = None,
     ) -> None:
         """
         Initializes a new instance of the ServiceRequestBusinessRuleRestrictionException class.
@@ -191,10 +234,15 @@ class ServiceRequestBusinessRuleRestrictionException(ServiceRequestGeneralExcept
             rule_name (str): The name of the business rule.
             message (str): The error message from the business rule.
             request (Optional[Any]): The service request.
+            response (Optional[Any]): The service response associated with the exception.
         """
         super().__init__(
-            SERVICE_REQUEST_BUSINESS_RULE_RESTRICTION.format(rule_name, message), request
+            SERVICE_REQUEST_BUSINESS_RULE_RESTRICTION.format(rule_name, message),
+            request,
+            response,
         )
+        self.business_rule_name = rule_name
+        self.error_message = message
 
 
 class ServiceRequestCanceledQueryException(ServiceRequestGeneralException):
@@ -202,15 +250,28 @@ class ServiceRequestCanceledQueryException(ServiceRequestGeneralException):
     Exception thrown when a query is canceled due to server overload.
     """
 
-    def __init__(self, seconds: int, request: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        seconds: Optional[int] = None,
+        request: Optional[Any] = None,
+        response: Optional[Any] = None,
+        message: Optional[str] = None,
+    ) -> None:
         """
         Initializes a new instance of the ServiceRequestCanceledQueryException class.
 
         Args:
-            seconds (int): The number of seconds to wait before retrying.
+            seconds (Optional[int]): The number of seconds to wait before retrying.
+                Only used when ``message`` is not supplied.
             request (Optional[Any]): The service request.
+            response (Optional[Any]): The service response associated with the exception.
+            message (Optional[str]): The error message. As in the .NET SDK
+                (``ServiceRequestCanceledQueryException(message, request)``), the
+                status message returned by Sankhya is used as is.
         """
-        super().__init__(SERVICE_REQUEST_CANCELED_QUERY.format(seconds), request)
+        if message is None:
+            message = SERVICE_REQUEST_CANCELED_QUERY.format(seconds)
+        super().__init__(message, request, response)
 
 
 class ServiceRequestExternalException(ServiceRequestTemporarilyException):
@@ -244,18 +305,25 @@ class ServiceRequestForeignKeyException(ServiceRequestGeneralException):
     """
 
     def __init__(
-        self, entity_name: str, property_name: str, request: Optional[Any] = None
+        self,
+        entity_name: str,
+        property_name: str,
+        request: Optional[Any] = None,
+        response: Optional[Any] = None,
     ) -> None:
         """
         Initializes a new instance of the ServiceRequestForeignKeyException class.
 
         Args:
-            entity_name (str): The name of the entity.
-            property_name (str): The name of the property.
+            entity_name (str): The name of the entity (table).
+            property_name (str): The name of the property (column).
             request (Optional[Any]): The service request.
+            response (Optional[Any]): The service response associated with the exception.
         """
         super().__init__(
-            SERVICE_REQUEST_FOREIGN_KEY.format(entity_name, property_name), request
+            SERVICE_REQUEST_FOREIGN_KEY.format(entity_name, property_name),
+            request,
+            response,
         )
 
 
@@ -264,23 +332,39 @@ class ServiceRequestFileNotFoundException(ServiceRequestGeneralException):
     Exception thrown when a file is not found.
     """
 
-    def __init__(self, file_path: str, request: Optional[Any] = None) -> None:
+    def __init__(
+        self, file_path: Optional[str] = None, request: Optional[Any] = None
+    ) -> None:
         """
         Initializes a new instance of the ServiceRequestFileNotFoundException class.
 
         Args:
-            file_path (str): The path to the file.
+            file_path (Optional[str]): The path to the file. When omitted, it is
+                resolved from the request (``RequestBody.Config.Path``), as in the
+                .NET SDK.
             request (Optional[Any]): The service request.
         """
+        if file_path is None:
+            body = getattr(request, "request_body", None)
+            config = getattr(body, "config", None) if body is not None else None
+            file_path = (getattr(config, "path", None) if config is not None else None) or ""
         super().__init__(SERVICE_REQUEST_FILE_NOT_FOUND.format(file_path), request)
 
 
-class ServiceRequestInaccessibleException(ServiceRequestGeneralException):
+class ServiceRequestInaccessibleException(ServiceRequestTemporarilyException):
     """
     Exception thrown when the Sankhya server is inaccessible.
+
+    This is a temporary condition, so the request may be retried.
     """
 
-    def __init__(self, host: str, port: int, request: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        request: Optional[Any] = None,
+        inner_exception: Optional[Exception] = None,
+    ) -> None:
         """
         Initializes a new instance of the ServiceRequestInaccessibleException class.
 
@@ -288,8 +372,14 @@ class ServiceRequestInaccessibleException(ServiceRequestGeneralException):
             host (str): The server host.
             port (int): The server port.
             request (Optional[Any]): The service request.
+            inner_exception (Optional[Exception]): The exception that is the cause of the current exception.
         """
-        super().__init__(SERVICE_REQUEST_INACCESSIBLE.format(host, port), request)
+        super().__init__(
+            SERVICE_REQUEST_INACCESSIBLE.format(host, port),
+            request,
+            None,
+            inner_exception,
+        )
 
 
 class ServiceRequestInvalidExpressionException(ServiceRequestGeneralException):
@@ -297,15 +387,52 @@ class ServiceRequestInvalidExpressionException(ServiceRequestGeneralException):
     Exception thrown when a filter expression is invalid.
     """
 
-    def __init__(self, expression: str, request: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        expression: Optional[str] = None,
+        request: Optional[Any] = None,
+        response: Optional[Any] = None,
+    ) -> None:
         """
         Initializes a new instance of the ServiceRequestInvalidExpressionException class.
 
         Args:
-            expression (str): The invalid expression.
+            expression (Optional[str]): The invalid expression. When omitted, it is
+                resolved from the literal criteria of the request, as in the .NET SDK.
             request (Optional[Any]): The service request.
+            response (Optional[Any]): The service response associated with the exception.
         """
-        super().__init__(SERVICE_REQUEST_INVALID_EXPRESSION.format(expression), request)
+        if expression is None:
+            expression = self._get_request_expression(request)
+        super().__init__(
+            SERVICE_REQUEST_INVALID_EXPRESSION.format(expression), request, response
+        )
+
+    @staticmethod
+    def _get_request_expression(request: Optional[Any]) -> str:
+        """
+        Resolves the literal criteria expression of a service request, as the .NET SDK does:
+        ``RequestBody.DataSet.LiteralCriteria.Expression`` for CRUDServiceProvider.loadRecords
+        and ``RequestBody.Entity.LiteralCriteria.Expression`` for the other services.
+
+        Args:
+            request (Optional[Any]): The service request.
+
+        Returns:
+            str: The expression, or an empty string when it cannot be resolved.
+        """
+        body = getattr(request, "request_body", None)
+        if body is None:
+            return ""
+
+        if getattr(request, "service", None) == ServiceName.CRUD_SERVICE_FIND:
+            container = getattr(body, "data_set", None)
+        else:
+            container = getattr(body, "entity", None)
+
+        criteria = getattr(container, "literal_criteria", None) if container is not None else None
+        expression = getattr(criteria, "expression", None) if criteria is not None else None
+        return expression or ""
 
 
 class ServiceRequestInvalidSubqueryException(ServiceRequestGeneralException):
