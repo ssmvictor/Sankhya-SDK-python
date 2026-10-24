@@ -922,6 +922,84 @@ class TestPagedRequestException:
         assert exc.request is request
 
 
+class TestPagedRequestStopRule:
+    """
+    Regra de parada da paginação (LoadResponseInternal, PagedRequestWrapper.cs).
+
+    No .NET o totalPages da resposta só alimenta o TTL do cache: a carga
+    para pela quantidade da página (ou max_results), não por totalPages.
+    """
+
+    @staticmethod
+    def _pages() -> List[ServiceResponse]:
+        """
+        550 registros em 150 + 300 + 100, com totalPages=2.
+
+        Um totalPages calculado sobre páginas de 300 (550/300 -> 2) não
+        considera a primeira página de 150: parar por ele perderia a última
+        página.
+        """
+        def rows(first: int, last: int) -> List[Dict[str, Any]]:
+            return [{"code": i, "name": f"Entity {i}"} for i in range(first, last + 1)]
+
+        return [
+            _provider_entities_response(rows(1, 150), pager_id="P-1", total_pages=2),
+            _provider_entities_response(rows(151, 450), pager_id="P-1", total_pages=2),
+            _provider_entities_response(rows(451, 550), pager_id="P-1", total_pages=2),
+        ]
+
+    @staticmethod
+    def _wrapper() -> PagedRequestWrapper:
+        request = ServiceRequest(
+            service=ServiceName.CRUD_SERVICE_FIND,
+            request_body=RequestBody(data_set=DataSet(root_entity="Parceiro")),
+        )
+        return PagedRequestWrapper(
+            request=request, entity_type=MockEntity, token=uuid.uuid4()
+        )
+
+    def test_total_pages_does_not_stop_loading(self):
+        """Página cheia continua a carga mesmo com current_page >= totalPages."""
+        wrapper = self._wrapper()
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", side_effect=self._pages()
+        ) as invoker:
+            wrapper._load_all_pages(threading.Event())
+
+        assert wrapper._load_error is None
+        assert invoker.call_count == 3
+        assert wrapper._request.request_body.data_set.page_number == 3
+        assert wrapper._results_loaded == 550
+        codes = [
+            wrapper._items.get_nowait().convert_to_type(MockEntity).code
+            for _ in range(wrapper._items.qsize())
+        ]
+        assert codes == list(range(1, 551))
+
+    @pytest.mark.asyncio
+    async def test_total_pages_does_not_stop_loading_async(self):
+        """Versão assíncrona segue a mesma regra de parada."""
+        wrapper = self._wrapper()
+        items_queue: asyncio.Queue = asyncio.Queue()
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            side_effect=self._pages(),
+        ) as invoker:
+            await wrapper._load_all_pages_async(asyncio.Event(), items_queue)
+
+        assert wrapper._load_error is None
+        assert invoker.call_count == 3
+        assert wrapper._results_loaded == 550
+        items = [items_queue.get_nowait() for _ in range(items_queue.qsize())]
+        assert items[-1] is None  # sentinela de fim de carga
+        codes = [item.convert_to_type(MockEntity).code for item in items[:-1]]
+        assert codes == list(range(1, 551))
+
+
 class TestPagedRequestErrorPropagation:
     """Erros de carga propagados pelos generators (hierarquia do SDK)."""
 

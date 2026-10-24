@@ -444,17 +444,15 @@ class PagedRequestWrapper:
                     break
                 
                 # Verifica se há mais páginas
-                # Sankhya retorna 150 ou 300 itens por página quando há mais
+                # Sankhya retorna 150 ou 300 itens por página quando há mais.
+                # Como no .NET (LoadResponseInternal), só a quantidade da
+                # página e o max_results encerram a paginação: o totalPages
+                # da resposta é apenas informativo (eventos de progresso).
                 if quantity not in (self.PAGE_SIZE_SMALL, self.PAGE_SIZE_LARGE):
                     logger.debug(
                         f"Última página detectada: {quantity} itens "
                         f"(esperado {self.PAGE_SIZE_SMALL} ou {self.PAGE_SIZE_LARGE})"
                     )
-                    break
-                
-                # Verifica total_pages se disponível
-                if total_pages is not None and current_page >= total_pages:
-                    logger.debug(f"Todas as {total_pages} páginas carregadas")
                     break
                 
                 current_page += 1
@@ -794,10 +792,8 @@ class PagedRequestWrapper:
                     break
                 
                 # Verifica se há mais páginas
+                # totalPages não encerra a paginação (como no .NET)
                 if quantity not in (self.PAGE_SIZE_SMALL, self.PAGE_SIZE_LARGE):
-                    break
-                
-                if total_pages is not None and current_page >= total_pages:
                     break
                 
                 current_page += 1
