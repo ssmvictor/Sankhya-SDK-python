@@ -39,6 +39,9 @@ ENV/
 .coverage
 htmlcov/
 .tox/
+pytest_output.txt
+test_output*.txt
+test_result*.txt
 
 # Environment
 .env
