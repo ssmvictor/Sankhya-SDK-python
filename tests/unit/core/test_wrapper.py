@@ -647,6 +647,40 @@ class TestSankhyaWrapperRetryParity:
         mock_sleep.assert_not_called()
 
     @pytest.mark.parametrize(
+        "message",
+        [
+            "Não foi possível gravar o registro: situação de concorrência",
+            "Não foi possível gravar no log de acessos",
+            "Violação da restrição PRIMARY KEY 'PK_TSIRLG'",
+        ],
+    )
+    @patch("sankhya_sdk.core.wrapper.time.sleep")
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_transactional_competition_is_not_retried(self, mock_request, mock_sleep, message):
+        """
+        Mensagens de concorrência geram ServiceRequestCompetitionException e, em
+        serviço transacional, não são retentadas nem reautenticam
+        (SankhyaWrapper.cs, HandleException).
+        """
+        mock_request.side_effect = [
+            _http_ok(_status_xml(0, message)),
+            _http_ok(_status_xml(1)),
+        ]
+        wrapper = self._wrapper()
+        try:
+            with patch.object(SankhyaWrapper, "authenticate") as mock_authenticate:
+                with pytest.raises(ServiceRequestCompetitionException):
+                    wrapper.service_invoker(
+                        ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+                    )
+        finally:
+            self._release(wrapper)
+
+        assert mock_request.call_count == 1
+        mock_authenticate.assert_not_called()
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.parametrize(
         "exception,base_delay",
         [
             (ServiceRequestDeadlockException("deadlock", None, None), RequestRetryDelay.STABLE),
