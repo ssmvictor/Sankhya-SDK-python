@@ -124,7 +124,9 @@ class SimpleCRUDRequestWrapper:
         Inicializa o wrapper com um contexto Sankhya.
         
         Se nenhum contexto for fornecido, cria um novo usando
-        as configurações padrão (SankhyaSettings).
+        as configurações padrão (SankhyaSettings). Em ambos os casos
+        uma sessão dedicada (ServiceRequestType.SIMPLE_CRUD) é adquirida
+        do contexto e finalizada em dispose().
         
         Args:
             context: Contexto Sankhya existente (opcional)
@@ -143,8 +145,12 @@ class SimpleCRUDRequestWrapper:
             return
         
         if context is not None:
+            # Como no .NET (Context.AcquireNewSession(ServiceRequestType.SimpleCrud)),
+            # o wrapper usa uma sessão dedicada e não a sessão principal do contexto.
             cls._context = context
-            cls._session_token = context.token
+            cls._session_token = context.acquire_new_session(
+                ServiceRequestType.SIMPLE_CRUD
+            )
         else:
             # Import local para evitar circular
             from sankhya_sdk.core.context import SankhyaContext

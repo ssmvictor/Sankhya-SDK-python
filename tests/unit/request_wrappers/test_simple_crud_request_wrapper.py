@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sankhya_sdk.enums.service_request_type import ServiceRequestType
 from sankhya_sdk.exceptions import (
     ServiceRequestTooManyResultsException,
     ServiceRequestUnexpectedResultException,
@@ -75,14 +76,32 @@ class TestInitialization:
     """Testes de inicialização do wrapper."""
     
     def test_initialize_with_context(self, mock_context):
-        """Inicializa com contexto existente."""
+        """Inicializa com contexto existente adquirindo sessão dedicada (.NET)."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
         
         assert SimpleCRUDRequestWrapper._initialized is True
         assert SimpleCRUDRequestWrapper._context is mock_context
-        assert SimpleCRUDRequestWrapper._session_token == mock_context.token
+        mock_context.acquire_new_session.assert_called_once_with(
+            ServiceRequestType.SIMPLE_CRUD
+        )
+        assert (
+            SimpleCRUDRequestWrapper._session_token
+            == mock_context.acquire_new_session.return_value
+        )
+        assert SimpleCRUDRequestWrapper._session_token != mock_context.token
     
-    @patch("sankhya_sdk.request_wrappers.simple_crud_request_wrapper.SankhyaContext")
+    def test_dispose_finalizes_acquired_session(self, mock_context):
+        """dispose finaliza a sessão dedicada, não a sessão principal do contexto."""
+        SimpleCRUDRequestWrapper.initialize(mock_context)
+        acquired_token = mock_context.acquire_new_session.return_value
+
+        SimpleCRUDRequestWrapper.dispose()
+
+        mock_context.finalize_session.assert_called_once_with(acquired_token)
+
+    # SankhyaContext é importado localmente em initialize(); o patch deve
+    # ser aplicado no módulo de origem (sankhya_sdk.core.context).
+    @patch("sankhya_sdk.core.context.SankhyaContext")
     def test_initialize_without_context(self, mock_ctx_class):
         """Inicializa criando novo contexto."""
         mock_ctx = MagicMock()
@@ -92,8 +111,15 @@ class TestInitialization:
         SimpleCRUDRequestWrapper.initialize()
         
         assert SimpleCRUDRequestWrapper._initialized is True
+        assert SimpleCRUDRequestWrapper._context is mock_ctx
         mock_ctx_class.from_settings.assert_called_once()
-        mock_ctx.acquire_new_session.assert_called_once()
+        mock_ctx.acquire_new_session.assert_called_once_with(
+            ServiceRequestType.SIMPLE_CRUD
+        )
+        assert (
+            SimpleCRUDRequestWrapper._session_token
+            == mock_ctx.acquire_new_session.return_value
+        )
     
     def test_initialize_already_initialized(self, mock_context):
         """Inicialização duplicada é ignorada."""
@@ -132,7 +158,7 @@ class TestInitialization:
 class TestContextManager:
     """Testes do context manager."""
     
-    @patch("sankhya_sdk.request_wrappers.simple_crud_request_wrapper.SankhyaContext")
+    @patch("sankhya_sdk.core.context.SankhyaContext")
     def test_context_manager_sync(self, mock_ctx_class):
         """Usa como context manager síncrono."""
         mock_ctx = MagicMock()
@@ -143,9 +169,12 @@ class TestContextManager:
             assert SimpleCRUDRequestWrapper._initialized is True
         
         assert SimpleCRUDRequestWrapper._initialized is False
+        mock_ctx.finalize_session.assert_called_once_with(
+            mock_ctx.acquire_new_session.return_value
+        )
     
     @pytest.mark.asyncio
-    @patch("sankhya_sdk.request_wrappers.simple_crud_request_wrapper.SankhyaContext")
+    @patch("sankhya_sdk.core.context.SankhyaContext")
     async def test_context_manager_async(self, mock_ctx_class):
         """Usa como context manager assíncrono."""
         mock_ctx = MagicMock()
@@ -156,6 +185,9 @@ class TestContextManager:
             assert SimpleCRUDRequestWrapper._initialized is True
         
         assert SimpleCRUDRequestWrapper._initialized is False
+        mock_ctx.finalize_session.assert_called_once_with(
+            mock_ctx.acquire_new_session.return_value
+        )
 
 
 # =============================================================================
