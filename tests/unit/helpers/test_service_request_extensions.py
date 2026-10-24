@@ -428,3 +428,82 @@ class TestResolveWithLiteralCriteria:
             ServiceRequestExtensions.resolve_with_literal_criteria(
                 request, Partner, LiteralCriteriaSql(expression="CODPARC = 1")
             )
+
+
+class TestFieldValueFormat:
+    """
+    Valores enviados no formato do .NET.
+
+    As propriedades serializadas de booleanos e enums no .NET são as
+    ``*Internal`` (Partner.cs: IsActiveInternal -> "S"/"N",
+    FiscalTypeInternal -> valor interno).
+    """
+
+    def test_bool_criteria_uses_s_n_and_is_quoted(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            request, Partner(code=1, is_active=True)
+        )
+
+        expression = request.request_body.data_set.literal_criteria.expression
+        assert expression == "CODPARC = 1 AND ATIVO = 'S'"
+
+    def test_save_bool_and_enum_values(self):
+        from sankhya_sdk.enums.fiscal_person_type import FiscalPersonType
+
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            request,
+            Partner(
+                code=1,
+                is_active=False,
+                fiscal_type=FiscalPersonType.CORPORATION,
+            ),
+        )
+
+        local_fields = request.request_body.data_set.data_rows[0].local_fields
+        assert local_fields == {"TIPPESSOA": "J", "ATIVO": "N"}
+
+
+class TestIgnoreInlineReference:
+    """EntityElement(..., IgnoreInlineReference = true) do .NET."""
+
+    def test_element_with_underscore_is_a_regular_field(self):
+        from typing import Optional
+
+        from sankhya_sdk.attributes.decorators import (
+            entity,
+            entity_element,
+            entity_key,
+        )
+        from sankhya_sdk.models.transport.base import TransportEntityBase
+
+        @entity("Documento")
+        class _Document(TransportEntityBase):
+            code: int = entity_key(entity_element("CODDOC", default=0))
+            document: Optional[str] = entity_element(
+                "CGC_CPF", ignore_inline_reference=True, default=None
+            )
+            inline: Optional[str] = entity_element("Cidade_NOMECID", default=None)
+
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            request, _Document(code=1, document="01234567890")
+        )
+
+        data_set = request.request_body.data_set
+        assert data_set.data_rows[0].local_fields == {"CGC_CPF": "01234567890"}
+
+        find_request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        ServiceRequestExtensions.resolve_with_entity(find_request, _Document(code=1))
+
+        entities = find_request.request_body.data_set.entities
+        assert entities[0].fieldset.list == "CODDOC,CGC_CPF"
+        # Sem IgnoreInlineReference, o padrão Entidade_CAMPO continua sendo
+        # tratado como referência inline
+        assert [(e.path, e.fieldset.list) for e in entities[1:]] == [
+            ("Cidade", "NOMECID"),
+        ]

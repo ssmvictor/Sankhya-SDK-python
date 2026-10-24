@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from decimal import Decimal
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -236,6 +237,11 @@ class ServiceRequestExtensions:
         model.is_entity_reference = metadata.is_reference
         model.custom_relation_name = metadata.custom_relation_name or ""
         model.custom_data = metadata.custom_data
+        # .NET: model.IgnoreEntityReferenceInline = elementAttribute.IgnoreInlineReference
+        # (ex.: CGC_CPF não é uma referência inline "CGC" -> "CPF")
+        model.ignore_entity_reference_inline = bool(
+            metadata.element.ignore_inline_reference if metadata.element else False
+        )
 
     @staticmethod
     def _check_if_element_is_ignored(
@@ -368,8 +374,8 @@ class ServiceRequestExtensions:
         if value is None:
             return
         
-        # Converte para string
-        str_value = str(value)
+        # Converte para string no formato enviado ao Sankhya
+        str_value = _format_field_value(criteria_entity, field_name, value)
         
         # Aplica max_length
         if model.custom_data and hasattr(model.custom_data, "max_length"):
@@ -384,8 +390,12 @@ class ServiceRequestExtensions:
         if model.is_criteria:
             result.criteria.append({"name": model.property_name, "value": str_value})
             
-            # Constrói literal criteria
-            is_numeric = isinstance(value, (int, float))
+            # Constrói literal criteria (.NET: PropertyType.IsNumericType();
+            # bool não é numérico)
+            is_numeric = (
+                isinstance(value, (int, float, Decimal))
+                and not isinstance(value, bool)
+            )
             quote = "" if is_numeric else "'"
             condition = f"{model.property_name} = {quote}{str_value}{quote}"
             
@@ -998,6 +1008,31 @@ def _int_to_reference_level(value: int) -> ReferenceLevel:
         6: ReferenceLevel.SIXTH,
     }
     return mapping.get(value, ReferenceLevel.NONE)
+
+
+def _format_field_value(entity: Any, field_name: str, value: Any) -> str:
+    """
+    Converte o valor de um campo para o texto enviado ao Sankhya.
+
+    No .NET, as propriedades serializadas de booleanos e enums são as
+    ``*Internal`` (ex.: ``IsActiveInternal`` -> "S"/"N",
+    ``FiscalTypeInternal`` -> valor interno). Para entidades de transporte
+    usa-se o mesmo conversor de ``TransportEntityBase.to_xml``.
+
+    Args:
+        entity: Entidade de origem
+        field_name: Nome do campo
+        value: Valor do campo (não nulo)
+
+    Returns:
+        Valor como texto
+    """
+    serialize = getattr(entity, "_serialize_value", None)
+    if callable(serialize):
+        serialized = serialize(value, field_name)
+        if serialized is not None:
+            return serialized
+    return str(value)
 
 
 def _except_field_values(
