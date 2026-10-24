@@ -8,6 +8,7 @@ import threading
 from typing import Optional
 from unittest.mock import MagicMock, patch
 import pytest
+import pytest_asyncio
 
 from pydantic import Field
 
@@ -162,7 +163,7 @@ class TestOnDemandRequestFactory:
 class TestAsyncOnDemandRequestFactory:
     """Testes para AsyncOnDemandRequestFactory."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def cleanup(self):
         """Limpa o factory antes e após cada teste."""
         await AsyncOnDemandRequestFactory.clear()
