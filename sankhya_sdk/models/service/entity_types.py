@@ -126,7 +126,7 @@ class Entity(BaseModel):
         if lit_crit_elem is not None:
             literal_criteria = LiteralCriteria.from_xml(lit_crit_elem)
         
-        lit_crit_sql_elem = element.find("criterioLiteralSql")
+        lit_crit_sql_elem = element.find("criterioLiteral")
         if lit_crit_sql_elem is not None:
             literal_criteria_sql = LiteralCriteriaSql.from_xml(lit_crit_sql_elem)
         
@@ -137,7 +137,7 @@ class Entity(BaseModel):
         # Parse field values from direct child elements
         known_elements = {
             "fields", "criteria", "literalCriteria", 
-            "criterioLiteralSql", "referenceFetch"
+            "criterioLiteral", "referenceFetch"
         }
         for child in element:
             if child.tag not in known_elements:

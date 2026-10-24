@@ -131,7 +131,8 @@ class Parameter(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("parameter")
-        elem.set("type", self.type.value)
+        # O atributo "type" usa o valor interno (S, I, D), como no .NET
+        elem.set("type", self.type.internal_value)
         elem.text = self.value
         return elem
 
@@ -140,7 +141,11 @@ class Parameter(BaseModel):
         """Deserializa de elemento XML."""
         type_str = get_element_attr(element, "type", "S")
         return cls(
-            type=ParameterType(type_str) if type_str else ParameterType.TEXT,
+            type=(
+                ParameterType.from_internal_value(type_str)
+                if type_str
+                else ParameterType.STRING
+            ),
             value=get_element_text(element, ""),
         )
 
@@ -158,23 +163,22 @@ class LiteralCriteria(BaseModel):
         elem = etree.Element("literalCriteria")
         if self.expression:
             expr_elem = create_xml_element("expression", self.expression, parent=elem)
-        if self.parameters:
-            params_elem = etree.SubElement(elem, "parameters")
-            for param in self.parameters:
-                params_elem.append(param.to_xml())
+        # Parâmetros são filhos diretos (<parameter>), sem elemento agrupador,
+        # como no .NET ([XmlElement(ElementName = "parameter")] em um array)
+        for param in self.parameters:
+            elem.append(param.to_xml())
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "LiteralCriteria":
         """Deserializa de elemento XML."""
         expr_elem = element.find("expression")
-        params_elem = element.find("parameters")
-        
-        parameters = []
-        if params_elem is not None:
-            for param_elem in params_elem.findall("parameter"):
-                parameters.append(Parameter.from_xml(param_elem))
-        
+
+        parameters = [
+            Parameter.from_xml(param_elem)
+            for param_elem in element.findall("parameter")
+        ]
+
         return cls(
             expression=get_element_text(expr_elem) if expr_elem is not None else None,
             parameters=parameters,
@@ -195,7 +199,8 @@ class LiteralCriteriaSql(BaseModel):
 
     def to_xml(self) -> Element:
         """Serializa para elemento XML com tags em português."""
-        elem = etree.Element("criterioLiteralSql")
+        # Mesmo nome de elemento usado pelo .NET em Entity.LiteralCriteriaSql
+        elem = etree.Element("criterioLiteral")
         if self.expression:
             create_xml_element("expressao", self.expression, parent=elem)
         if self.parameters:

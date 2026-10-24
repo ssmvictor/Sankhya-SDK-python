@@ -69,18 +69,24 @@ class TestComplexXmlStructures:
             literal_criteria=LiteralCriteria(
                 expression="CODPARC > ? AND ATIVO = ?",
                 parameters=[
-                    Parameter(type=ParameterType.NUMERIC, value="0"),
-                    Parameter(type=ParameterType.TEXT, value="S"),
+                    Parameter(type=ParameterType.INTEGER, value="0"),
+                    Parameter(type=ParameterType.STRING, value="S"),
                 ]
             )
         )
-        
+
         xml = req.to_xml()
         body = xml.find("requestBody")
         entity = body.find("entity")
-        
+
         assert entity is not None
         assert entity.get("name") == "Parceiro"
+
+        literal = entity.find("literalCriteria")
+        assert literal is not None
+        assert literal.findtext("expression") == "CODPARC > ? AND ATIVO = ?"
+        params = literal.findall("parameter")
+        assert [(p.get("type"), p.text) for p in params] == [("I", "0"), ("S", "S")]
 
     def test_dataset_request(self):
         """Testa requisição com DataSet."""

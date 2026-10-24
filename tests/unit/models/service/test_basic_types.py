@@ -20,6 +20,7 @@ from sankhya_sdk.models.service.basic_types import (
     Path,
     Paths,
 )
+from sankhya_sdk.models.service.entity_types import Entity
 from sankhya_sdk.enums.parameter_type import ParameterType
 
 
@@ -120,9 +121,9 @@ class TestParameter:
 
     def test_to_xml(self):
         """Testa serialização para XML."""
-        param = Parameter(type=ParameterType.TEXT, value="teste")
+        param = Parameter(type=ParameterType.STRING, value="teste")
         xml = param.to_xml()
-        
+
         assert xml.tag == "parameter"
         assert xml.get("type") == "S"
         assert xml.text == "teste"
@@ -132,9 +133,37 @@ class TestParameter:
         xml_str = '<parameter type="I">123</parameter>'
         elem = etree.fromstring(xml_str)
         param = Parameter.from_xml(elem)
-        
-        assert param.type == ParameterType.NUMERIC
+
+        assert param.type == ParameterType.INTEGER
         assert param.value == "123"
+
+    @pytest.mark.parametrize(
+        "param_type, code",
+        [
+            (ParameterType.STRING, "S"),
+            (ParameterType.INTEGER, "I"),
+            (ParameterType.DATETIME, "D"),
+        ],
+    )
+    def test_type_uses_internal_value(self, param_type, code):
+        """Testa que o atributo type usa o valor interno (S/I/D) nos dois sentidos."""
+        xml = Parameter(type=param_type, value="x").to_xml()
+        assert xml.get("type") == code
+
+        parsed = Parameter.from_xml(etree.fromstring(f'<parameter type="{code}">x</parameter>'))
+        assert parsed.type == param_type
+
+    def test_from_xml_without_type_defaults_to_string(self):
+        """Testa que a ausência do atributo type resulta em STRING (padrão do .NET)."""
+        param = Parameter.from_xml(etree.fromstring("<parameter>abc</parameter>"))
+
+        assert param.type == ParameterType.STRING
+        assert param.value == "abc"
+
+    def test_from_xml_invalid_type_raises(self):
+        """Testa que um código de tipo desconhecido não é aceito silenciosamente."""
+        with pytest.raises(ValueError):
+            Parameter.from_xml(etree.fromstring('<parameter type="X">1</parameter>'))
 
 
 class TestLiteralCriteria:
@@ -144,31 +173,64 @@ class TestLiteralCriteria:
         """Testa serialização para XML."""
         crit = LiteralCriteria(
             expression="CODPROD = ?",
-            parameters=[Parameter(type=ParameterType.NUMERIC, value="123")]
+            parameters=[Parameter(type=ParameterType.INTEGER, value="123")]
         )
         xml = crit.to_xml()
-        
+
         assert xml.tag == "literalCriteria"
         expr = xml.find("expression")
         assert expr is not None
         assert expr.text == "CODPROD = ?"
+
+    def test_to_xml_parameters_are_direct_children(self):
+        """Testa que os parâmetros são filhos diretos <parameter>, sem agrupador (formato .NET)."""
+        crit = LiteralCriteria(
+            expression="CODPROD = ? AND ATIVO = ?",
+            parameters=[
+                Parameter(type=ParameterType.INTEGER, value="123"),
+                Parameter(type=ParameterType.STRING, value="S"),
+            ],
+        )
+        xml = crit.to_xml()
+
+        assert xml.find("parameters") is None
+        params = xml.findall("parameter")
+        assert [p.get("type") for p in params] == ["I", "S"]
+        assert [p.text for p in params] == ["123", "S"]
 
     def test_from_xml(self):
         """Testa deserialização de XML."""
         xml_str = """
         <literalCriteria>
             <expression>CODPROD = ?</expression>
-            <parameters>
-                <parameter type="I">123</parameter>
-            </parameters>
+            <parameter type="I">123</parameter>
         </literalCriteria>
         """
         elem = etree.fromstring(xml_str)
         crit = LiteralCriteria.from_xml(elem)
-        
+
         assert crit.expression == "CODPROD = ?"
         assert len(crit.parameters) == 1
+        assert crit.parameters[0].type == ParameterType.INTEGER
         assert crit.parameters[0].value == "123"
+
+    def test_round_trip(self):
+        """Testa round-trip to_xml/from_xml preservando tipos e ordem dos parâmetros."""
+        original = LiteralCriteria(
+            expression="DTNEG >= ? AND CODPARC = ?",
+            parameters=[
+                Parameter(type=ParameterType.DATETIME, value="01/01/2024"),
+                Parameter(type=ParameterType.INTEGER, value="10"),
+            ],
+        )
+
+        parsed = LiteralCriteria.from_xml(original.to_xml())
+
+        assert parsed.expression == original.expression
+        assert [(p.type, p.value) for p in parsed.parameters] == [
+            (ParameterType.DATETIME, "01/01/2024"),
+            (ParameterType.INTEGER, "10"),
+        ]
 
 
 class TestLiteralCriteriaSql:
@@ -178,14 +240,31 @@ class TestLiteralCriteriaSql:
         """Testa serialização para XML com tags em português."""
         crit = LiteralCriteriaSql(
             expression="CODPROD = ?",
-            parameters=[Parameter(type=ParameterType.NUMERIC, value="123")]
+            parameters=[Parameter(type=ParameterType.INTEGER, value="123")]
         )
         xml = crit.to_xml()
-        
-        assert xml.tag == "criterioLiteralSql"
+
+        # Nome do elemento conforme o .NET: [XmlElement("criterioLiteral")] em Entity
+        assert xml.tag == "criterioLiteral"
         expr = xml.find("expressao")
         assert expr is not None
         assert expr.text == "CODPROD = ?"
+
+    def test_entity_round_trip(self):
+        """Testa que Entity serializa e lê o critério SQL pelo mesmo elemento."""
+        entity = Entity(
+            name="Produto",
+            literal_criteria_sql=LiteralCriteriaSql(expression="CODPROD = 1"),
+        )
+
+        xml = entity.to_xml()
+        assert xml.find("criterioLiteral") is not None
+
+        parsed = Entity.from_xml(xml)
+        assert parsed.literal_criteria_sql is not None
+        assert parsed.literal_criteria_sql.expression == "CODPROD = 1"
+        # Não deve ser confundido com um valor de campo
+        assert parsed.field_values == []
 
 
 class TestDataRow:
