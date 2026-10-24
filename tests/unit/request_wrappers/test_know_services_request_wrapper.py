@@ -778,32 +778,99 @@ class TestBilling:
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_DUPLICATE
 
-    def test_duplicate_invoice_from_invoices_response(self, mock_context, mock_response):
+    def test_duplicate_invoice_from_invoices_response(self, mock_context):
         """Test duplicate_invoice reads destiny NUNOTA from invoices (.NET path)."""
-        # .NET: response.ResponseBody.Invoices.Invoice.SingleNumberDuplicationDestiny
-        mock_response.response_body = ResponseBody(
-            invoices=Invoices(
-                items=[
-                    Invoice(
-                        extra_data={"singleNumberDuplicationDestiny": "54321"}
-                    )
-                ]
-            )
+        # .NET: response.ResponseBody.Invoices.Invoice.SingleNumberDuplicationDestiny,
+        # i.e. the nuNota attribute of <notas><nota nuNota="..." nuNotaOrig="..."/>
+        response = _service_response(
+            "CACSP.duplicarNota",
+            '<notas><nota nuNota="54321" nuNotaOrig="12345"/></notas>',
         )
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
-            return_value=mock_response,
+            return_value=response,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             new_nunota = KnowServicesRequestWrapper.duplicate_invoice(
                 single_number=12345,
                 code_operation_type=2,
             )
-            
+
             assert new_nunota == 54321
+            assert type(new_nunota) is int
+
+    def test_duplicate_invoice_request_xml_matches_dotnet(self, mock_context):
+        """Test duplicate_invoice sends the .NET <notas> payload (dataSaida always sent)."""
+        # .NET KnowServicesRequestWrapper.cs:464-482: top, atualizaPreco,
+        # duplicarTodosItens, dataSaida (DateExitDuplicationNullable = dateExit,
+        # mesmo nulo -> "") e <nota NUNOTA="n"/>
+        response = _service_response(
+            "CACSP.duplicarNota",
+            '<notas><nota nuNota="54321" nuNotaOrig="12345"/></notas>',
+        )
+
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            new_nunota = KnowServicesRequestWrapper.duplicate_invoice(
+                single_number=12345,
+                code_operation_type=1100,
+            )
+
+            assert _sent_request_xml() == (
+                '<serviceRequest serviceName="CACSP.duplicarNota">'
+                "<requestBody>"
+                '<notas top="1100" atualizaPreco="false" duplicarTodosItens="true" '
+                'dataSaida="">'
+                '<nota NUNOTA="12345"/>'
+                "</notas>"
+                "</requestBody>"
+                "</serviceRequest>"
+            )
+
+        assert new_nunota == 54321
+
+    def test_duplicate_invoice_with_series_and_date_request_xml(self, mock_context):
+        """Test duplicate_invoice sends serie and the .NET invariant dataSaida."""
+        # .NET :479-482 (Series quando informada) e Invoices.cs
+        # DateExitDuplicationNullableInternal (ToString(CultureInfo.InvariantCulture))
+        response = _service_response(
+            "CACSP.duplicarNota",
+            '<notas><nota nuNota="777" nuNotaOrig="12345"/></notas>',
+        )
+
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            new_nunota = KnowServicesRequestWrapper.duplicate_invoice(
+                single_number=12345,
+                code_operation_type=1100,
+                series=2,
+                date_exit=datetime(2024, 3, 15, 8, 30, 0),
+                should_update_price=True,
+            )
+
+            assert _sent_request_xml() == (
+                '<serviceRequest serviceName="CACSP.duplicarNota">'
+                "<requestBody>"
+                '<notas top="1100" serie="2" atualizaPreco="true" '
+                'duplicarTodosItens="true" dataSaida="03/15/2024 08:30:00">'
+                '<nota NUNOTA="12345"/>'
+                "</notas>"
+                "</requestBody>"
+                "</serviceRequest>"
+            )
+
+        assert new_nunota == 777
 
 
 # =============================================================================

@@ -780,12 +780,14 @@ class KnowServicesRequestWrapper:
             single_number: NUNOTA da nota a duplicar
             code_operation_type: Código do tipo de operação da nova nota
             series: Série da nova nota (opcional)
-            date_exit: Data de saída da nova nota (opcional)
+            date_exit: Data de saída da nova nota (opcional; enviada em
+                ``dataSaida`` no formato invariante do .NET, vazia se None)
             should_update_price: Se deve atualizar os preços
-            
+
         Returns:
-            NUNOTA da nova nota duplicada
-            
+            NUNOTA da nova nota duplicada (atributo ``nuNota`` de
+            ``<notas><nota>`` na resposta)
+
         Example:
             >>> new_nunota = KnowServicesRequestWrapper.duplicate_invoice(
             ...     single_number=12345,
@@ -800,52 +802,40 @@ class KnowServicesRequestWrapper:
             f"data saída: {date_exit}, atualizar preço: {should_update_price})"
         )
         
-        # Build invoice with single_number_duplication matching .NET
-        invoice = Invoice()
-        invoice.extra_data["singleNumberDuplication"] = str(single_number)
-        
-        # Build Invoices with duplication-specific fields matching .NET:
-        # - CodeOperationTypeDuplication
-        # - DateExitDuplicationNullable
-        # - ShouldUpdatePrice
-        # - ShouldDuplicateAllItems = true
-        # - Invoice (with SingleNumberDuplication)
-        invoices = Invoices(items=[invoice])
-        
-        # Set duplication-specific fields via extra_data
-        request_body = RequestBody(invoices=invoices)
-        if request_body.invoices and request_body.invoices.items:
-            inv = request_body.invoices.items[0]
-            inv.extra_data.update({
-                "codeOperationTypeDuplication": str(code_operation_type),
-                "shouldUpdatePrice": "true" if should_update_price else "false",
-                "shouldDuplicateAllItems": "true",
-            })
-            # Add date exit if provided
-            if date_exit is not None:
-                inv.extra_data["dateExitDuplicationNullable"] = date_exit.strftime("%d/%m/%Y")
-            # Add series if provided
-            if series is not None:
-                inv.series = str(series)
-        
+        # .NET (KnowServicesRequestWrapper.cs:464-482): atributos de <notas>
+        # top, serie (se informada), atualizaPreco, duplicarTodosItens="true" e
+        # dataSaida (sempre enviado; vazio quando a data não é informada) com
+        # <nota NUNOTA="n"/>
+        invoices = Invoices(
+            code_operation_type_duplication=code_operation_type,
+            date_exit_duplication=date_exit,
+            should_update_price=should_update_price,
+            should_duplicate_all_items=True,
+            items=[Invoice(single_number_duplication=single_number)],
+        )
+        if series is not None:
+            invoices.series = series
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_DUPLICATE,
-            request_body=request_body,
+            request_body=RequestBody(invoices=invoices),
         )
         response = cls._invoke_service(request)
-        
-        # Extrair novo NUNOTA from response invoices
+
+        # Extrair novo NUNOTA (.NET :492-498:
+        # ResponseBody.Invoices.Invoice.SingleNumberDuplicationDestiny, atributo nuNota)
         new_nunota = 0
         if response.response_body:
             rb = response.response_body
             if hasattr(rb, "invoices") and rb.invoices:
                 if hasattr(rb.invoices, "items") and rb.invoices.items:
                     inv = rb.invoices.items[0]
-                    # Try singleNumberDuplicationDestiny from extra_data
-                    if "singleNumberDuplicationDestiny" in inv.extra_data:
-                        new_nunota = int(inv.extra_data["singleNumberDuplicationDestiny"])
-                    elif inv.unique_number:
-                        new_nunota = inv.unique_number
+                    if inv.single_number_duplication_destiny is not None:
+                        new_nunota = inv.single_number_duplication_destiny
+                    logger.debug(
+                        f"Duplicação: origem={inv.single_number_duplication_source}, "
+                        f"destino={inv.single_number_duplication_destiny}"
+                    )
             elif hasattr(rb, "primary_key") and rb.primary_key:
                 if hasattr(rb.primary_key, "nunota"):
                     new_nunota = rb.primary_key.nunota or 0
