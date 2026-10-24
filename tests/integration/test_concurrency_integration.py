@@ -8,33 +8,33 @@ Testa operações simultâneas, thread safety e race conditions.
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union
+from typing import List, Tuple
 from unittest.mock import MagicMock, patch
-from urllib.parse import parse_qs, urlparse
-from uuid import uuid4
 
 import pytest
 import requests
 
 from sankhya_sdk.core.constants import MAX_RETRY_COUNT
-from sankhya_sdk.core.context import SankhyaContext
-from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import SankhyaException
 from sankhya_sdk.models.transport.partner import Partner
-from sankhya_sdk.models.transport.product import Product
 from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
     SimpleCRUDRequestWrapper,
 )
 
 from .conftest import (
-    create_login_response,
-    create_logout_response,
+    FakeSankhyaServer,
+    ServerReply,
+    entities_response,
+    find_criteria,
+    http_response,
+    save_data_row,
+    simple_crud_session,
 )
 
 
@@ -43,108 +43,41 @@ from .conftest import (
 # =============================================================================
 
 
-def _http_response(status_code: int, content: bytes) -> requests.Response:
+def _requested_partner_code(body: str) -> int:
+    """Código do parceiro pedido no critério de CRUDServiceProvider.loadRecords."""
+    expression = find_criteria(body)
+    match = re.fullmatch(r"CODPARC = (\d+)", expression or "")
+    assert match, f"Critério inesperado na busca: {expression!r}"
+    return int(match.group(1))
+
+
+def _find_partner_reply(body: str) -> ServerReply:
     """
-    Cria uma resposta HTTP real (requests.Response).
+    Responde a busca com o parceiro do código pedido na requisição.
 
-    Usa o objeto real para que ``raise_for_status`` lance HTTPError em
-    respostas 4xx/5xx, como no servidor de verdade.
+    Como a resposta depende do corpo da requisição, uma resposta entregue
+    à thread errada (requisições trocadas) é detectada pelo teste.
     """
-    response = requests.Response()
-    response.status_code = status_code
-    response._content = content
-    response.headers["Content-Type"] = "text/xml;charset=UTF-8"
-    response.encoding = "utf-8"
-    response.url = "http://test.local:8180/mge/service.sbr"
-    return response
+    code = _requested_partner_code(body)
+    return http_response(200, entities_response(
+        {"CODPARC": code, "NOMEPARC": f"Parceiro {code}"}
+    ))
 
 
-def _entities_response(
-    *rows: Dict[str, Any],
-    service: ServiceName = ServiceName.CRUD_SERVICE_FIND,
-) -> bytes:
-    """Gera XML de resposta do CRUDServiceProvider com as entidades informadas."""
-    entities = "".join(
-        "<entity>" + "".join(f"<{k}>{v}</{k}>" for k, v in row.items()) + "</entity>"
-        for row in rows
-    )
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        f'<serviceResponse serviceName="{service.internal_value}" status="1">'
-        f'<responseBody><entities total="{len(rows)}">{entities}</entities></responseBody>'
-        "</serviceResponse>"
-    ).encode("utf-8")
-
-
-class _FakeSankhyaServer:
+def _save_partner_reply(body: str) -> ServerReply:
     """
-    Simula o servidor Sankhya como ``side_effect`` de ``requests.Session.request``.
+    Responde o saveRecord ecoando o parceiro enviado no dataRow.
 
-    Login e logout sempre respondem com sucesso (cada login gera um
-    JSESSIONID único) e o registro de user agent (DWR) responde vazio.
-    As demais chamadas de serviço consomem, em ordem, a fila de respostas;
-    itens da fila que são exceções são lançados (falhas de transporte).
-    Uma chamada além da fila falha com AssertionError. Thread-safe.
+    Sem chave na requisição (criação), o código é o número no fim do nome
+    (``"Novo Parceiro 7"`` -> 7), simulando a chave gerada pelo servidor.
     """
-
-    def __init__(
-        self,
-        responses: Sequence[Union[requests.Response, BaseException]] = (),
-    ) -> None:
-        self._lock = threading.Lock()
-        self._responses = list(responses)
-        self.calls: List[str] = []
-        self.logins = 0
-        self.logouts = 0
-
-    def calls_to(self, service: ServiceName) -> int:
-        """Retorna quantas requisições foram feitas para o serviço."""
-        return self.calls.count(service.internal_value)
-
-    def __call__(self, method: str, url: str, **kwargs: Any) -> requests.Response:
-        service = parse_qs(urlparse(url).query).get("serviceName", [""])[0]
-
-        with self._lock:
-            if service == ServiceName.LOGIN.internal_value:
-                self.logins += 1
-                session_id = f"SESSION_{uuid4().hex}"
-                return _http_response(200, create_login_response(session_id))
-
-            if service == ServiceName.LOGOUT.internal_value:
-                self.logouts += 1
-                return _http_response(200, create_logout_response())
-
-            if not service:
-                assert "DWRController" in url, f"URL inesperada: {url}"
-                return _http_response(200, b"")
-
-            self.calls.append(service)
-            if not self._responses:
-                raise AssertionError(
-                    f"Requisição inesperada #{len(self.calls)} para {service}"
-                )
-            item = self._responses.pop(0)
-
-        if isinstance(item, BaseException):
-            raise item
-        return item
-
-
-@contextmanager
-def _simple_crud_session() -> Iterator[SankhyaWrapper]:
-    """
-    Autentica um SankhyaWrapper e inicializa o SimpleCRUDRequestWrapper
-    com um SankhyaContext, liberando todos os recursos ao final.
-    """
-    wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-    wrapper.authenticate("user", "pass")
-    context = SankhyaContext(wrapper=wrapper)
-    try:
-        SimpleCRUDRequestWrapper.initialize(context)
-        yield wrapper
-    finally:
-        SimpleCRUDRequestWrapper.dispose()
-        context.dispose()
+    keys, local_fields = save_data_row(body)
+    name = local_fields["NOMEPARC"]
+    code = keys.get("CODPARC") or re.search(r"(\d+)$", name).group(1)
+    return http_response(200, entities_response(
+        {"CODPARC": code, "NOMEPARC": name},
+        service=ServiceName.CRUD_SERVICE_SAVE,
+    ))
 
 
 # =============================================================================
@@ -162,13 +95,8 @@ class TestConcurrentReads:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        # Múltiplas respostas de busca
-        server = _FakeSankhyaServer([
-            _http_response(200, _entities_response(
-                {"CODPARC": i, "NOMEPARC": f"Parceiro {i}"}
-            ))
-            for i in range(1, 11)
-        ])
+        # Uma resposta por busca, com o parceiro do código pedido
+        server = FakeSankhyaServer([_find_partner_reply] * 10)
         mock_session.request.side_effect = server
 
         results: List[Tuple[int, Partner]] = []
@@ -184,7 +112,7 @@ class TestConcurrentReads:
                 with lock:
                     errors.append((code, e))
 
-        with _simple_crud_session():
+        with simple_crud_session():
             threads = [
                 threading.Thread(target=find_partner, args=(i,))
                 for i in range(1, 11)
@@ -198,13 +126,13 @@ class TestConcurrentReads:
 
             assert not any(t.is_alive() for t in threads)
 
-        # Todas devem ter sucesso, cada resposta entregue a uma única thread
+        # Todas devem ter sucesso, cada thread com a resposta da sua busca
         assert errors == []
-        assert len(results) == 10
-        assert all(result is not None for _, result in results)
-        assert sorted(result.name for _, result in results) == sorted(
-            f"Parceiro {i}" for i in range(1, 11)
-        )
+        assert sorted(code for code, _ in results) == list(range(1, 11))
+        for code, result in results:
+            assert result is not None
+            assert result.code == code
+            assert result.name == f"Parceiro {code}"
         assert server.calls_to(ServiceName.CRUD_SERVICE_FIND) == 10
 
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
@@ -213,30 +141,27 @@ class TestConcurrentReads:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        # Uma resposta para cada leitura
-        server = _FakeSankhyaServer([
-            _http_response(200, _entities_response(
-                {"CODPARC": i, "NOMEPARC": f"Parceiro {i}"}
-            ))
-            for i in range(1, 51)
-        ])
+        # Uma resposta para cada leitura, com o parceiro do código pedido
+        server = FakeSankhyaServer([_find_partner_reply] * 50)
         mock_session.request.side_effect = server
 
         errors: List[Exception] = []
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with ThreadPoolExecutor(max_workers=20) as executor:
-                futures = [
+                futures = {
                     executor.submit(
                         SimpleCRUDRequestWrapper.try_find, Partner(code=i)
-                    )
+                    ): i
                     for i in range(1, 51)
-                ]
+                }
 
                 completed = 0
                 for future in as_completed(futures, timeout=30):
                     try:
-                        assert future.result() is not None
+                        result = future.result()
+                        assert result is not None
+                        assert result.code == futures[future]
                         completed += 1
                     except Exception as e:
                         errors.append(e)
@@ -262,17 +187,11 @@ class TestConcurrentWrites:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        # Múltiplas respostas de criação
-        server = _FakeSankhyaServer([
-            _http_response(200, _entities_response(
-                {"CODPARC": i, "NOMEPARC": f"Novo Parceiro {i}"},
-                service=ServiceName.CRUD_SERVICE_SAVE,
-            ))
-            for i in range(1, 11)
-        ])
+        # Uma resposta por criação, ecoando o parceiro enviado
+        server = FakeSankhyaServer([_save_partner_reply] * 10)
         mock_session.request.side_effect = server
 
-        results: List[Partner] = []
+        results: List[Tuple[int, Partner]] = []
         errors: List[Exception] = []
         lock = threading.Lock()
 
@@ -281,12 +200,12 @@ class TestConcurrentWrites:
                 partner = Partner(name=f"Novo Parceiro {i}")
                 result = SimpleCRUDRequestWrapper.update(partner)
                 with lock:
-                    results.append(result)
+                    results.append((i, result))
             except Exception as e:
                 with lock:
                     errors.append(e)
 
-        with _simple_crud_session():
+        with simple_crud_session():
             threads = [
                 threading.Thread(target=create_partner, args=(i,))
                 for i in range(1, 11)
@@ -300,10 +219,12 @@ class TestConcurrentWrites:
 
             assert not any(t.is_alive() for t in threads)
 
-        # Todas devem ter sucesso
+        # Todas devem ter sucesso, cada thread com o registro que criou
         assert errors == []
-        assert len(results) == 10
-        assert sorted(result.code for result in results) == list(range(1, 11))
+        assert sorted(i for i, _ in results) == list(range(1, 11))
+        for i, result in results:
+            assert result.code == i
+            assert result.name == f"Novo Parceiro {i}"
         assert server.calls_to(ServiceName.CRUD_SERVICE_SAVE) == 10
 
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
@@ -312,17 +233,11 @@ class TestConcurrentWrites:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        # Respostas de atualização
-        server = _FakeSankhyaServer([
-            _http_response(200, _entities_response(
-                {"CODPARC": 1, "NOMEPARC": f"Parceiro Atualizado {i}"},
-                service=ServiceName.CRUD_SERVICE_SAVE,
-            ))
-            for i in range(5)
-        ])
+        # Uma resposta por atualização, ecoando o parceiro enviado
+        server = FakeSankhyaServer([_save_partner_reply] * 5)
         mock_session.request.side_effect = server
 
-        results: List[Partner] = []
+        results: List[Tuple[int, Partner]] = []
         errors: List[Exception] = []
         lock = threading.Lock()
 
@@ -331,12 +246,12 @@ class TestConcurrentWrites:
                 partner = Partner(code=1, name=f"Parceiro Atualizado {i}")
                 result = SimpleCRUDRequestWrapper.update(partner)
                 with lock:
-                    results.append(result)
+                    results.append((i, result))
             except Exception as e:
                 with lock:
                     errors.append(e)
 
-        with _simple_crud_session():
+        with simple_crud_session():
             threads = [
                 threading.Thread(target=update_partner, args=(i,))
                 for i in range(5)
@@ -350,13 +265,12 @@ class TestConcurrentWrites:
 
             assert not any(t.is_alive() for t in threads)
 
-        # Todas devem ter sucesso
+        # Todas devem ter sucesso, cada thread com a sua atualização
         assert errors == []
-        assert len(results) == 5
-        assert all(result.code == 1 for result in results)
-        assert sorted(result.name for result in results) == sorted(
-            f"Parceiro Atualizado {i}" for i in range(5)
-        )
+        assert sorted(i for i, _ in results) == list(range(5))
+        for i, result in results:
+            assert result.code == 1
+            assert result.name == f"Parceiro Atualizado {i}"
         assert server.calls_to(ServiceName.CRUD_SERVICE_SAVE) == 5
 
 
@@ -371,12 +285,7 @@ class TestThreadSafety:
         mock_session_class.return_value = mock_session
 
         # Uma resposta para cada busca (10 threads x 5 buscas)
-        server = _FakeSankhyaServer([
-            _http_response(200, _entities_response(
-                {"CODPARC": i, "NOMEPARC": f"P{i}"}
-            ))
-            for i in range(50)
-        ])
+        server = FakeSankhyaServer([_find_partner_reply] * 50)
         mock_session.request.side_effect = server
 
         barrier = threading.Barrier(10)
@@ -388,17 +297,17 @@ class TestThreadSafety:
             barrier.wait()  # Todas as threads começam juntas
             for i in range(5):
                 try:
-                    result = SimpleCRUDRequestWrapper.try_find(
-                        Partner(code=thread_id * 10 + i)
-                    )
+                    code = thread_id * 10 + i
+                    result = SimpleCRUDRequestWrapper.try_find(Partner(code=code))
                     assert result is not None
+                    assert result.code == code
                     with lock:
                         results.append(thread_id)
                 except Exception as e:
                     with lock:
                         errors.append(e)
 
-        with _simple_crud_session():
+        with simple_crud_session():
             threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
 
             for t in threads:
@@ -426,15 +335,10 @@ class TestAsyncConcurrency:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
-            _http_response(200, _entities_response(
-                {"CODPARC": i, "NOMEPARC": f"Parceiro Async {i}"}
-            ))
-            for i in range(1, 6)
-        ])
+        server = FakeSankhyaServer([_find_partner_reply] * 5)
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             # Executar múltiplas buscas assíncronas em paralelo
             tasks = [
                 SimpleCRUDRequestWrapper.try_find_async(Partner(code=i))
@@ -442,12 +346,11 @@ class TestAsyncConcurrency:
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Verificar resultados
+        # Verificar resultados: gather preserva a ordem das buscas
         errors = [r for r in results if isinstance(r, BaseException)]
         assert errors == []
-        assert sorted(r.name for r in results) == sorted(
-            f"Parceiro Async {i}" for i in range(1, 6)
-        )
+        assert [r.code for r in results] == [1, 2, 3, 4, 5]
+        assert [r.name for r in results] == [f"Parceiro {i}" for i in range(1, 6)]
         assert server.calls_to(ServiceName.CRUD_SERVICE_FIND) == 5
 
 
@@ -462,16 +365,11 @@ class TestPerformance:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        # 100 respostas rápidas
-        server = _FakeSankhyaServer([
-            _http_response(200, _entities_response(
-                {"CODPARC": i, "NOMEPARC": f"P{i}"}
-            ))
-            for i in range(100)
-        ])
+        # 100 respostas rápidas, com o parceiro do código pedido
+        server = FakeSankhyaServer([_find_partner_reply] * 100)
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             start_time = time.time()
 
             for i in range(100):
@@ -498,16 +396,16 @@ class TestResourceCleanup:
         mock_session_class.return_value = mock_session
 
         def success_resp():
-            return _http_response(200, _entities_response(
+            return http_response(200, entities_response(
                 {"CODPARC": 1, "NOMEPARC": "P"}
             ))
 
         def error_resps():
             # Erro 500 persistente: esgota os retries da requisição
-            return [_http_response(500, b"Error") for _ in range(1 + MAX_RETRY_COUNT)]
+            return [http_response(500, b"Error") for _ in range(1 + MAX_RETRY_COUNT)]
 
         # Mistura de sucesso e erros
-        server = _FakeSankhyaServer(
+        server = FakeSankhyaServer(
             [success_resp()] + error_resps()
             + [success_resp()] + error_resps()
             + [success_resp()]
@@ -517,7 +415,7 @@ class TestResourceCleanup:
         successes = 0
         failures: List[Exception] = []
 
-        with _simple_crud_session() as wrapper:
+        with simple_crud_session() as wrapper:
             for i in range(5):
                 try:
                     SimpleCRUDRequestWrapper.try_find(Partner(code=i))
@@ -545,14 +443,14 @@ class TestResourceCleanup:
         mock_session_class.return_value = mock_session
 
         for cycle in range(3):
-            server = _FakeSankhyaServer([
-                _http_response(200, _entities_response(
+            server = FakeSankhyaServer([
+                http_response(200, entities_response(
                     {"CODPARC": 1, "NOMEPARC": f"Parceiro Ciclo {cycle}"}
                 )),
             ])
             mock_session.request.side_effect = server
 
-            with _simple_crud_session():
+            with simple_crud_session():
                 result = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
             # Cada ciclo deve usar o contexto recém-inicializado

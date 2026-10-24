@@ -7,20 +7,13 @@ Testa cenários de erro, retry, timeout e recuperação.
 
 from __future__ import annotations
 
-import threading
-from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Sequence, Union
 from unittest.mock import MagicMock, call, patch
-from urllib.parse import parse_qs, urlparse
-from uuid import uuid4
 
 import pytest
 import requests
 from lxml import etree
 
 from sankhya_sdk.core.constants import MAX_RETRY_COUNT
-from sankhya_sdk.core.context import SankhyaContext
-from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import (
     SankhyaException,
@@ -33,123 +26,16 @@ from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
 )
 
 from .conftest import (
+    FakeSankhyaServer,
     create_error_response,
-    create_login_response,
-    create_logout_response,
+    entities_response,
+    http_response,
+    simple_crud_session,
 )
 
 
 # Tentativas totais de uma requisição que falha sempre: 1 + retries
 MAX_ATTEMPTS = 1 + MAX_RETRY_COUNT
-
-
-# =============================================================================
-# Helpers
-# =============================================================================
-
-
-def _http_response(status_code: int, content: bytes) -> requests.Response:
-    """
-    Cria uma resposta HTTP real (requests.Response).
-
-    Usa o objeto real para que ``raise_for_status`` lance HTTPError em
-    respostas 4xx/5xx, como no servidor de verdade.
-    """
-    response = requests.Response()
-    response.status_code = status_code
-    response._content = content
-    response.headers["Content-Type"] = "text/xml;charset=UTF-8"
-    response.encoding = "utf-8"
-    response.url = "http://test.local:8180/mge/service.sbr"
-    return response
-
-
-def _entities_response(
-    *rows: Dict[str, Any],
-    service: ServiceName = ServiceName.CRUD_SERVICE_FIND,
-) -> bytes:
-    """Gera XML de resposta do CRUDServiceProvider com as entidades informadas."""
-    entities = "".join(
-        "<entity>" + "".join(f"<{k}>{v}</{k}>" for k, v in row.items()) + "</entity>"
-        for row in rows
-    )
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        f'<serviceResponse serviceName="{service.internal_value}" status="1">'
-        f'<responseBody><entities total="{len(rows)}">{entities}</entities></responseBody>'
-        "</serviceResponse>"
-    ).encode("utf-8")
-
-
-class _FakeSankhyaServer:
-    """
-    Simula o servidor Sankhya como ``side_effect`` de ``requests.Session.request``.
-
-    Login e logout sempre respondem com sucesso (cada login gera um
-    JSESSIONID único) e o registro de user agent (DWR) responde vazio.
-    As demais chamadas de serviço consomem, em ordem, a fila de respostas;
-    itens da fila que são exceções são lançados (falhas de transporte).
-    Uma chamada além da fila falha com AssertionError.
-    """
-
-    def __init__(
-        self,
-        responses: Sequence[Union[requests.Response, BaseException]] = (),
-    ) -> None:
-        self._lock = threading.Lock()
-        self._responses = list(responses)
-        self.calls: List[str] = []
-        self.logins = 0
-        self.logouts = 0
-
-    def calls_to(self, service: ServiceName) -> int:
-        """Retorna quantas requisições foram feitas para o serviço."""
-        return self.calls.count(service.internal_value)
-
-    def __call__(self, method: str, url: str, **kwargs: Any) -> requests.Response:
-        service = parse_qs(urlparse(url).query).get("serviceName", [""])[0]
-
-        with self._lock:
-            if service == ServiceName.LOGIN.internal_value:
-                self.logins += 1
-                session_id = f"SESSION_{uuid4().hex}"
-                return _http_response(200, create_login_response(session_id))
-
-            if service == ServiceName.LOGOUT.internal_value:
-                self.logouts += 1
-                return _http_response(200, create_logout_response())
-
-            if not service:
-                assert "DWRController" in url, f"URL inesperada: {url}"
-                return _http_response(200, b"")
-
-            self.calls.append(service)
-            if not self._responses:
-                raise AssertionError(
-                    f"Requisição inesperada #{len(self.calls)} para {service}"
-                )
-            item = self._responses.pop(0)
-
-        if isinstance(item, BaseException):
-            raise item
-        return item
-
-
-@contextmanager
-def _simple_crud_session() -> Iterator[SankhyaWrapper]:
-    """
-    Autentica um SankhyaWrapper e inicializa o SimpleCRUDRequestWrapper
-    com um SankhyaContext, liberando todos os recursos ao final.
-    """
-    wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-    wrapper.authenticate("user", "pass")
-    context = SankhyaContext(wrapper=wrapper)
-    try:
-        SimpleCRUDRequestWrapper.initialize(context)
-        yield wrapper
-    finally:
-        SimpleCRUDRequestWrapper.dispose()
-        context.dispose()
 
 
 # =============================================================================
@@ -168,17 +54,17 @@ class TestTimeoutHandling:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
+        server = FakeSankhyaServer([
             # Primeira tentativa: timeout
             requests.exceptions.Timeout("Connection timed out"),
             # Segunda tentativa: sucesso
-            _http_response(200, _entities_response(
+            http_response(200, entities_response(
                 {"CODPARC": 1, "NOMEPARC": "Parceiro Recuperado"}
             )),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             result = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
         # Deve ter recuperado após retry
@@ -195,13 +81,13 @@ class TestTimeoutHandling:
         mock_session_class.return_value = mock_session
 
         # Todas as tentativas: timeout
-        server = _FakeSankhyaServer([
+        server = FakeSankhyaServer([
             requests.exceptions.Timeout("Connection timed out")
             for _ in range(MAX_ATTEMPTS)
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises((requests.exceptions.Timeout, SankhyaException)):
                 SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
@@ -220,13 +106,13 @@ class TestConnectionErrors:
         mock_session_class.return_value = mock_session
 
         # Erro de conexão persistente (todas as tentativas)
-        server = _FakeSankhyaServer([
+        server = FakeSankhyaServer([
             requests.exceptions.ConnectionError("Connection refused")
             for _ in range(MAX_ATTEMPTS)
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises((requests.exceptions.ConnectionError, SankhyaException)):
                 SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
@@ -239,17 +125,17 @@ class TestConnectionErrors:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
+        server = FakeSankhyaServer([
             # Primeiro: erro de conexão
             requests.exceptions.ConnectionError("Connection refused"),
             # Segundo: sucesso
-            _http_response(200, _entities_response(
+            http_response(200, entities_response(
                 {"CODPARC": 1, "NOMEPARC": "Parceiro"}
             )),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             result = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
         assert result is not None
@@ -269,13 +155,13 @@ class TestServerErrors:
         mock_session_class.return_value = mock_session
 
         # Resposta 500 persistente
-        server = _FakeSankhyaServer([
-            _http_response(500, b"Internal Server Error")
+        server = FakeSankhyaServer([
+            http_response(500, b"Internal Server Error")
             for _ in range(MAX_ATTEMPTS)
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises(
                 (requests.exceptions.HTTPError, SankhyaException)
             ) as exc_info:
@@ -293,13 +179,13 @@ class TestServerErrors:
         mock_session_class.return_value = mock_session
 
         # Resposta 503 persistente
-        server = _FakeSankhyaServer([
-            _http_response(503, b"Service Unavailable")
+        server = FakeSankhyaServer([
+            http_response(503, b"Service Unavailable")
             for _ in range(MAX_ATTEMPTS)
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises(
                 (requests.exceptions.HTTPError, SankhyaException)
             ) as exc_info:
@@ -326,12 +212,12 @@ class TestBusinessErrors:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
-            _http_response(200, create_error_response("DUPLICATE_KEY", "Chave duplicada")),
+        server = FakeSankhyaServer([
+            http_response(200, create_error_response("DUPLICATE_KEY", "Chave duplicada")),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises(SankhyaException) as exc:
                 SimpleCRUDRequestWrapper.update(Partner(code=1, name="Duplicado"))
 
@@ -345,12 +231,12 @@ class TestBusinessErrors:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
-            _http_response(200, create_error_response("FK_VIOLATION", "Referência inválida")),
+        server = FakeSankhyaServer([
+            http_response(200, create_error_response("FK_VIOLATION", "Referência inválida")),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises(SankhyaException):
                 SimpleCRUDRequestWrapper.update(
                     Partner(name="Parceiro", code_city=99999)  # Cidade inexistente
@@ -365,14 +251,14 @@ class TestBusinessErrors:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
-            _http_response(200, create_error_response(
+        server = FakeSankhyaServer([
+            http_response(200, create_error_response(
                 "REQUIRED_FIELD", "Campo obrigatório: NOMEPARC"
             )),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises(SankhyaException):
                 SimpleCRUDRequestWrapper.update(Partner())  # Sem nome
 
@@ -397,17 +283,17 @@ class TestConcurrencyErrors:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
+        server = FakeSankhyaServer([
             # Primeiro: deadlock
-            _http_response(200, create_error_response("DEADLOCK", "Transaction deadlock")),
+            http_response(200, create_error_response("DEADLOCK", "Transaction deadlock")),
             # Segundo: sucesso
-            _http_response(200, _entities_response(
+            http_response(200, entities_response(
                 {"CODPARC": 1, "NOMEPARC": "Parceiro"}
             )),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             logins_before = server.logins
             result = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
@@ -430,15 +316,15 @@ class TestConcurrencyErrors:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
-            _http_response(200, create_error_response(
+        server = FakeSankhyaServer([
+            http_response(200, create_error_response(
                 "COMPETITION",
                 "Não foi possível gravar o registro: situação de concorrência",
             )),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises(ServiceRequestCompetitionException):
                 SimpleCRUDRequestWrapper.update(Partner(code=1, name="Locked"))
 
@@ -461,17 +347,17 @@ class TestSessionErrors:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([
+        server = FakeSankhyaServer([
             # Operação retorna sessão inválida
-            _http_response(200, create_error_response("SESSION.INVALID", "Não autorizado.")),
+            http_response(200, create_error_response("SESSION.INVALID", "Não autorizado.")),
             # Retry com sucesso após o re-login
-            _http_response(200, _entities_response(
+            http_response(200, entities_response(
                 {"CODPARC": 1, "NOMEPARC": "Parceiro"}
             )),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             logins_before = server.logins
             logouts_before = server.logouts
             result = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
@@ -496,12 +382,12 @@ class TestXMLParsingErrors:
         mock_session_class.return_value = mock_session
 
         # XML inválido
-        server = _FakeSankhyaServer([
-            _http_response(200, b"<invalid><not-closed>"),
+        server = FakeSankhyaServer([
+            http_response(200, b"<invalid><not-closed>"),
         ])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises((etree.XMLSyntaxError, SankhyaException)):
                 SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
@@ -513,10 +399,10 @@ class TestXMLParsingErrors:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
 
-        server = _FakeSankhyaServer([_http_response(200, b"")])
+        server = FakeSankhyaServer([http_response(200, b"")])
         mock_session.request.side_effect = server
 
-        with _simple_crud_session():
+        with simple_crud_session():
             with pytest.raises((etree.XMLSyntaxError, SankhyaException)):
                 SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 

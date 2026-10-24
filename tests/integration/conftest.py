@@ -9,25 +9,40 @@ e testar fluxos completos de forma determinística.
 from __future__ import annotations
 
 import base64
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
-from decimal import Decimal
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from unittest.mock import MagicMock, Mock, patch
-from uuid import UUID, uuid4
+from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 from xml.sax.saxutils import escape as xml_escape
 
 import pytest
+import requests
+from lxml import etree
 
 from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.wrapper import SankhyaWrapper
+from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.models.base import EntityBase
-from sankhya_sdk.value_objects.service_file import ServiceFile
-from sankhya_sdk.models.service.service_response import ServiceResponse
 from sankhya_sdk.models.transport.partner import Partner
 from sankhya_sdk.models.transport.product import Product
 from sankhya_sdk.models.transport.neighborhood import Neighborhood
-from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
+from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
+    SimpleCRUDRequestWrapper,
+)
 
 
 T = TypeVar("T", bound=EntityBase)
@@ -308,6 +323,186 @@ def create_paged_response(
 
 
 # =============================================================================
+# Servidor Sankhya simulado (roteado pelo serviceName)
+# =============================================================================
+
+
+def http_response(status_code: int, content: bytes) -> requests.Response:
+    """
+    Cria uma resposta HTTP real (requests.Response).
+
+    Usa o objeto real para que ``raise_for_status`` lance HTTPError em
+    respostas 4xx/5xx, como no servidor de verdade.
+    """
+    response = requests.Response()
+    response.status_code = status_code
+    response._content = content
+    response.headers["Content-Type"] = "text/xml;charset=UTF-8"
+    response.encoding = "utf-8"
+    response.url = "http://test.local:8180/mge/service.sbr"
+    return response
+
+
+def entities_response(
+    *rows: Dict[str, Any],
+    service: ServiceName = ServiceName.CRUD_SERVICE_FIND,
+) -> bytes:
+    """Gera XML de resposta do CRUDServiceProvider com as entidades informadas."""
+    entities = "".join(_create_entity_xml(row) for row in rows)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<serviceResponse serviceName="{service.internal_value}" status="1">'
+        f'<responseBody><entities total="{len(rows)}">{entities}</entities></responseBody>'
+        "</serviceResponse>"
+    ).encode("utf-8")
+
+
+def request_xml(body: str) -> etree._Element:
+    """Interpreta o corpo XML de uma requisição enviada ao servidor simulado."""
+    return etree.fromstring(body.encode("utf-8"))
+
+
+def find_criteria(body: str) -> Optional[str]:
+    """
+    Expressão do critério de uma requisição CRUDServiceProvider.loadRecords.
+
+    No .NET (ServiceRequestExtensions.HandleService, CrudServiceFind) o
+    critério montado a partir das chaves/campos preenchidos da entidade vai
+    em ``dataSet/criteria/expression``.
+    """
+    return request_xml(body).findtext("requestBody/dataSet/criteria/expression")
+
+
+def save_data_row(body: str) -> Tuple[Dict[str, Optional[str]], Dict[str, Optional[str]]]:
+    """
+    Chaves e campos locais do ``dataRow`` de CRUDServiceProvider.saveRecord.
+
+    No .NET (ServiceRequestExtensions.HandleService, CrudServiceSave) as
+    chaves preenchidas vão em ``dataRow/key`` e os demais campos em
+    ``dataRow/localFields``.
+
+    Returns:
+        Tupla (chaves, campos locais), cada uma como {nome: valor}
+    """
+    rows = request_xml(body).findall("requestBody/dataSet/dataRow")
+    assert len(rows) == 1, f"saveRecord deveria ter um único dataRow: {body}"
+    keys = rows[0].find("key")
+    local_fields = rows[0].find("localFields")
+    return (
+        {child.tag: child.text for child in (keys if keys is not None else [])},
+        {child.tag: child.text for child in (local_fields if local_fields is not None else [])},
+    )
+
+
+ServerReply = Union[requests.Response, BaseException]
+ServerResponder = Callable[[str], ServerReply]
+
+
+class FakeSankhyaServer:
+    """
+    Simula o servidor Sankhya como ``side_effect`` de ``requests.Session.request``.
+
+    Roteia cada requisição pelo parâmetro ``serviceName`` da URL. Login e
+    logout sempre respondem com sucesso (cada login gera um JSESSIONID
+    único) e o registro de user agent (DWR) responde vazio, de modo que as
+    sessões adicionais (ex.: a sessão dedicada do SimpleCRUDRequestWrapper,
+    ``Context.AcquireNewSession`` no .NET) não consomem as respostas do teste.
+
+    As demais chamadas de serviço consomem, em ordem, a fila de respostas.
+    Cada item da fila pode ser:
+
+    - uma resposta HTTP, devolvida como está;
+    - uma exceção, lançada (falha de transporte);
+    - uma função que recebe o corpo XML da requisição e devolve a resposta
+      (ou exceção), para responder de acordo com o que foi pedido.
+
+    Uma chamada além da fila falha com AssertionError. O serviço e o corpo
+    XML de cada chamada ficam registrados. Thread-safe.
+    """
+
+    def __init__(
+        self,
+        responses: Sequence[Union[ServerReply, ServerResponder]] = (),
+    ) -> None:
+        self._lock = threading.Lock()
+        self._responses = list(responses)
+        self.calls: List[str] = []
+        self.requests: List[Tuple[str, str]] = []
+        self.logins = 0
+        self.logouts = 0
+
+    def calls_to(self, service: ServiceName) -> int:
+        """Retorna quantas requisições foram feitas para o serviço."""
+        with self._lock:
+            return self.calls.count(service.internal_value)
+
+    def bodies(self, service: ServiceName) -> List[str]:
+        """Retorna os corpos XML enviados para o serviço, em ordem."""
+        with self._lock:
+            return [
+                body for name, body in self.requests
+                if name == service.internal_value
+            ]
+
+    def __call__(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        service = parse_qs(urlparse(url).query).get("serviceName", [""])[0]
+        data = kwargs.get("data")
+        body = data.decode("utf-8") if isinstance(data, bytes) else (data or "")
+
+        with self._lock:
+            if service == ServiceName.LOGIN.internal_value:
+                self.logins += 1
+                session_id = f"SESSION_{uuid4().hex}"
+                return http_response(200, create_login_response(session_id))
+
+            if service == ServiceName.LOGOUT.internal_value:
+                self.logouts += 1
+                return http_response(200, create_logout_response())
+
+            if not service:
+                assert "DWRController" in url, f"URL inesperada: {url}"
+                return http_response(200, b"")
+
+            self.calls.append(service)
+            self.requests.append((service, body))
+            if not self._responses:
+                raise AssertionError(
+                    f"Requisição inesperada #{len(self.calls)} para {service}"
+                )
+            item = self._responses.pop(0)
+
+        # Mocks também são "callable": só funções respondem pelo corpo
+        if not isinstance(item, (requests.Response, Mock, BaseException)):
+            item = item(body)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+
+@contextmanager
+def simple_crud_session() -> Iterator[SankhyaWrapper]:
+    """
+    Autentica um SankhyaWrapper e inicializa o SimpleCRUDRequestWrapper
+    com um SankhyaContext, liberando todos os recursos ao final.
+
+    ``SimpleCRUDRequestWrapper.initialize(context)`` adquire uma sessão
+    dedicada (novo login), como ``Context.AcquireNewSession(SimpleCrud)``
+    no .NET (SimpleCRUDRequestWrapper.cs:17-21). O contexto é descartado
+    mesmo se a inicialização falhar, para não deixar sessões registradas
+    no ``SankhyaContext`` (estado de classe) para os próximos testes.
+    """
+    wrapper = SankhyaWrapper(host="http://test.local", port=8180)
+    wrapper.authenticate("user", "pass")
+    context = SankhyaContext(wrapper=wrapper)
+    try:
+        SimpleCRUDRequestWrapper.initialize(context)
+        yield wrapper
+    finally:
+        SimpleCRUDRequestWrapper.dispose()
+        context.dispose()
+
+
+# =============================================================================
 # Sample Entity Factories
 # =============================================================================
 
@@ -525,9 +720,9 @@ def mock_sankhya_server(sample_xml_responses):
             """Configura o side_effect do mock."""
             mock_session.request.side_effect = responses_queue
         
-        # Inicializa com login bem-sucedido por padrão
-        login_resp = create_mock_response(200, sample_xml_responses["login_success"])
-        responses_queue.append(login_resp)
+        # Inicializa com autenticação bem-sucedida por padrão: authenticate()
+        # consome o login e o registro de user agent (DWR)
+        responses_queue.extend(create_authentication_responses("SESSION123", 1))
         
         yield mock_session, add_response, configure_side_effect
 
