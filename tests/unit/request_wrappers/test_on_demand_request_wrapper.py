@@ -17,6 +17,7 @@ from pydantic import Field
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
 from sankhya_sdk.exceptions import (
+    CanceledOnDemandRequestWrapperException,
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
     ServiceRequestTimeoutException,
@@ -446,3 +447,29 @@ class TestOnDemandRetry:
             assert failure_events[0].exception is timeout
         finally:
             _dispose_quietly(wrapper)
+
+
+# =============================================================================
+# Cancelamento (.NET OnDemandRequestWrapper.cs:105-108)
+# =============================================================================
+
+
+class TestOnDemandCancellation:
+    """Comportamento do wrapper após o cancelamento."""
+
+    def test_add_after_cancellation_raises(self):
+        """add() recusa entidades quando o cancelamento já foi solicitado."""
+        cancel_token = threading.Event()
+        service = _RecordingService()
+        wrapper = _create_wrapper(service, cancel_token=cancel_token)
+        try:
+            cancel_token.set()
+
+            with pytest.raises(CanceledOnDemandRequestWrapperException):
+                wrapper.add(Partner(name="A"))
+
+            assert wrapper.queue_size == 0
+        finally:
+            _dispose_quietly(wrapper)
+
+        assert service.batches == []

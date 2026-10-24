@@ -17,6 +17,7 @@ import pytest
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
 from sankhya_sdk.exceptions import (
+    CanceledOnDemandRequestWrapperException,
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
     ServiceRequestTimeoutException,
@@ -227,3 +228,30 @@ class TestAsyncOnDemandRetry:
             assert failure_events[0].exception is timeout
         finally:
             await _dispose_quietly(wrapper)
+
+
+# =============================================================================
+# Cancelamento (.NET OnDemandRequestWrapper.cs:105-108)
+# =============================================================================
+
+
+class TestAsyncOnDemandCancellation:
+    """Comportamento do wrapper após o cancelamento."""
+
+    @pytest.mark.asyncio
+    async def test_add_after_cancellation_raises(self):
+        """add() recusa entidades quando o cancelamento já foi solicitado."""
+        cancel_event = asyncio.Event()
+        service = _RecordingService()
+        wrapper = await _create_wrapper(service, cancel_event=cancel_event)
+        try:
+            cancel_event.set()
+
+            with pytest.raises(CanceledOnDemandRequestWrapperException):
+                await wrapper.add(Partner(name="A"))
+
+            assert wrapper.queue_size == 0
+        finally:
+            await _dispose_quietly(wrapper)
+
+        assert service.batches == []

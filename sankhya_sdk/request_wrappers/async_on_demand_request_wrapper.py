@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
 from sankhya_sdk.exceptions import (
+    CanceledOnDemandRequestWrapperException,
     SankhyaException,
     ServiceRequestDeadlockException,
     ServiceRequestTimeoutException,
@@ -195,9 +196,14 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
             
         Raises:
             ValueError: Se o wrapper já foi descartado
+            CanceledOnDemandRequestWrapperException: Se o cancelamento já
+                foi solicitado (.NET OnDemandRequestWrapper.cs:105-108)
         """
         if self._disposed:
             raise ValueError("AsyncOnDemandRequestWrapper já foi descartado")
+        
+        if self._cancel_event.is_set():
+            raise CanceledOnDemandRequestWrapperException()
         
         await self._queue.put(entity)
         self._work_available.set()
