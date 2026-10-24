@@ -559,11 +559,12 @@ class TestBilling:
 
     def test_bill(self, mock_context, mock_response):
         """Test bill returns NUNOTA and events."""
-        # Real ResponseBody: the billed invoice comes in <notas><nota>, i.e.
-        # response_body.invoices.items[0] (.NET: ResponseBody.Invoices.Invoice)
+        # Real ResponseBody: the billed invoice comes in <notas><nota>N</nota>, i.e.
+        # response_body.invoices.items[0].value (.NET: ResponseBody.Invoices.Invoice.Value,
+        # the [XmlText] of <nota>)
         response_events = [ClientEvent(type="test")]
         mock_response.response_body = ResponseBody(
-            invoices=Invoices(items=[Invoice(unique_number=12345)]),
+            invoices=Invoices(items=[Invoice(value="12345")]),
             client_events=ClientEvents(items=response_events),
         )
         
@@ -585,6 +586,130 @@ class TestBilling:
             assert events == response_events
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_BILL
+
+    def test_bill_request_xml_and_response_match_dotnet(self, mock_context):
+        """Test bill sends the .NET <notas> payload and parses <nota>N</nota>."""
+        # .NET KnowServicesRequestWrapper.cs:259-309
+        response = _service_response(
+            "SelecaoDocumentoSP.faturar",
+            "<notas><nota>12346</nota></notas>"
+            "<clientEvents>"
+            '<clientEvent id="7">br.com.sankhya.mgecom.event.troca.serie</clientEvent>'
+            "</clientEvents>",
+        )
+
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            nunota, events = KnowServicesRequestWrapper.bill(
+                single_number=12345,
+                code_operation_type=1001,
+                billing_type=BillingType.NORMAL,
+                request_events=[
+                    ClientEvent(text="br.com.sankhya.comercial.recalcula.icms")
+                ],
+            )
+
+            assert _sent_request_xml() == (
+                '<serviceRequest serviceName="SelecaoDocumentoSP.faturar">'
+                "<requestBody>"
+                '<notas codTipOper="1001" dataValidada="S" umaNotaParaCada="S" '
+                'dtFaturamento="" dtSaida="" hrSaida="" '
+                'tipoFaturamento="FaturamentoNormal">'
+                '<notasComMoeda valorMoeda="undefined"/>'
+                "<nota>12345</nota>"
+                "</notas>"
+                "<clientEventList>"
+                "<clientEvent>br.com.sankhya.comercial.recalcula.icms</clientEvent>"
+                "</clientEventList>"
+                "</requestBody>"
+                "</serviceRequest>"
+            )
+
+        assert nunota == 12346
+        assert type(nunota) is int
+        assert len(events) == 1
+        assert events[0].id == "7"
+        assert events[0].text == "br.com.sankhya.mgecom.event.troca.serie"
+
+    def test_bill_with_series_forces_direct_billing(self, mock_context):
+        """Test bill with series sends serie and tipoFaturamento=FaturamentoDireto (.NET)."""
+        # .NET KnowServicesRequestWrapper.cs:282-286:
+        # if (series.HasValue) { BillingType = BillingType.Direct; Series = series.Value; }
+        response = _service_response(
+            "SelecaoDocumentoSP.faturar", "<notas><nota>500</nota></notas>"
+        )
+
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            nunota, events = KnowServicesRequestWrapper.bill(
+                single_number=12345,
+                code_operation_type=1001,
+                billing_type=BillingType.NORMAL,
+                series=3,
+            )
+
+            assert _sent_request_xml() == (
+                '<serviceRequest serviceName="SelecaoDocumentoSP.faturar">'
+                "<requestBody>"
+                '<notas codTipOper="1001" serie="3" dataValidada="S" umaNotaParaCada="S" '
+                'dtFaturamento="" dtSaida="" hrSaida="" '
+                'tipoFaturamento="FaturamentoDireto">'
+                '<notasComMoeda valorMoeda="undefined"/>'
+                "<nota>12345</nota>"
+                "</notas>"
+                "</requestBody>"
+                "</serviceRequest>"
+            )
+
+        assert nunota == 500
+        assert events is None
+
+    def test_bill_returns_minus_one_without_invoices(self, mock_context):
+        """Test bill returns -1 when the response has no <notas> (.NET)."""
+        response = _service_response("SelecaoDocumentoSP.faturar", "")
+
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            nunota, events = KnowServicesRequestWrapper.bill(
+                single_number=12345,
+                code_operation_type=1001,
+                billing_type=BillingType.NORMAL,
+            )
+
+        assert nunota == -1
+        assert events is None
+
+    def test_bill_returns_zero_for_empty_nota(self, mock_context):
+        """Test bill returns 0 for <nota/> without text (.NET int Value default)."""
+        response = _service_response(
+            "SelecaoDocumentoSP.faturar", "<notas><nota/></notas>"
+        )
+
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            nunota, _ = KnowServicesRequestWrapper.bill(
+                single_number=12345,
+                code_operation_type=1001,
+                billing_type=BillingType.NORMAL,
+            )
+
+        assert nunota == 0
 
     def test_confirm_invoice(self, mock_context, mock_response):
         """Test confirm_invoice sends correct request."""

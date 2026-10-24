@@ -57,12 +57,14 @@ from sankhya_sdk.models.service.invoice_types import (
     InvoiceItem,
     InvoiceItems,
     Invoices,
+    InvoicesWithCurrency,
 )
 from sankhya_sdk.models.service.metadata_types import Config, Session
 from sankhya_sdk.models.service.request_body import RequestBody
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
 from sankhya_sdk.models.service.user_types import LowData, SessionInfo
+from sankhya_sdk.models.service.xml_serialization import deserialize_optional_int
 
 
 logger = logging.getLogger(__name__)
@@ -643,13 +645,17 @@ class KnowServicesRequestWrapper:
         Args:
             single_number: NUNOTA da nota a faturar
             code_operation_type: Código do tipo de operação
-            billing_type: Tipo de faturamento
+            billing_type: Tipo de faturamento (com ``series`` informada, o
+                .NET força ``BillingType.DIRECT``)
             series: Série da nota (opcional)
             request_events: Eventos de requisição (opcional)
-            
+
         Returns:
-            Tupla com (NUNOTA faturado, eventos de resposta)
-            
+            Tupla com (NUNOTA faturado, eventos de resposta). Como no .NET, o
+            NUNOTA é o texto de ``<notas><nota>N</nota></notas>`` da resposta
+            (0 se ``<nota>`` vier sem texto) e -1 se a resposta não trouxer
+            ``<notas>``/``<nota>``.
+
         Example:
             >>> nunota, events = KnowServicesRequestWrapper.bill(
             ...     single_number=12345,
@@ -663,64 +669,49 @@ class KnowServicesRequestWrapper:
             f"(tipo operação: {code_operation_type}, tipo faturamento: {billing_type})"
         )
         
-        # Build invoice reference with single_number (matching .NET structure)
-        invoice = Invoice()
-        invoice.extra_data["value"] = str(single_number)
-        
-        # Build Invoices with all required billing fields matching .NET
-        invoices = Invoices(items=[invoice])
-        # Add billing-specific fields via extra_data to match .NET payload structure
-        billing_type_value = billing_type.internal_value if hasattr(billing_type, "internal_value") else str(billing_type.value)
-        
-        # Build request body with proper invoices structure matching .NET
-        request_body = RequestBody(invoices=invoices)
-        
-        # Set invoices extra_data to include all billing fields from .NET
-        # .NET sends: BillingType, CodeOperationType, DateBillingNullable=null, 
-        # DateExitNullable=null, TimeExitNullable=null, IsDateValidated=true,
-        # InvoicesWithCurrency={CurrencyValue="undefined"}, Invoice={Value=singleNumber},
-        # OneInvoiceForEach=true
-        if request_body.invoices:
-            request_body.invoices.items[0].extra_data.update({
-                "billingType": billing_type_value,
-                "codeOperationType": str(code_operation_type),
-                "dateBillingNullable": "",
-                "dateExitNullable": "",
-                "timeExitNullable": "",
-                "isDateValidated": "true",
-                "oneInvoiceForEach": "true",
-            })
-        
+        # .NET (KnowServicesRequestWrapper.cs:259-286): atributos de <notas>
+        # (codTipOper, dataValidada, umaNotaParaCada, dtFaturamento/dtSaida/
+        # hrSaida vazios, tipoFaturamento), <notasComMoeda valorMoeda="undefined"/>
+        # e <nota>NUNOTA</nota>
+        invoices = Invoices(
+            billing_type=billing_type,
+            code_operation_type=code_operation_type,
+            date_billing=None,
+            date_exit=None,
+            time_exit=None,
+            is_date_validated=True,
+            invoices_with_currency=InvoicesWithCurrency(currency_value="undefined"),
+            items=[Invoice(value=str(single_number))],
+            one_invoice_for_each=True,
+        )
+
         if series is not None:
-            # When series is provided, use Direct billing type
-            if request_body.invoices and request_body.invoices.items:
-                request_body.invoices.items[0].extra_data["billingType"] = "Direct"
-                request_body.invoices.items[0].series = str(series)
-        
+            # Com série informada o .NET fatura sempre como direto
+            invoices.billing_type = BillingType.DIRECT
+            invoices.series = series
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_BILL,
-            request_body=request_body,
+            request_body=RequestBody(invoices=invoices),
         )
-        
-        if request_events:
-            request.request_body.client_events = ClientEvents(items=request_events)
-        
+
+        if request_events is not None:
+            request.request_body.client_events = ClientEvents(items=list(request_events))
+
         response = cls._invoke_service(request)
-        
-        # Extrair NUNOTA e eventos da resposta
+
+        # Extrair NUNOTA e eventos da resposta (.NET :295-309)
         result_nunota = -1
         response_events: Optional[List[ClientEvent]] = None
-        
+
         if response.response_body:
             rb = response.response_body
             if hasattr(rb, "invoices") and rb.invoices:
                 if hasattr(rb.invoices, "items") and rb.invoices.items:
-                    # Get value from invoice
-                    inv = rb.invoices.items[0]
-                    if inv.unique_number:
-                        result_nunota = inv.unique_number
-                    elif "value" in inv.extra_data:
-                        result_nunota = int(inv.extra_data["value"])
+                    # Invoice.Value: texto de <nota> (int no .NET, 0 se vazio)
+                    result_nunota = deserialize_optional_int(
+                        rb.invoices.items[0].value, default=0
+                    )
             if hasattr(rb, "client_events") and rb.client_events:
                 response_events = rb.client_events.items
         
