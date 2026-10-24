@@ -113,6 +113,36 @@ def test_get_valid_token_refresh_failure_with_reauth(mock_session):
     assert mock_session.post.call_count == 2
 
 
+def test_get_valid_token_refreshes_when_token_expires_after_check(mock_session):
+    """Test that get_valid_token refreshes if get_token() raises TokenExpiredError
+    after is_expired() returned False (token expired between the two checks)."""
+    token_manager = MagicMock(spec=TokenManager)
+    token_manager.is_expired.return_value = False
+    token_manager.get_token.side_effect = TokenExpiredError("Access token expired.")
+    token_manager.get_refresh_token.return_value = "ref123"
+    client = OAuthClient("http://api.test", token_manager=token_manager)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "access_token": "new_token",
+        "expires_in": 3600
+    }
+    mock_session.post.return_value = mock_response
+
+    # Must fall through to refresh instead of failing (e.g. NameError)
+    token = client.get_valid_token()
+
+    assert token == "new_token"
+    mock_session.post.assert_called_once()
+    assert mock_session.post.call_args[0][0] == "http://api.test/token/refresh"
+    token_manager.set_tokens.assert_called_once_with(
+        access_token="new_token",
+        expires_in=3600,
+        refresh_token="ref123"
+    )
+
+
 def test_get_valid_token_no_token_raises_error(mock_session):
     """Test that get_valid_token raises error if no token and can't refresh."""
     client = OAuthClient("http://api.test")

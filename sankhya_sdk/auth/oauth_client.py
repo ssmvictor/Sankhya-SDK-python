@@ -2,7 +2,7 @@ import logging
 import requests
 from typing import Optional, Dict
 
-from sankhya_sdk.auth.exceptions import AuthError, AuthNetworkError
+from sankhya_sdk.auth.exceptions import AuthError, AuthNetworkError, TokenExpiredError
 from sankhya_sdk.auth.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
