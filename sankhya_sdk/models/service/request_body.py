@@ -91,6 +91,9 @@ class RequestBody(EntityBase):
         elem = etree.Element(SankhyaConstants.REQUEST_BODY)
         
         # Mapeia campos para suas tags XML
+        # (nomes do .NET em Sankhya-SDK-dotnet/Src/Sankhya/Service/RequestBody.cs:
+        # [XmlElement("SESSION")], [XmlElement("aviso")],
+        # [XmlArray("clientEventList")] e [XmlArray("arquivos")])
         field_mappings = {
             "invoice": "nota",
             "invoices": "notas",
@@ -99,17 +102,17 @@ class RequestBody(EntityBase):
             "data_set": "dataSet",
             "param": "param",
             "params": "params",
-            "session": "session",
+            "session": "SESSION",
             "low_data": "dadosBaixa",
-            "system_warning": "avisoSistema",
+            "system_warning": "aviso",
             "system_message": "mensagemSistema",
             "config": "config",
             "username": "NOMUSU",
             "password": "INTERNO",
             "single_numbers": "singleNumbers",
-            "client_events": "clientEvents",
+            "client_events": "clientEventList",
             "notification_elem": "notificacao",
-            "paths": "paths",
+            "paths": "arquivos",
             "custom_query": "sql",
         }
         
@@ -191,11 +194,11 @@ class RequestBody(EntityBase):
                 instance.param = Param.from_xml(child)
             elif tag == "params":
                 instance.params = Params.from_xml(child)
-            elif tag == "session":
+            elif tag in ("SESSION", "session"):
                 instance.session = Session.from_xml(child)
             elif tag == "dadosBaixa":
                 instance.low_data = LowData.from_xml(child)
-            elif tag == "avisoSistema":
+            elif tag in ("aviso", "avisoSistema"):
                 instance.system_warning = SystemWarning.from_xml(child)
             elif tag == "mensagemSistema":
                 instance.system_message = SystemMessage.from_xml(child)
@@ -207,11 +210,11 @@ class RequestBody(EntityBase):
                 instance.password = get_element_text(child)
             elif tag == "singleNumbers":
                 instance.single_numbers = SingleNumbers.from_xml(child)
-            elif tag == "clientEvents":
+            elif tag in ("clientEventList", "clientEvents"):
                 instance.client_events = ClientEvents.from_xml(child)
             elif tag == "notificacao":
                 instance.notification_elem = NotificationElem.from_xml(child)
-            elif tag == "paths":
+            elif tag in ("arquivos", "paths"):
                 instance.paths = Paths.from_xml(child)
         
         return instance

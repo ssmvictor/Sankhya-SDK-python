@@ -8,12 +8,14 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Service/
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from lxml import etree
 from lxml.etree import Element
 from pydantic import BaseModel, ConfigDict, Field as PydanticField
 
+from sankhya_sdk.enums.sankhya_warning_level import SankhyaWarningLevel
+from sankhya_sdk.enums.sankhya_warning_type import SankhyaWarningType
 from .xml_serialization import (
     create_xml_element,
     get_element_attr,
@@ -83,10 +85,16 @@ class ClientEvent(BaseModel):
     Evento de cliente.
     
     Representa um evento disparado pelo cliente para o servidor.
+
+    ``id`` corresponde ao atributo ``id`` e ``text`` ao texto do elemento
+    (``[XmlText]``) do .NET (Sankhya-SDK-dotnet/Src/Sankhya/Service/ClientEvent.cs),
+    ex.: ``<clientEvent>br.com.sankhya.actionbutton.clientconfirm</clientEvent>``.
     """
 
     model_config = ConfigDict(frozen=False)
 
+    id: Optional[str] = None
+    text: Optional[str] = None
     type: Optional[str] = None
     code: Optional[str] = None
     invoice_number: Optional[int] = None
@@ -97,6 +105,10 @@ class ClientEvent(BaseModel):
         """Serializa para elemento XML."""
         elem = etree.Element("clientEvent")
         
+        if self.text is not None:
+            elem.text = self.text
+        if self.id is not None:
+            elem.set("id", self.id)
         if self.type:
             elem.set("type", self.type)
         if self.code:
@@ -134,6 +146,8 @@ class ClientEvent(BaseModel):
                 data[child.tag] = get_element_text(child)
         
         return cls(
+            id=get_element_attr(element, "id"),
+            text=(element.text or "").strip() or None,
             type=get_element_attr(element, "type"),
             code=get_element_attr(element, "code"),
             invoice_number=deserialize_optional_int(
@@ -348,11 +362,21 @@ class SystemMessage(BaseModel):
 
 
 class SystemWarningRecipient(BaseModel):
-    """Destinatário de aviso do sistema."""
+    """
+    Destinatário de aviso do sistema.
+
+    Serializado como no .NET
+    (Sankhya-SDK-dotnet/Src/Sankhya/Service/SystemWarningRecipient.cs):
+    ``<destinatario id="..." tipo="..."/>``, onde ``user_id`` é o ``id``
+    (usuário ou grupo) e ``type`` o ``tipo`` (valor interno de
+    ``SankhyaWarningType``: ``usuario``/``grupo``). Os campos ``user_name``,
+    ``email`` e ``read`` não existem no protocolo .NET e não são serializados.
+    """
 
     model_config = ConfigDict(frozen=False)
 
     user_id: Optional[int] = None
+    type: Optional[SankhyaWarningType] = None
     user_name: Optional[str] = None
     email: Optional[str] = None
     read: bool = False
@@ -362,20 +386,31 @@ class SystemWarningRecipient(BaseModel):
         elem = etree.Element("destinatario")
         
         if self.user_id is not None:
-            elem.set("idusu", str(self.user_id))
-        if self.user_name:
-            elem.set("nomeUsu", self.user_name)
-        if self.email:
-            elem.set("email", self.email)
-        elem.set("lido", serialize_bool(self.read))
+            elem.set("id", str(self.user_id))
+        if self.type is not None:
+            elem.set("tipo", self.type.internal_value)
         
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "SystemWarningRecipient":
         """Deserializa de elemento XML."""
+        user_id = deserialize_optional_int(get_element_attr(element, "id"))
+        if user_id is None:
+            # Formato legado
+            user_id = deserialize_optional_int(get_element_attr(element, "idusu"))
+
+        warning_type: Optional[SankhyaWarningType] = None
+        type_value = get_element_attr(element, "tipo")
+        if type_value is not None:
+            try:
+                warning_type = SankhyaWarningType.from_internal_value(type_value)
+            except ValueError:
+                warning_type = None
+
         return cls(
-            user_id=deserialize_optional_int(get_element_attr(element, "idusu")),
+            user_id=user_id,
+            type=warning_type,
             user_name=get_element_attr(element, "nomeUsu"),
             email=get_element_attr(element, "email"),
             read=deserialize_bool(get_element_attr(element, "lido", "")),
@@ -387,6 +422,23 @@ class SystemWarning(BaseModel):
     Aviso do sistema.
     
     Representa um aviso para ser exibido aos usuários.
+
+    Serializado como no .NET (Sankhya-SDK-dotnet/Src/Sankhya/Service/SystemWarning.cs
+    e RequestBody.cs ``[XmlElement("aviso")]``)::
+
+        <aviso importancia="2">
+            <titulo>...</titulo>
+            <descricao>...</descricao>
+            <Dica>...</Dica>
+            <destinatario id="1" tipo="usuario"/>
+        </aviso>
+
+    Mapeamento: ``priority`` -> ``importancia`` (aceita ``SankhyaWarningLevel``,
+    serializado pelo valor interno, ou o valor já como texto), ``title`` ->
+    ``titulo``, ``content`` -> ``descricao`` (.NET ``Description``), ``tip`` ->
+    ``Dica`` e ``recipients`` -> ``destinatario`` (repetido, sem elemento
+    agrupador). Os campos ``code``, ``type``, ``created_at`` e ``expire_at`` não
+    existem no protocolo .NET e não são serializados.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -394,56 +446,71 @@ class SystemWarning(BaseModel):
     code: Optional[str] = None
     title: Optional[str] = None
     content: Optional[str] = None
+    tip: Optional[str] = None
     type: Optional[str] = None
-    priority: Optional[str] = None
+    priority: Optional[Union[SankhyaWarningLevel, str]] = None
     created_at: Optional[str] = None
     expire_at: Optional[str] = None
     recipients: List[SystemWarningRecipient] = PydanticField(default_factory=list)
 
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
-        elem = etree.Element("avisoSistema")
+        elem = etree.Element("aviso")
         
-        if self.code:
-            elem.set("codigo", self.code)
-        if self.type:
-            elem.set("tipo", self.type)
-        if self.priority:
-            elem.set("prioridade", self.priority)
-        if self.created_at:
-            elem.set("criadoEm", self.created_at)
-        if self.expire_at:
-            elem.set("expiraEm", self.expire_at)
-        if self.title:
+        if self.priority is not None:
+            importance = (
+                self.priority.internal_value
+                if isinstance(self.priority, SankhyaWarningLevel)
+                else self.priority
+            )
+            elem.set("importancia", importance)
+        if self.title is not None:
             create_xml_element("titulo", self.title, parent=elem)
-        if self.content:
-            create_xml_element("conteudo", self.content, parent=elem)
-        if self.recipients:
-            dest_elem = etree.SubElement(elem, "destinatarios")
-            for recipient in self.recipients:
-                dest_elem.append(recipient.to_xml())
+        if self.content is not None:
+            create_xml_element("descricao", self.content, parent=elem)
+        if self.tip is not None:
+            create_xml_element("Dica", self.tip, parent=elem)
+        for recipient in self.recipients:
+            elem.append(recipient.to_xml())
         
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "SystemWarning":
         """Deserializa de elemento XML."""
-        recipients: List[SystemWarningRecipient] = []
+        recipients: List[SystemWarningRecipient] = [
+            SystemWarningRecipient.from_xml(r) for r in element.findall("destinatario")
+        ]
         dest_elem = element.find("destinatarios")
         if dest_elem is not None:
-            recipients = [
+            # Formato legado: destinatários agrupados em <destinatarios>
+            recipients.extend(
                 SystemWarningRecipient.from_xml(r) 
                 for r in dest_elem.findall("destinatario")
-            ]
+            )
         
+        def optional_text(child: Optional[Element]) -> Optional[str]:
+            return get_element_text(child) if child is not None else None
+
+        content_elem = element.find("descricao")
+        if content_elem is None:
+            # Formato legado
+            content_elem = element.find("conteudo")
+
+        priority = get_element_attr(element, "importancia")
+        if priority is None:
+            # Formato legado
+            priority = get_element_attr(element, "prioridade")
+
         return cls(
             code=get_element_attr(element, "codigo"),
             type=get_element_attr(element, "tipo"),
-            priority=get_element_attr(element, "prioridade"),
+            priority=priority,
             created_at=get_element_attr(element, "criadoEm"),
             expire_at=get_element_attr(element, "expiraEm"),
-            title=get_element_text(element.find("titulo")),
-            content=get_element_text(element.find("conteudo")),
+            title=optional_text(element.find("titulo")),
+            content=optional_text(content_elem),
+            tip=optional_text(element.find("Dica")),
             recipients=recipients,
         )
 
