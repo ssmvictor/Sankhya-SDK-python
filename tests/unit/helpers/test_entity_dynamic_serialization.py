@@ -54,13 +54,51 @@ class TestEntityDynamicSerialization:
         assert serializer.get_member("CODPARC") == "123"
 
     def test_get_member_case_insensitive(self):
-        """Verifica get_member com fallback para uppercase."""
+        """
+        Verifica que get_member NÃO faz busca case-insensitive.
+        
+        Assim como TryGetMember do DynamicSerialization (.NET), a busca é
+        exata: não há fallback para uppercase em get_member.
+        """
         data = {"CODPARC": "123"}
         serializer = EntityDynamicSerialization(data)
         
         assert serializer.get_member("codparc") is None
-        # Busca por uppercase como fallback
+        # O valor continua acessível pela chave exata
         assert serializer.dictionary.get("CODPARC") == "123"
+
+    def test_get_member_returns_falsy_values(self):
+        """Verifica que valores falsy (0, "", False) não são descartados."""
+        data = {"ativo": False, "vlrdesc": 0, "obs": ""}
+        serializer = EntityDynamicSerialization(data)
+        
+        assert serializer.get_member("ativo") is False
+        assert serializer.get_member("vlrdesc") == 0
+        assert serializer.get_member("obs") == ""
+
+    def test_get_member_does_not_fall_through_to_uppercase_key(self):
+        """Verifica que a chave exata prevalece mesmo com valor falsy."""
+        data = {"codparc": 0, "CODPARC": 5}
+        serializer = EntityDynamicSerialization(data)
+        
+        assert serializer.get_member("codparc") == 0
+        assert serializer.get_member("CODPARC") == 5
+
+    def test_get_member_roundtrip_uppercase_filter(self):
+        """Verifica que get_member lê o que set_member gravou (uppercase)."""
+        serializer = EntityDynamicSerialization(key_filter="uppercase")
+        serializer.set_member("codparc", "123")
+        
+        assert serializer.get_member("codparc") == "123"
+        assert serializer.get_member("CODPARC") == "123"
+
+    def test_get_member_roundtrip_lowercase_filter(self):
+        """Verifica que get_member lê o que set_member gravou (lowercase)."""
+        serializer = EntityDynamicSerialization(key_filter="lowercase")
+        serializer.set_member("CODPARC", "123")
+        
+        assert serializer.get_member("CODPARC") == "123"
+        assert serializer.get_member("codparc") == "123"
 
     def test_set_member(self):
         """Verifica set_member."""

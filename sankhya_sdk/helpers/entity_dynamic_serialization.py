@@ -77,9 +77,32 @@ class EntityDynamicSerialization:
         """Retorna o dicionário interno."""
         return self._dictionary
 
+    def _filter_key(self, name: str) -> str:
+        """
+        Aplica o filtro de chaves (key_filter) a um nome de membro.
+        
+        Args:
+            name: Nome do membro
+        
+        Returns:
+            Nome normalizado conforme o filtro configurado
+        """
+        if self._key_filter == "uppercase":
+            return name.upper()
+        if self._key_filter == "lowercase":
+            return name.lower()
+        return name
+
     def get_member(self, name: str) -> Optional[Any]:
         """
         Obtém um membro do dicionário.
+        
+        A busca é exata e case-sensitive, como ``TryGetMember`` do
+        ``DynamicSerialization`` (.NET): não há fallback para uppercase.
+        O nome passa pelo mesmo filtro de chaves aplicado em
+        ``set_member``, garantindo que um valor definido com
+        ``set_member(name, ...)`` seja lido com ``get_member(name)``.
+        Valores "falsy" (0, "", False) são retornados como estão.
         
         Args:
             name: Nome do membro
@@ -87,7 +110,7 @@ class EntityDynamicSerialization:
         Returns:
             Valor ou None se não existir
         """
-        return self._dictionary.get(name) or self._dictionary.get(name.upper())
+        return self._dictionary.get(self._filter_key(name))
 
     def set_member(self, name: str, value: Any) -> None:
         """
@@ -97,13 +120,7 @@ class EntityDynamicSerialization:
             name: Nome do membro
             value: Valor a definir
         """
-        key = name
-        if self._key_filter == "uppercase":
-            key = name.upper()
-        elif self._key_filter == "lowercase":
-            key = name.lower()
-        
-        self._dictionary[key] = value
+        self._dictionary[self._filter_key(name)] = value
 
     def convert_to_type(self, entity_type: Type[T]) -> T:
         """
