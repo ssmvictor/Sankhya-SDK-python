@@ -88,6 +88,8 @@ class KnowServicesRequestWrapper:
     Attributes:
         _context: Contexto Sankhya para gerenciamento de sessão
         _session_token: Token UUID da sessão ativa
+        _owns_session: Indica se a sessão foi adquirida pelo próprio wrapper
+            (e, portanto, deve ser finalizada em dispose())
         _initialized: Flag indicando se o wrapper foi inicializado
         _last_time_message_received: Timestamp da última mensagem recebida
     
@@ -108,6 +110,7 @@ class KnowServicesRequestWrapper:
     
     _context: ClassVar[Optional["SankhyaContext"]] = None
     _session_token: ClassVar[Optional[uuid.UUID]] = None
+    _owns_session: ClassVar[bool] = False
     _initialized: ClassVar[bool] = False
     _last_time_message_received: ClassVar[datetime] = datetime.now()
     
@@ -153,14 +156,30 @@ class KnowServicesRequestWrapper:
         Inicializa o wrapper com um contexto Sankhya.
         
         Se nenhum contexto for fornecido, cria um novo usando
-        as configurações padrão (SankhyaSettings).
-        
+        as configurações padrão (SankhyaSettings) e adquire dele uma
+        sessão dedicada (ServiceRequestType.KNOW_SERVICES), finalizada
+        em dispose().
+
+        Com um contexto informado, o wrapper usa a sessão principal do
+        contexto (``context.token``) e NÃO a finaliza em dispose(): a
+        sessão pertence ao contexto, que a encerra no próprio dispose().
+
+        Note:
+            No .NET (KnowServicesRequestWrapper.cs:22-26) a classe estática
+            sempre adquire uma sessão própria com
+            ``Context.AcquireNewSession(ServiceRequestType.KnowServices)``.
+            O ramo com contexto informado mantém a sessão principal porque
+            os testes de integração existentes (com sequências fixas de
+            respostas HTTP simuladas) dependem de não haver um login extra;
+            a troca para ``context.acquire_new_session(KNOW_SERVICES)``
+            depende da atualização desses testes.
+
         Args:
             context: Contexto Sankhya existente (opcional)
-            
+
         Raises:
             RuntimeError: Se já foi inicializado
-            
+
         Example:
             >>> KnowServicesRequestWrapper.initialize()
             >>> # ou com contexto existente
@@ -170,10 +189,11 @@ class KnowServicesRequestWrapper:
         if cls._initialized:
             logger.warning("KnowServicesRequestWrapper já inicializado")
             return
-        
+
         if context is not None:
             cls._context = context
             cls._session_token = context.token
+            cls._owns_session = False
         else:
             # Import local para evitar circular
             from sankhya_sdk.core.context import SankhyaContext
@@ -181,7 +201,8 @@ class KnowServicesRequestWrapper:
             cls._session_token = cls._context.acquire_new_session(
                 ServiceRequestType.KNOW_SERVICES
             )
-        
+            cls._owns_session = True
+
         cls._last_time_message_received = datetime.now()
         cls._initialized = True
         logger.info(
@@ -192,24 +213,28 @@ class KnowServicesRequestWrapper:
     def dispose(cls) -> None:
         """
         Libera os recursos do wrapper.
-        
-        Finaliza a sessão e limpa os atributos de classe.
+
+        Finaliza a sessão adquirida pelo próprio wrapper (inicialização sem
+        contexto) e limpa os atributos de classe. A sessão principal de um
+        contexto informado em initialize(context) não é finalizada, pois
+        pertence ao contexto.
         Pode ser chamado múltiplas vezes sem efeito.
-        
+
         Example:
             >>> KnowServicesRequestWrapper.dispose()
         """
         if not cls._initialized:
             return
-        
-        if cls._context and cls._session_token:
+
+        if cls._owns_session and cls._context and cls._session_token:
             try:
                 cls._context.finalize_session(cls._session_token)
             except Exception as e:
                 logger.warning(f"Erro ao finalizar sessão: {e}")
-        
+
         cls._context = None
         cls._session_token = None
+        cls._owns_session = False
         cls._initialized = False
         cls._last_time_message_received = datetime.now()
         logger.info("KnowServicesRequestWrapper descartado")

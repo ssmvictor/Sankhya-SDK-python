@@ -50,11 +50,13 @@ def reset_wrapper():
     """Reset wrapper state before and after each test."""
     KnowServicesRequestWrapper._context = None
     KnowServicesRequestWrapper._session_token = None
+    KnowServicesRequestWrapper._owns_session = False
     KnowServicesRequestWrapper._initialized = False
     KnowServicesRequestWrapper._last_time_message_received = datetime.now()
     yield
     KnowServicesRequestWrapper._context = None
     KnowServicesRequestWrapper._session_token = None
+    KnowServicesRequestWrapper._owns_session = False
     KnowServicesRequestWrapper._initialized = False
 
 
@@ -133,14 +135,46 @@ class TestLifecycle:
         assert "já inicializado" in caplog.text
 
     def test_dispose(self, mock_context):
-        """Test dispose releases resources."""
+        """Test dispose releases resources without finalizing the context's main session."""
         KnowServicesRequestWrapper.initialize(mock_context)
         KnowServicesRequestWrapper.dispose()
-        
+
         assert KnowServicesRequestWrapper._initialized is False
         assert KnowServicesRequestWrapper._context is None
         assert KnowServicesRequestWrapper._session_token is None
-        mock_context.finalize_session.assert_called_once()
+        # A sessão principal pertence ao contexto (o .NET nunca a finaliza a
+        # partir do KnowServicesRequestWrapper); finalize_session(context.token)
+        # seria apenas um no-op com aviso.
+        mock_context.finalize_session.assert_not_called()
+
+    def test_initialize_with_context_does_not_acquire_session(self, mock_context):
+        """Test initialize(context) uses the context's main session (documented decision)."""
+        KnowServicesRequestWrapper.initialize(mock_context)
+
+        mock_context.acquire_new_session.assert_not_called()
+        assert KnowServicesRequestWrapper._session_token == mock_context.token
+        assert KnowServicesRequestWrapper._owns_session is False
+
+    def test_dispose_finalizes_session_acquired_without_context(self):
+        """Test dispose finalizes the dedicated KNOW_SERVICES session it acquired."""
+        mock_ctx = MagicMock()
+        acquired_token = uuid.uuid4()
+        mock_ctx.acquire_new_session.return_value = acquired_token
+
+        with patch(
+            "sankhya_sdk.core.context.SankhyaContext.from_settings",
+            return_value=mock_ctx,
+        ):
+            KnowServicesRequestWrapper.initialize()
+
+        assert KnowServicesRequestWrapper._session_token == acquired_token
+        assert KnowServicesRequestWrapper._owns_session is True
+
+        KnowServicesRequestWrapper.dispose()
+
+        mock_ctx.finalize_session.assert_called_once_with(acquired_token)
+        assert KnowServicesRequestWrapper._owns_session is False
+        assert KnowServicesRequestWrapper._session_token is None
 
     def test_dispose_not_initialized(self):
         """Test dispose when not initialized does nothing."""
