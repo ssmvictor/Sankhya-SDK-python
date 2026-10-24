@@ -115,18 +115,26 @@ class AsyncOnDemandRequestFactory:
                 ServiceRequestType.ON_DEMAND_CRUD
             )
         
-        # Cria wrapper
-        wrapper: AsyncOnDemandRequestWrapper[TEntity] = AsyncOnDemandRequestWrapper(
-            service=service,
-            cancel_event=cancel_event,
-            throughput=throughput,
-            allow_above_throughput=allow_above_throughput,
-            context=context,
-            session_token=session_token,
-        )
-        
-        # Inicia worker task
-        await wrapper.start()
+        # Cria wrapper; a sessão dedicada passa a pertencer a ele e é
+        # finalizada quando o worker termina, como no .NET
+        # (OnDemandRequestWrapper.cs:144-165)
+        try:
+            wrapper: AsyncOnDemandRequestWrapper[TEntity] = AsyncOnDemandRequestWrapper(
+                service=service,
+                cancel_event=cancel_event,
+                throughput=throughput,
+                allow_above_throughput=allow_above_throughput,
+                context=context,
+                session_token=session_token,
+                owns_session=session_token is not None,
+            )
+            
+            # Inicia worker task
+            await wrapper.start()
+        except Exception:
+            if context and session_token:
+                context.detach_on_demand_request_wrapper(session_token)
+            raise
         
         # Gera chave única
         key = uuid4()

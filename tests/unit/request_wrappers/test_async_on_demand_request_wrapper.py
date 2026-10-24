@@ -11,6 +11,7 @@ comportamento esperado não ocorre (evitam travar a suíte).
 import asyncio
 from typing import Callable, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -590,3 +591,82 @@ class TestAsyncOnDemandBatching:
 
         assert service.batches == [["A", "B"]]
         assert wrapper.entities_sent_successfully == 2
+
+
+# =============================================================================
+# Sessão dedicada (.NET OnDemandRequestWrapper.cs:144-165)
+# =============================================================================
+
+
+def _create_session_wrapper(
+    context: MagicMock,
+    token: UUID,
+    cancel_event: Optional[asyncio.Event] = None,
+    **kwargs,
+) -> AsyncOnDemandRequestWrapper:
+    """Cria um wrapper ligado a uma sessão dedicada do contexto."""
+    return AsyncOnDemandRequestWrapper(
+        service=ServiceName.CRUD_SERVICE_SAVE,
+        cancel_event=cancel_event or asyncio.Event(),
+        context=context,
+        session_token=token,
+        **kwargs,
+    )
+
+
+class TestAsyncOnDemandSession:
+    """A sessão própria do wrapper é finalizada quando o worker termina."""
+
+    @pytest.mark.asyncio
+    async def test_owned_session_is_released_on_dispose(self):
+        """dispose() finaliza a sessão que pertence ao wrapper."""
+        context = MagicMock()
+        token = uuid4()
+        wrapper = _create_session_wrapper(context, token, owns_session=True)
+        await wrapper.start()
+
+        await asyncio.wait_for(wrapper.dispose(), SYNC_TIMEOUT)
+
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+
+    @pytest.mark.asyncio
+    async def test_owned_session_is_released_without_started_worker(self):
+        """Mesmo sem task worker iniciada, o dispose finaliza a sessão."""
+        context = MagicMock()
+        token = uuid4()
+        wrapper = _create_session_wrapper(context, token, owns_session=True)
+
+        await asyncio.wait_for(wrapper.dispose(), SYNC_TIMEOUT)
+
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+
+    @pytest.mark.asyncio
+    async def test_owned_session_is_released_when_cancelled_worker_ends(self):
+        """O worker encerrado pelo cancelamento finaliza a sessão uma vez."""
+        context = MagicMock()
+        token = uuid4()
+        cancel_event = asyncio.Event()
+        wrapper = _create_session_wrapper(
+            context, token, cancel_event=cancel_event, owns_session=True
+        )
+        await wrapper.start()
+        try:
+            cancel_event.set()
+            await asyncio.wait_for(asyncio.shield(wrapper._worker_task), SYNC_TIMEOUT)
+
+            context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+        finally:
+            await _dispose_quietly(wrapper)
+
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+
+    @pytest.mark.asyncio
+    async def test_session_not_owned_is_kept(self):
+        """Sessão recebida sem posse continua sob responsabilidade de quem a criou."""
+        context = MagicMock()
+        wrapper = _create_session_wrapper(context, uuid4())
+        await wrapper.start()
+
+        await asyncio.wait_for(wrapper.dispose(), SYNC_TIMEOUT)
+
+        context.detach_on_demand_request_wrapper.assert_not_called()

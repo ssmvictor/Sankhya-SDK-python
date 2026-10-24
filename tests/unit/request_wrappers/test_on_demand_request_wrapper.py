@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Callable, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
+from uuid import UUID, uuid4
 import pytest
 
 from pydantic import Field
@@ -800,3 +801,66 @@ class TestOnDemandBatching:
         assert service.batches == [["A", "B"]]
         assert wrapper.entities_sent_successfully == 2
         assert not wrapper._worker.is_alive()
+
+
+# =============================================================================
+# Sessão dedicada (.NET OnDemandRequestWrapper.cs:144-165)
+# =============================================================================
+
+
+def _create_session_wrapper(
+    context: MagicMock,
+    token: UUID,
+    cancel_token: Optional[threading.Event] = None,
+    **kwargs,
+) -> OnDemandRequestWrapper:
+    """Cria um wrapper ligado a uma sessão dedicada do contexto."""
+    return OnDemandRequestWrapper(
+        service=ServiceName.CRUD_SERVICE_SAVE,
+        cancel_token=cancel_token or threading.Event(),
+        context=context,
+        session_token=token,
+        **kwargs,
+    )
+
+
+class TestOnDemandSession:
+    """A sessão própria do wrapper é finalizada quando o worker termina."""
+
+    def test_owned_session_is_released_on_dispose(self):
+        """dispose() finaliza a sessão que pertence ao wrapper."""
+        context = MagicMock()
+        token = uuid4()
+        wrapper = _create_session_wrapper(context, token, owns_session=True)
+
+        _call_with_timeout(wrapper.dispose)
+
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+
+    def test_owned_session_is_released_when_cancelled_worker_ends(self):
+        """O worker encerrado pelo cancelamento finaliza a sessão uma vez."""
+        context = MagicMock()
+        token = uuid4()
+        cancel_token = threading.Event()
+        wrapper = _create_session_wrapper(
+            context, token, cancel_token=cancel_token, owns_session=True
+        )
+        try:
+            cancel_token.set()
+            wrapper._worker.join(SYNC_TIMEOUT)
+            assert not wrapper._worker.is_alive()
+
+            context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+        finally:
+            _dispose_quietly(wrapper)
+
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+
+    def test_session_not_owned_is_kept(self):
+        """Sessão recebida sem posse continua sob responsabilidade de quem a criou."""
+        context = MagicMock()
+        wrapper = _create_session_wrapper(context, uuid4())
+
+        _call_with_timeout(wrapper.dispose)
+
+        context.detach_on_demand_request_wrapper.assert_not_called()

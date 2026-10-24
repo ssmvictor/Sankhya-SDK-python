@@ -99,6 +99,7 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         allow_above_throughput: bool = True,
         context: Optional["SankhyaContext"] = None,
         session_token: Optional[UUID] = None,
+        owns_session: bool = False,
     ) -> None:
         """
         Inicializa o wrapper assíncrono.
@@ -113,6 +114,9 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
                 disponíveis na fila; se False, no máximo ``throughput``
             context: Contexto Sankhya (opcional)
             session_token: Token de sessão existente (opcional)
+            owns_session: Se True, a sessão ``session_token`` pertence ao
+                wrapper e é finalizada no ``context`` quando o worker termina
+                ou no dispose (.NET OnDemandRequestWrapper.cs:164)
         """
         self._service = service
         self._throughput = throughput
@@ -129,7 +133,8 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         # Sessão e contexto
         self._context = context
         self._session_token = session_token
-        self._owns_session = False
+        self._owns_session = owns_session
+        self._session_released = False
         
         # Estatísticas
         self._request_count = 0
@@ -274,12 +279,9 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
                 except asyncio.CancelledError:
                     pass
         
-        # Finaliza sessão se for proprietário
-        if self._owns_session and self._session_token and self._context:
-            try:
-                self._context.detach_on_demand_request_wrapper(self._session_token)
-            except Exception as e:
-                logger.warning(f"Erro ao finalizar sessão: {e}")
+        # Finaliza sessão se for proprietário (o worker já o faz ao terminar;
+        # aqui cobre o wrapper cuja task worker nunca foi iniciada)
+        self._release_session()
         
         logger.info(
             f"AsyncOnDemandRequestWrapper finalizado: "
@@ -332,7 +334,25 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         finally:
             # Sinaliza conclusão de qualquer flush pendente
             self._flush_complete.set()
+            self._release_session()
             logger.debug("Worker task finalizada")
+
+    def _release_session(self) -> None:
+        """
+        Finaliza a sessão dedicada, se ela pertencer ao wrapper.
+        
+        Equivalente a ``_context.DetachOnDemandRequestWrapper(sessionToken)``
+        ao fim do worker no .NET (OnDemandRequestWrapper.cs:164).
+        """
+        if not self._owns_session or self._session_released:
+            return
+        self._session_released = True
+        
+        if self._session_token and self._context:
+            try:
+                self._context.detach_on_demand_request_wrapper(self._session_token)
+            except Exception as e:
+                logger.warning(f"Erro ao finalizar sessão: {e}")
 
     async def _wait_for_work(self) -> None:
         """

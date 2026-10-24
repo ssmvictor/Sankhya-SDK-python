@@ -106,6 +106,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         allow_above_throughput: bool = True,
         context: Optional["SankhyaContext"] = None,
         session_token: Optional[UUID] = None,
+        owns_session: bool = False,
     ) -> None:
         """
         Inicializa o wrapper.
@@ -120,6 +121,9 @@ class OnDemandRequestWrapper(Generic[TEntity]):
                 disponíveis na fila; se False, no máximo ``throughput``
             context: Contexto Sankhya (opcional, usa default se não fornecido)
             session_token: Token de sessão existente (opcional)
+            owns_session: Se True, a sessão ``session_token`` pertence ao
+                wrapper e é finalizada no ``context`` quando o worker termina
+                (.NET OnDemandRequestWrapper.cs:164)
         """
         self._service = service
         self._throughput = throughput
@@ -137,7 +141,8 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         # Sessão e contexto
         self._context = context
         self._session_token = session_token
-        self._owns_session = False
+        self._owns_session = owns_session
+        self._session_released = False
         
         # Estatísticas
         self._request_count = 0
@@ -261,18 +266,11 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         self._stop_event.set()
         self._work_available.set()
         
-        # Aguarda thread worker
+        # Aguarda thread worker (que finaliza a sessão própria ao terminar)
         if self._worker.is_alive():
             self._worker.join(timeout=30.0)
             if self._worker.is_alive():
                 logger.warning("Worker thread não finalizou no tempo esperado")
-        
-        # Finaliza sessão se for proprietário
-        if self._owns_session and self._session_token and self._context:
-            try:
-                self._context.detach_on_demand_request_wrapper(self._session_token)
-            except Exception as e:
-                logger.warning(f"Erro ao finalizar sessão: {e}")
         
         logger.info(
             f"OnDemandRequestWrapper finalizado: "
@@ -321,7 +319,26 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             # Marca o término antes de liberar flushes pendentes (ver flush)
             self._worker_finished.set()
             self._flush_complete.set()
+            self._release_session()
             logger.debug("Worker thread finalizado")
+
+    def _release_session(self) -> None:
+        """
+        Finaliza a sessão dedicada, se ela pertencer ao wrapper.
+        
+        Equivalente a ``_context.DetachOnDemandRequestWrapper(sessionToken)``
+        ao fim do worker no .NET (OnDemandRequestWrapper.cs:164).
+        """
+        with self._lock:
+            if not self._owns_session or self._session_released:
+                return
+            self._session_released = True
+        
+        if self._session_token and self._context:
+            try:
+                self._context.detach_on_demand_request_wrapper(self._session_token)
+            except Exception as e:
+                logger.warning(f"Erro ao finalizar sessão: {e}")
 
     def _wait_for_work(self) -> None:
         """
