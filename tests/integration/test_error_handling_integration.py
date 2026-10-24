@@ -7,6 +7,7 @@ Testa cenários de erro, retry, timeout e recuperação.
 
 from __future__ import annotations
 
+import gc
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -14,6 +15,8 @@ import requests
 from lxml import etree
 
 from sankhya_sdk.core.constants import MAX_RETRY_COUNT
+from sankhya_sdk.core.context import SankhyaContext
+from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import (
     SankhyaException,
@@ -406,4 +409,49 @@ class TestXMLParsingErrors:
             with pytest.raises((etree.XMLSyntaxError, SankhyaException)):
                 SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
+        assert server.calls_to(ServiceName.CRUD_SERVICE_FIND) == 1
+
+
+@pytest.mark.integration
+class TestSharedStateIsolation:
+    """
+    Isolamento entre testes do estado de classe do SankhyaContext.
+
+    Causa da intermitência de ``test_malformed_xml_response``: um
+    SankhyaContext vazado por outro teste, quando finalizado pelo coletor
+    cíclico, executa ``dispose()`` e remove do registro de classe as sessões
+    de todos os contextos, inclusive a sessão dedicada do
+    SimpleCRUDRequestWrapper do teste em execução ("Wrapper não encontrado
+    para token").
+    """
+
+    @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
+    def test_leaked_context_does_not_drop_running_test_session(self, mock_session_class):
+        """Contexto vazado não derruba a sessão do teste em execução."""
+        mock_session = MagicMock()
+        mock_session_class.return_value = mock_session
+
+        server = FakeSankhyaServer([
+            http_response(200, entities_response({"CODPARC": 1, "NOMEPARC": "Parceiro"})),
+        ])
+        mock_session.request.side_effect = server
+
+        with simple_crud_session():
+            # Contexto não descartado preso num ciclo de referências, como o
+            # de um teste que falhou antes do dispose (frames do traceback)
+            leaked_wrapper = SankhyaWrapper(host="http://test.local", port=8180)
+            leaked_wrapper.authenticate("user", "pass")
+            leaked_context = SankhyaContext(wrapper=leaked_wrapper)
+            leaked_context.reference_cycle = leaked_context
+            del leaked_context, leaked_wrapper
+
+            # Alocações suficientes para disparar várias coletas automáticas
+            # das gerações jovens, onde está o ciclo recém-criado
+            allocations = [[] for _ in range(20 * gc.get_threshold()[0])]
+            del allocations
+
+            result = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
+
+        assert result is not None
+        assert result.name == "Parceiro"
         assert server.calls_to(ServiceName.CRUD_SERVICE_FIND) == 1
