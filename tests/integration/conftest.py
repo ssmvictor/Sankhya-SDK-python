@@ -28,7 +28,7 @@ from typing import (
 from unittest.mock import MagicMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
-from xml.sax.saxutils import escape as xml_escape
+from xml.sax.saxutils import escape as xml_escape, quoteattr
 
 import pytest
 import requests
@@ -239,10 +239,16 @@ def create_logout_response() -> bytes:
 
 def create_sessions_response(sessions: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """
-    Gera XML de resposta de sessões ativas.
+    Gera XML de resposta de sessões ativas (SessionManagerSP.getCoreSessions).
+    
+    Segue o protocolo usado pelo SDK .NET (Service/SessionsResponse.cs e
+    Service/Session.cs): ``<SESSIONS>`` com um elemento ``<SESSION>`` por
+    sessão, cujos campos são atributos em maiúsculas (``ID``, ``USERID``,
+    ``USERNAME``, ``HOST``, ...).
     
     Args:
-        sessions: Lista de sessões com campos como user_name, ip_address, etc.
+        sessions: Lista de sessões; cada dicionário mapeia o nome do
+            atributo do protocolo (ex.: ``"USERNAME"``) para o seu valor
         
     Returns:
         XML serializado como bytes
@@ -252,17 +258,17 @@ def create_sessions_response(sessions: Optional[List[Dict[str, Any]]] = None) ->
     
     session_strs = []
     for sess in sessions:
-        attrs = " ".join(f'{k}="{v}"' for k, v in sess.items())
-        session_strs.append(f"<sessao {attrs}/>")
+        attrs = " ".join(f"{k}={quoteattr(str(v))}" for k, v in sess.items())
+        session_strs.append(f"<SESSION {attrs}/>")
     
     sessions_xml = "".join(session_strs)
     
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <serviceResponse status="1">
     <responseBody>
-        <sessoes>
+        <SESSIONS>
             {sessions_xml}
-        </sessoes>
+        </SESSIONS>
     </responseBody>
 </serviceResponse>'''.encode("utf-8")
 
@@ -688,8 +694,8 @@ def sample_xml_responses() -> Dict[str, bytes]:
             "deadlock", "Deadlock detectado"
         ),
         "sessions_list": create_sessions_response([
-            {"CODUSU": "1", "NOMEUSU": "admin", "IP": "192.168.1.1"},
-            {"CODUSU": "2", "NOMEUSU": "user1", "IP": "192.168.1.2"},
+            {"ID": "SESSION_A", "USERID": "1", "USERNAME": "admin", "HOST": "192.168.1.1"},
+            {"ID": "SESSION_B", "USERID": "2", "USERNAME": "user1", "HOST": "192.168.1.2"},
         ]),
     }
 
