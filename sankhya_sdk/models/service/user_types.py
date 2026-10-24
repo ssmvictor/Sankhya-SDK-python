@@ -121,6 +121,13 @@ class SessionInfo(BaseModel):
     Informações de sessão ativa.
     
     Representa uma sessão de usuário conectado.
+
+    Segue o formato do .NET (Service/Session.cs), em que cada sessão é um
+    elemento ``<SESSION>`` com os atributos ``ID``, ``CREATIONTIME``,
+    ``LASTACCESSEDTIME``, ``INACTIVEINTERVAL``, ``MAXINACTIVEINTERVAL``,
+    ``USERAGENT``, ``HOST``, ``LOGINTIME``, ``AUTHENTICATED`` (S/N),
+    ``USERID`` e ``USERNAME``. Os atributos legados (``sessao``) continuam
+    sendo aceitos na leitura.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -133,17 +140,43 @@ class SessionInfo(BaseModel):
     start_time: Optional[str] = None
     last_activity: Optional[str] = None
     application: Optional[str] = None
+    # Campos do .NET (Service/Session.cs)
+    creation_time: Optional[str] = None
+    last_accessed_time: Optional[str] = None
+    inactive_interval: Optional[int] = None
+    max_inactive_interval: Optional[int] = None
+    user_agent: Optional[str] = None
+    host: Optional[str] = None
+    login_time: Optional[str] = None
+    is_authenticated: Optional[bool] = None
 
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
-        elem = etree.Element("sessao")
+        elem = etree.Element("SESSION")
         
         if self.session_id:
-            elem.set("sessionId", self.session_id)
+            elem.set("ID", self.session_id)
+        if self.creation_time:
+            elem.set("CREATIONTIME", self.creation_time)
+        if self.last_accessed_time:
+            elem.set("LASTACCESSEDTIME", self.last_accessed_time)
+        if self.inactive_interval is not None:
+            elem.set("INACTIVEINTERVAL", str(self.inactive_interval))
+        if self.max_inactive_interval is not None:
+            elem.set("MAXINACTIVEINTERVAL", str(self.max_inactive_interval))
+        if self.user_agent:
+            elem.set("USERAGENT", self.user_agent)
+        if self.host:
+            elem.set("HOST", self.host)
+        if self.login_time:
+            elem.set("LOGINTIME", self.login_time)
+        if self.is_authenticated is not None:
+            elem.set("AUTHENTICATED", serialize_bool(self.is_authenticated, "S|N"))
         if self.user_id is not None:
-            elem.set("idusu", str(self.user_id))
+            elem.set("USERID", str(self.user_id))
         if self.user_name:
-            elem.set("nomeUsu", self.user_name)
+            elem.set("USERNAME", self.user_name)
+        # Campos sem equivalente no .NET mantêm os atributos legados
         if self.company_id is not None:
             elem.set("codemp", str(self.company_id))
         if self.ip_address:
@@ -159,21 +192,48 @@ class SessionInfo(BaseModel):
 
     @classmethod
     def from_xml(cls, element: Element) -> "SessionInfo":
-        """Deserializa de elemento XML."""
+        """Deserializa de elemento XML (formato .NET ou legado)."""
+        authenticated = get_element_attr(element, "AUTHENTICATED")
         return cls(
-            session_id=get_element_attr(element, "sessionId"),
-            user_id=deserialize_optional_int(get_element_attr(element, "idusu")),
-            user_name=get_element_attr(element, "nomeUsu"),
+            session_id=get_element_attr(element, "ID")
+            or get_element_attr(element, "sessionId"),
+            user_id=deserialize_optional_int(
+                get_element_attr(element, "USERID")
+                or get_element_attr(element, "idusu")
+            ),
+            user_name=get_element_attr(element, "USERNAME")
+            or get_element_attr(element, "nomeUsu"),
             company_id=deserialize_optional_int(get_element_attr(element, "codemp")),
             ip_address=get_element_attr(element, "ip"),
             start_time=get_element_attr(element, "inicio"),
             last_activity=get_element_attr(element, "ultimaAtividade"),
             application=get_element_attr(element, "aplicacao"),
+            creation_time=get_element_attr(element, "CREATIONTIME"),
+            last_accessed_time=get_element_attr(element, "LASTACCESSEDTIME"),
+            inactive_interval=deserialize_optional_int(
+                get_element_attr(element, "INACTIVEINTERVAL")
+            ),
+            max_inactive_interval=deserialize_optional_int(
+                get_element_attr(element, "MAXINACTIVEINTERVAL")
+            ),
+            user_agent=get_element_attr(element, "USERAGENT"),
+            host=get_element_attr(element, "HOST"),
+            login_time=get_element_attr(element, "LOGINTIME"),
+            is_authenticated=(
+                deserialize_bool(authenticated, "S|N")
+                if authenticated
+                else None
+            ),
         )
 
 
 class SessionsResponse(BaseModel):
-    """Resposta contendo lista de sessões ativas."""
+    """
+    Resposta contendo lista de sessões ativas.
+
+    No .NET (Service/SessionsResponse.cs) é ``<SESSIONS>`` com elementos
+    ``<SESSION>``; elementos legados ``<sessao>`` também são aceitos.
+    """
 
     model_config = ConfigDict(frozen=False)
 
@@ -195,7 +255,11 @@ class SessionsResponse(BaseModel):
     @classmethod
     def from_xml(cls, element: Element) -> "SessionsResponse":
         """Deserializa de elemento XML."""
-        sessions = [SessionInfo.from_xml(child) for child in element.findall("sessao")]
+        sessions = [
+            SessionInfo.from_xml(child)
+            for child in element
+            if child.tag in ("SESSION", "sessao")
+        ]
         
         return cls(
             sessions=sessions,
