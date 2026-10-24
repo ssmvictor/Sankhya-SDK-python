@@ -448,6 +448,27 @@ class TestInvoiceCRUD:
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_INCLUDE
 
+    def test_create_invoice_returns_int_from_pk_response(self, mock_context):
+        """Test create_invoice returns the <pk><NUNOTA> text as int (.NET ToInt32)."""
+        # .NET KnowServicesRequestWrapper.cs:154-156:
+        # response.ResponseBody.PrimaryKey.NUNOTA.ToString().ToInt32()
+        response = _service_response(
+            "CACSP.incluirNota", "<pk><NUNOTA>12345</NUNOTA></pk>"
+        )
+
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            nunota = KnowServicesRequestWrapper.create_invoice(
+                Invoice(partner_code=100, top_code=1)
+            )
+
+        assert nunota == 12345
+        assert type(nunota) is int
+
     def test_create_invoice_null_header_raises(self, mock_context):
         """Test create_invoice with None header raises ValueError."""
         KnowServicesRequestWrapper.initialize(mock_context)
@@ -464,9 +485,29 @@ class TestInvoiceCRUD:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             KnowServicesRequestWrapper.remove_invoice(12345)
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_REMOVE
+
+    def test_remove_invoice_request_xml_matches_dotnet(self, mock_context, mock_response):
+        """Test remove_invoice sends <notas><nota NUNOTA="n"/></notas> like .NET."""
+        # .NET KnowServicesRequestWrapper.cs:159-170:
+        # Invoices = new() { Invoice = new() { SingleNumberDuplication = singleNumber } }
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=mock_response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            KnowServicesRequestWrapper.remove_invoice(12345)
+
+            assert _sent_request_xml() == (
+                '<serviceRequest serviceName="CACSP.excluirNotas">'
+                "<requestBody>"
+                '<notas><nota NUNOTA="12345"/></notas>'
+                "</requestBody>"
+                "</serviceRequest>"
+            )
 
     def test_add_invoice_items(self, mock_context, mock_response):
         """Test add_invoice_items returns sequence."""
@@ -678,6 +719,28 @@ class TestInvoiceStatus:
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_ACCOMPANIMENTS
 
+    def test_get_invoice_accompaniments_request_xml_matches_dotnet(
+        self, mock_context, mock_response
+    ):
+        """Test get_invoice_accompaniments sends <notas><nunota>...</notas> like .NET."""
+        # .NET KnowServicesRequestWrapper.cs:375-389:
+        # Invoices = new() { SingleNumbers = singleNumbersList }
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=mock_response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            KnowServicesRequestWrapper.get_invoice_accompaniments([123, 456])
+
+            assert _sent_request_xml() == (
+                '<serviceRequest serviceName="ServicosNfeSP.getAcompanhamentosNota">'
+                "<requestBody>"
+                "<notas><nunota>123</nunota><nunota>456</nunota></notas>"
+                "</requestBody>"
+                "</serviceRequest>"
+            )
+
     def test_cancel_invoices(self, mock_context, mock_response):
         """Test cancel_invoices returns cancelled count and not-cancelled list."""
         mock_response.response_body.total_cancelled_invoices = 1
@@ -748,9 +811,53 @@ class TestNFe:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             KnowServicesRequestWrapper.generate_lot([123, 456])
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.NFE_GENERATE_LOT
+
+    def test_get_fiscal_invoice_authorization_request_xml_matches_dotnet(
+        self, mock_context, mock_response
+    ):
+        """Test get_fiscal_invoice_authorization sends <nunota> children like .NET."""
+        # .NET KnowServicesRequestWrapper.cs:501-515:
+        # Invoices = new() { SingleNumbers = singleNumbersLists }
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=mock_response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            KnowServicesRequestWrapper.get_fiscal_invoice_authorization([123, 456])
+
+            assert _sent_request_xml() == (
+                '<serviceRequest serviceName="ServicosNfeSP.buscaProcessamentoLote">'
+                "<requestBody>"
+                "<notas><nunota>123</nunota><nunota>456</nunota></notas>"
+                "</requestBody>"
+                "</serviceRequest>"
+            )
+
+    def test_generate_lot_request_xml_matches_dotnet(self, mock_context, mock_response):
+        """Test generate_lot sends retNotasReprovadas="N" and <nunota> children like .NET."""
+        # .NET KnowServicesRequestWrapper.cs:517-538:
+        # Invoices = new() { ReturnDisapprovedInvoices = false, SingleNumbers = ... }
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=mock_response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+            KnowServicesRequestWrapper.generate_lot([123, 456])
+
+            assert _sent_request_xml() == (
+                '<serviceRequest serviceName="ServicosNfeSP.gerarLote">'
+                "<requestBody>"
+                '<notas retNotasReprovadas="N">'
+                "<nunota>123</nunota><nunota>456</nunota>"
+                "</notas>"
+                "</requestBody>"
+                "</serviceRequest>"
+            )
 
 
 # =============================================================================

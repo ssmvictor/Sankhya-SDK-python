@@ -482,7 +482,8 @@ class KnowServicesRequestWrapper:
         )
         response = cls._invoke_service(request)
         
-        # Extrair NUNOTA da resposta
+        # Extrair NUNOTA da resposta (.NET: PrimaryKey.NUNOTA.ToString().ToInt32();
+        # <pk><NUNOTA>...</NUNOTA></pk> é lido como Key.values com o texto do XML)
         nunota = 0
         if response.response_body:
             rb = response.response_body
@@ -490,8 +491,9 @@ class KnowServicesRequestWrapper:
                 if hasattr(rb.primary_key, "nunota"):
                     nunota = rb.primary_key.nunota or 0
                 elif hasattr(rb.primary_key, "values"):
-                    nunota = rb.primary_key.values.get("NUNOTA", 0)
-        
+                    nunota = rb.primary_key.values.get("NUNOTA") or 0
+        nunota = int(nunota)
+
         logger.info(f"Nota fiscal criada: NUNOTA={nunota}")
         return nunota
     
@@ -509,10 +511,12 @@ class KnowServicesRequestWrapper:
         cls._ensure_initialized()
         logger.info(f"Removendo nota fiscal: NUNOTA={single_number}")
         
+        # .NET (KnowServicesRequestWrapper.cs:159-170):
+        # Invoices.Invoice.SingleNumberDuplication -> <notas><nota NUNOTA="n"/></notas>
         invoices = Invoices(
-            items=[Invoice(unique_number=single_number)]
+            items=[Invoice(single_number_duplication=single_number)]
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_REMOVE,
             request_body=RequestBody(invoices=invoices),
@@ -911,10 +915,10 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Obtendo acompanhamentos de {len(single_numbers)} nota(s)")
-        
-        invoices = Invoices(
-            items=[Invoice(unique_number=n) for n in single_numbers]
-        )
+
+        # .NET (KnowServicesRequestWrapper.cs:375-389): Invoices.SingleNumbers
+        # -> <notas><nunota>n</nunota>...</notas>
+        invoices = Invoices(single_numbers=list(single_numbers))
         
         request = ServiceRequest(
             service=ServiceName.INVOICE_ACCOMPANIMENTS,
@@ -1051,10 +1055,10 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Buscando autorização NF-e para {len(single_numbers)} nota(s)")
-        
-        invoices = Invoices(
-            items=[Invoice(unique_number=n) for n in single_numbers]
-        )
+
+        # .NET (KnowServicesRequestWrapper.cs:501-515): Invoices.SingleNumbers
+        # -> <notas><nunota>n</nunota>...</notas>
+        invoices = Invoices(single_numbers=list(single_numbers))
         
         request = ServiceRequest(
             service=ServiceName.NFE_GET_AUTHORIZATION,
@@ -1076,9 +1080,12 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Gerando lote NF-e para {len(single_numbers)} nota(s)")
-        
+
+        # .NET (KnowServicesRequestWrapper.cs:517-538):
+        # <notas retNotasReprovadas="N"><nunota>n</nunota>...</notas>
         invoices = Invoices(
-            items=[Invoice(unique_number=n) for n in single_numbers]
+            return_disapproved_invoices=False,
+            single_numbers=list(single_numbers),
         )
         
         request = ServiceRequest(
