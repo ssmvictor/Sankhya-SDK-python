@@ -161,11 +161,11 @@ class KnowServicesRequestWrapper:
         as configurações padrão (SankhyaSettings) e adquire dele uma
         sessão dedicada (ServiceRequestType.KNOW_SERVICES), finalizada
         em dispose().
-
+        
         Com um contexto informado, o wrapper usa a sessão principal do
         contexto (``context.token``) e NÃO a finaliza em dispose(): a
         sessão pertence ao contexto, que a encerra no próprio dispose().
-
+        
         Note:
             No .NET (KnowServicesRequestWrapper.cs:22-26) a classe estática
             sempre adquire uma sessão própria com
@@ -175,13 +175,13 @@ class KnowServicesRequestWrapper:
             respostas HTTP simuladas) dependem de não haver um login extra;
             a troca para ``context.acquire_new_session(KNOW_SERVICES)``
             depende da atualização desses testes.
-
+            
         Args:
             context: Contexto Sankhya existente (opcional)
-
+            
         Raises:
             RuntimeError: Se já foi inicializado
-
+            
         Example:
             >>> KnowServicesRequestWrapper.initialize()
             >>> # ou com contexto existente
@@ -191,7 +191,7 @@ class KnowServicesRequestWrapper:
         if cls._initialized:
             logger.warning("KnowServicesRequestWrapper já inicializado")
             return
-
+        
         if context is not None:
             cls._context = context
             cls._session_token = context.token
@@ -204,7 +204,7 @@ class KnowServicesRequestWrapper:
                 ServiceRequestType.KNOW_SERVICES
             )
             cls._owns_session = True
-
+        
         cls._last_time_message_received = datetime.now()
         cls._initialized = True
         logger.info(
@@ -215,25 +215,25 @@ class KnowServicesRequestWrapper:
     def dispose(cls) -> None:
         """
         Libera os recursos do wrapper.
-
+        
         Finaliza a sessão adquirida pelo próprio wrapper (inicialização sem
         contexto) e limpa os atributos de classe. A sessão principal de um
         contexto informado em initialize(context) não é finalizada, pois
         pertence ao contexto.
         Pode ser chamado múltiplas vezes sem efeito.
-
+        
         Example:
             >>> KnowServicesRequestWrapper.dispose()
         """
         if not cls._initialized:
             return
-
+        
         if cls._owns_session and cls._context and cls._session_token:
             try:
                 cls._context.finalize_session(cls._session_token)
             except Exception as e:
                 logger.warning(f"Erro ao finalizar sessão: {e}")
-
+        
         cls._context = None
         cls._session_token = None
         cls._owns_session = False
@@ -356,7 +356,7 @@ class KnowServicesRequestWrapper:
         )
         if tip is not None and tip.strip():
             warning.tip = tip
-
+        
         request = ServiceRequest(
             service=ServiceName.WARNING_SEND,
             request_body=RequestBody(system_warning=warning),
@@ -495,7 +495,7 @@ class KnowServicesRequestWrapper:
                 elif hasattr(rb.primary_key, "values"):
                     nunota = rb.primary_key.values.get("NUNOTA") or 0
         nunota = int(nunota)
-
+        
         logger.info(f"Nota fiscal criada: NUNOTA={nunota}")
         return nunota
     
@@ -518,7 +518,7 @@ class KnowServicesRequestWrapper:
         invoices = Invoices(
             items=[Invoice(single_number_duplication=single_number)]
         )
-
+        
         request = ServiceRequest(
             service=ServiceName.INVOICE_REMOVE,
             request_body=RequestBody(invoices=invoices),
@@ -649,13 +649,13 @@ class KnowServicesRequestWrapper:
                 .NET força ``BillingType.DIRECT``)
             series: Série da nota (opcional)
             request_events: Eventos de requisição (opcional)
-
+            
         Returns:
             Tupla com (NUNOTA faturado, eventos de resposta). Como no .NET, o
             NUNOTA é o texto de ``<notas><nota>N</nota></notas>`` da resposta
             (0 se ``<nota>`` vier sem texto) e -1 se a resposta não trouxer
             ``<notas>``/``<nota>``.
-
+            
         Example:
             >>> nunota, events = KnowServicesRequestWrapper.bill(
             ...     single_number=12345,
@@ -684,26 +684,26 @@ class KnowServicesRequestWrapper:
             items=[Invoice(value=str(single_number))],
             one_invoice_for_each=True,
         )
-
+        
         if series is not None:
             # Com série informada o .NET fatura sempre como direto
             invoices.billing_type = BillingType.DIRECT
             invoices.series = series
-
+        
         request = ServiceRequest(
             service=ServiceName.INVOICE_BILL,
             request_body=RequestBody(invoices=invoices),
         )
-
+        
         if request_events is not None:
             request.request_body.client_events = ClientEvents(items=list(request_events))
-
+        
         response = cls._invoke_service(request)
-
+        
         # Extrair NUNOTA e eventos da resposta (.NET :295-309)
         result_nunota = -1
         response_events: Optional[List[ClientEvent]] = None
-
+        
         if response.response_body:
             rb = response.response_body
             if hasattr(rb, "invoices") and rb.invoices:
@@ -783,11 +783,11 @@ class KnowServicesRequestWrapper:
             date_exit: Data de saída da nova nota (opcional; enviada em
                 ``dataSaida`` no formato invariante do .NET, vazia se None)
             should_update_price: Se deve atualizar os preços
-
+            
         Returns:
             NUNOTA da nova nota duplicada (atributo ``nuNota`` de
             ``<notas><nota>`` na resposta)
-
+            
         Example:
             >>> new_nunota = KnowServicesRequestWrapper.duplicate_invoice(
             ...     single_number=12345,
@@ -815,13 +815,13 @@ class KnowServicesRequestWrapper:
         )
         if series is not None:
             invoices.series = series
-
+        
         request = ServiceRequest(
             service=ServiceName.INVOICE_DUPLICATE,
             request_body=RequestBody(invoices=invoices),
         )
         response = cls._invoke_service(request)
-
+        
         # Extrair novo NUNOTA (.NET :492-498:
         # ResponseBody.Invoices.Invoice.SingleNumberDuplicationDestiny, atributo nuNota)
         new_nunota = 0
@@ -896,7 +896,7 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Obtendo acompanhamentos de {len(single_numbers)} nota(s)")
-
+        
         # .NET (KnowServicesRequestWrapper.cs:375-389): Invoices.SingleNumbers
         # -> <notas><nunota>n</nunota>...</notas>
         invoices = Invoices(single_numbers=list(single_numbers))
@@ -1036,7 +1036,7 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Buscando autorização NF-e para {len(single_numbers)} nota(s)")
-
+        
         # .NET (KnowServicesRequestWrapper.cs:501-515): Invoices.SingleNumbers
         # -> <notas><nunota>n</nunota>...</notas>
         invoices = Invoices(single_numbers=list(single_numbers))
@@ -1061,7 +1061,7 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Gerando lote NF-e para {len(single_numbers)} nota(s)")
-
+        
         # .NET (KnowServicesRequestWrapper.cs:517-538):
         # <notas retNotasReprovadas="N"><nunota>n</nunota>...</notas>
         invoices = Invoices(
