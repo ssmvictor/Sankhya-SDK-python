@@ -332,6 +332,8 @@ class TestConcurrencyErrors:
                 SimpleCRUDRequestWrapper.update(Partner(code=1, name="Locked"))
 
         assert server.calls_to(ServiceName.CRUD_SERVICE_SAVE) == 1
+        # Sem nova tentativa, nenhum atraso é aplicado
+        assert mock_sleep.call_args_list == []
 
 
 @pytest.mark.integration
@@ -372,6 +374,9 @@ class TestSessionErrors:
         assert relogins == 1
         assert session_logouts == 1
         assert server.calls_to(ServiceName.CRUD_SERVICE_FIND) == 2
+        # A reautenticação repete a requisição sem atraso
+        # (SankhyaWrapper.cs:371-389 não define RetryDelay)
+        assert mock_sleep.call_args_list == []
 
 
 @pytest.mark.integration

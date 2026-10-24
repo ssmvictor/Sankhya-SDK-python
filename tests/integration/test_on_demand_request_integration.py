@@ -182,13 +182,39 @@ def _dispose_quietly(wrapper: OnDemandRequestWrapper) -> None:
 
 
 def _wait_until(predicate: Callable[[], bool], timeout: float = WAIT_TIMEOUT) -> bool:
-    """Aguarda o predicado ficar verdadeiro (processamento é feito pelo worker)."""
+    """
+    Aguarda o predicado ficar verdadeiro (processamento é feito pelo worker).
+
+    Verifica o predicado continuamente e retorna assim que ele vale; o
+    ``timeout`` só limita a espera quando o comportamento esperado não ocorre.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return True
-        time.sleep(0.02)
+        time.sleep(0.001)
     return predicate()
+
+
+def _wait_worker_evaluated(wrapper: OnDemandRequestWrapper) -> None:
+    """
+    Aguarda o worker terminar de avaliar a fila após o último ``add()``.
+
+    Substitui esperas fixas (``time.sleep``) por sincronização com o worker:
+    ``add()`` enfileira a entidade e então sinaliza ``_work_available``; só
+    o worker limpa esse sinal, no início de cada iteração e antes de avaliar
+    a fila (``_process_internal``). Com o sinal limpo, a iteração em curso
+    já enxerga a entidade. Um novo sinal (despertar espúrio, inofensivo como
+    o que o próprio worker emite após cada lote) só é limpo na iteração
+    seguinte, isto é, depois que a avaliação anterior, com qualquer envio
+    que ela tenha decidido fazer, terminou.
+    """
+    for wake_again in (True, False):
+        assert _wait_until(lambda: not wrapper._work_available.is_set()), (
+            "O worker não consumiu o sinal de trabalho"
+        )
+        if wake_again:
+            wrapper._work_available.set()
 
 
 def _create_wrapper(
@@ -278,11 +304,13 @@ class TestOnDemandBasic:
         wrapper = _create_wrapper(sankhya_context, throughput=5)
 
         try:
-            # Adicionar múltiplos itens, espaçados para dar tempo ao worker:
-            # abaixo do throughput as entidades devem continuar acumuladas
-            for name in names:
+            # Adicionar múltiplos itens, aguardando o worker avaliar a fila a
+            # cada um: abaixo do throughput as entidades continuam acumuladas
+            for name in names[:-1]:
                 wrapper.add(Partner(name=name))
-                time.sleep(0.05)
+                _wait_worker_evaluated(wrapper)
+                assert sankhya_server.bodies(SAVE_RECORD) == []
+            wrapper.add(Partner(name=names[-1]))
 
             # Flush para processar todos
             _run_with_timeout(wrapper.flush)
@@ -330,8 +358,9 @@ class TestOnDemandThrottling:
 
             # Abaixo do throughput a entidade aguarda o flush
             wrapper.add(partners[4])
-            time.sleep(0.3)
+            _wait_worker_evaluated(wrapper)
             assert sent_requests() == 2
+            assert wrapper.queue_size == 1
 
             _run_with_timeout(wrapper.flush)
             _run_with_timeout(wrapper.dispose)
@@ -349,35 +378,46 @@ class TestOnDemandThrottling:
         """Testa limite de concorrência."""
         lock = threading.Lock()
         in_flight = {"current": 0, "max": 0}
+        request_threads: List[threading.Thread] = []
 
-        # Simular delay nas respostas e medir requisições simultâneas
-        def delayed_save(body: str) -> bytes:
+        # Medir requisições simultâneas e registrar a thread de cada envio
+        # (sem atraso artificial na resposta: a thread identifica o worker)
+        def tracked_save(body: str) -> bytes:
             with lock:
                 in_flight["current"] += 1
                 in_flight["max"] = max(in_flight["max"], in_flight["current"])
+                request_threads.append(threading.current_thread())
             try:
-                time.sleep(0.05)
                 return _save_ok(body)
             finally:
                 with lock:
                     in_flight["current"] -= 1
 
-        sankhya_server.on(SAVE_RECORD, delayed_save)
+        sankhya_server.on(SAVE_RECORD, tracked_save)
         names = [f"Parceiro {i}" for i in range(1, 6)]
         wrapper = _create_wrapper(sankhya_context, throughput=3)
 
         try:
-            for name in names:
+            # Primeiro lote ao atingir o throughput; o restante vai no flush,
+            # de modo que há mais de um envio para comparar as threads
+            for name in names[:3]:
+                wrapper.add(Partner(name=name))
+            assert _wait_until(lambda: len(sankhya_server.bodies(SAVE_RECORD)) == 1)
+            for name in names[3:]:
                 wrapper.add(Partner(name=name))
 
             _run_with_timeout(wrapper.flush)
             _run_with_timeout(wrapper.dispose)
 
             batches = _sent_batches(sankhya_server, names)
+            assert batches == [set(names[:3]), set(names[3:])]
             # Todas as entidades enviadas exatamente uma vez
             assert set().union(*batches) == set(names)
             assert sum(len(batch) for batch in batches) == len(names)
-            # Um único worker: nunca há duas requisições simultâneas
+            # Um único worker: todos os envios saem da mesma thread (que não é
+            # a do teste), então nunca há duas requisições simultâneas
+            assert len(set(request_threads)) == 1
+            assert request_threads[0] is not threading.current_thread()
             assert in_flight["max"] == 1
             assert wrapper.entities_sent_successfully == 5
         finally:
