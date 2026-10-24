@@ -173,11 +173,11 @@ class QueryCriteria(BaseModel):
         # Escape de valores string
         safe_value = str(self.value).replace("'", "''")
         
-        if self.value_type == ParameterType.TEXT:
+        if self.value_type == ParameterType.STRING:
             return f"{self.field} {self.operator} '{safe_value}'"
-        elif self.value_type == ParameterType.DATE:
+        elif self.value_type == ParameterType.DATETIME:
             return f"{self.field} {self.operator} '{safe_value}'"
-        elif self.value_type in (ParameterType.NUMERIC, ParameterType.DECIMAL):
+        elif self.value_type == ParameterType.INTEGER:
             return f"{self.field} {self.operator} {self.value}"
         else:
             # Tenta inferir tipo
@@ -351,7 +351,7 @@ class QueryBuilder:
         parameters: List[Parameter] = []
         for crit in self._criteria:
             if crit.value is not None:
-                param_type = crit.value_type or ParameterType.TEXT
+                param_type = crit.value_type or ParameterType.STRING
                 parameters.append(Parameter(
                     type=param_type,
                     value=str(crit.value),
