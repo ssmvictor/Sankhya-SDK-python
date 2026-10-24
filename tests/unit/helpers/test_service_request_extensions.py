@@ -400,16 +400,32 @@ class TestResolveWithLiteralCriteria:
         assert [p.text for p in xml_criteria.findall("parameter")] == ["0"]
 
     def test_query_builder_parameters(self):
+        """
+        Expressão de um builder vai sem parâmetros.
+
+        Equivale a ``Resolve<T>(StringBuilder)`` do .NET
+        (ServiceRequestExtensions.cs:751-760), que cria
+        ``new LiteralCriteria(builder.ToString())``. O QueryBuilder embute
+        os valores na expressão (sem '?'), então enviar ``<parameter>``
+        geraria binds sem placeholder.
+        """
         from sankhya_sdk.models.service.query_types import QueryBuilder
 
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        builder = QueryBuilder("Parceiro").where("CODPARC", 5, ">", ParameterType.INTEGER)
+        builder = (
+            QueryBuilder("Parceiro")
+            .where("CODPARC", 5, ">", ParameterType.INTEGER)
+            .where("NOMEPARC", "Fulano")
+        )
 
         ServiceRequestExtensions.resolve_with_literal_criteria(request, Partner, builder)
 
         literal = request.request_body.data_set.literal_criteria
-        assert literal.expression == builder.build_expression()
-        assert [p.value for p in literal.parameters] == ["5"]
+        assert literal.expression == "CODPARC > 5 AND NOMEPARC = 'Fulano'"
+        assert literal.parameters == []
+        criteria = _body(request).find("dataSet/criteria")
+        assert criteria.findtext("expression") == "CODPARC > 5 AND NOMEPARC = 'Fulano'"
+        assert criteria.findall("parameter") == []
 
     def test_literal_criteria_sql_on_crud_find(self):
         request = ServiceRequest(service=ServiceName.CRUD_FIND)

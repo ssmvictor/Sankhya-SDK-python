@@ -659,13 +659,14 @@ class ServiceRequestExtensions:
         if isinstance(literal_criteria, LiteralCriteriaSql):
             literal_sql = literal_criteria
         elif isinstance(literal_criteria, LiteralCriteria):
+            # Parâmetros só seguem quando o próprio chamador os definiu
+            # no LiteralCriteria (Resolve<T>(ILiteralCriteria), .NET)
             literal = literal_criteria
         else:
-            build_parameters = getattr(literal_criteria, "build_parameters", None)
-            literal = LiteralCriteria(
-                expression=literal_criteria.build_expression(),
-                parameters=list(build_parameters()) if callable(build_parameters) else [],
-            )
+            # Equivalente a Resolve<T>(StringBuilder) do .NET: apenas a
+            # expressão. Os valores já vêm embutidos na expressão (sem
+            # placeholders '?'), então nenhum <parameter> é enviado.
+            literal = LiteralCriteria(expression=literal_criteria.build_expression())
 
         if literal is not None and request.service == ServiceName.CRUD_FIND:
             request.request_body.entity.literal_criteria = literal
