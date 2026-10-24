@@ -3,7 +3,7 @@
 Unit tests for the SankhyaWrapper and related components.
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, call, patch
 import threading
 import pytest
 import requests
@@ -22,14 +22,20 @@ from sankhya_sdk.enums.service_environment import ServiceEnvironment
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_request_type import ServiceRequestType
 from sankhya_sdk.exceptions import (
+    ServiceRequestCanceledQueryException,
+    ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
+    ServiceRequestInaccessibleException,
     ServiceRequestInvalidAuthorizationException,
+    ServiceRequestPropertyValueException,
     ServiceRequestTimeoutException,
     ServiceRequestUnavailableException,
 )
+from sankhya_sdk.models.service.basic_types import Field
+from sankhya_sdk.models.service.entity_types import Entity
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
-from sankhya_sdk.request_helpers import RequestRetryDelay
+from sankhya_sdk.request_helpers import RequestRetryData, RequestRetryDelay
 
 
 class TestConstants:
@@ -509,6 +515,240 @@ class TestSankhyaWrapperRetryLogic:
 
         assert result is True
         assert retry_data.retry_delay == RequestRetryDelay.STABLE
+
+
+def _status_xml(status: int, message: str = "") -> bytes:
+    """Gera o XML de uma resposta de serviço com status e mensagem."""
+    status_message = f"<statusMessage>{message}</statusMessage>" if message else ""
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<serviceResponse status="{status}">{status_message}'
+        "<responseBody></responseBody></serviceResponse>"
+    ).encode("utf-8")
+
+
+def _http_ok(content: bytes) -> Mock:
+    response = Mock()
+    response.ok = True
+    response.status_code = 200
+    response.content = content
+    return response
+
+
+class TestSankhyaWrapperRetryParity:
+    """
+    Paridade do retry com o .NET (SankhyaWrapper.cs, ServiceInvokerInternal,
+    HandleException e HandleExceptionInternal): o atraso é zerado a cada
+    tentativa, cresce linearmente (RetryCount * RequestRetryDelay.X) e uma
+    requisição é tentada no máximo 1 + 3 vezes.
+    """
+
+    def setup_method(self):
+        SankhyaWrapper._invalid_session_ids = []
+        LockManager.clear_all()
+
+    @staticmethod
+    def _wrapper(with_session: bool = True) -> SankhyaWrapper:
+        wrapper = SankhyaWrapper(host="http://example.com", port=8180)
+        if with_session:
+            wrapper._session_info = SessionInfo("SESSION", 1, "user", "pass")
+        return wrapper
+
+    @staticmethod
+    def _release(wrapper: SankhyaWrapper) -> None:
+        # Evita logout real (rede) ao descartar o wrapper no fim do teste
+        wrapper._session_info = None
+        wrapper.dispose()
+
+    @patch("sankhya_sdk.core.wrapper.time.sleep")
+    @patch.object(SankhyaWrapper, "_service_invoker_internal")
+    def test_retry_delay_is_reset_between_attempts(self, mock_internal, mock_sleep):
+        """Um retry sem atraso (competição) não repete o atraso do deadlock anterior."""
+        expected = Mock(spec=ServiceResponse)
+        mock_internal.side_effect = [
+            ServiceRequestDeadlockException("deadlock", None, None),
+            ServiceRequestCompetitionException(None, None),
+            expected,
+        ]
+        wrapper = self._wrapper(with_session=False)
+        try:
+            response = wrapper.service_invoker(ServiceRequest(service=ServiceName.CRUD_FIND))
+        finally:
+            self._release(wrapper)
+
+        assert response is expected
+        assert mock_internal.call_count == 3
+        assert mock_sleep.call_args_list == [call(RequestRetryDelay.STABLE)]
+
+    @patch("sankhya_sdk.core.wrapper.time.sleep")
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_retry_delay_grows_linearly(self, mock_request, mock_sleep):
+        """Atrasos de 1x, 2x e 3x o valor base, como RetryCount * RequestRetryDelay.Unstable."""
+        mock_request.side_effect = [
+            _http_ok(_status_xml(0, "I/O Error: Connection reset")),
+            _http_ok(_status_xml(0, "I/O Error: Connection reset")),
+            _http_ok(_status_xml(0, "I/O Error: Connection reset")),
+            _http_ok(_status_xml(1)),
+        ]
+        wrapper = self._wrapper()
+        try:
+            response = wrapper.service_invoker(ServiceRequest(service=ServiceName.CRUD_FIND))
+        finally:
+            self._release(wrapper)
+
+        assert isinstance(response, ServiceResponse)
+        assert mock_request.call_count == 4
+        assert mock_sleep.call_args_list == [
+            call(1 * RequestRetryDelay.UNSTABLE),
+            call(2 * RequestRetryDelay.UNSTABLE),
+            call(3 * RequestRetryDelay.UNSTABLE),
+        ]
+
+    @patch("sankhya_sdk.core.wrapper.time.sleep")
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_max_attempts_matches_dotnet(self, mock_request, mock_sleep):
+        """.NET: RetryCount > 3 interrompe na 4ª tentativa (1 tentativa + 3 retries)."""
+        mock_request.side_effect = [
+            _http_ok(_status_xml(0, "I/O Error: Connection reset")) for _ in range(5)
+        ]
+        wrapper = self._wrapper()
+        try:
+            with pytest.raises(ServiceRequestUnavailableException):
+                wrapper.service_invoker(ServiceRequest(service=ServiceName.CRUD_FIND))
+        finally:
+            self._release(wrapper)
+
+        assert mock_request.call_count == 1 + MAX_RETRY_COUNT
+        assert len(mock_sleep.call_args_list) == MAX_RETRY_COUNT
+
+    @patch("sankhya_sdk.core.wrapper.time.sleep")
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_transactional_deadlock_is_not_retried(self, mock_request, mock_sleep):
+        """
+        "deadlock" gera ServiceRequestDeadlockException e, em serviço transacional
+        (saveRecord), não é retentado, para não duplicar a gravação
+        (SankhyaWrapper.cs, HandleException).
+        """
+        mock_request.side_effect = [
+            _http_ok(_status_xml(0, "Transaction was deadlocked on lock resources")),
+            _http_ok(_status_xml(1)),
+        ]
+        wrapper = self._wrapper()
+        try:
+            with pytest.raises(ServiceRequestDeadlockException):
+                wrapper.service_invoker(
+                    ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+                )
+        finally:
+            self._release(wrapper)
+
+        assert mock_request.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "exception,base_delay",
+        [
+            (ServiceRequestDeadlockException("deadlock", None, None), RequestRetryDelay.STABLE),
+            (ServiceRequestTimeoutException(ServiceName.CRUD_FIND), RequestRetryDelay.FREE),
+            (ServiceRequestUnavailableException(ServiceName.CRUD_FIND), RequestRetryDelay.UNSTABLE),
+            (ServiceRequestCanceledQueryException(message="A consulta foi cancelada"), RequestRetryDelay.STABLE),
+        ],
+    )
+    def test_handler_delay_is_attempt_times_base(self, exception, base_delay):
+        """Na 3ª tentativa (2 retries feitos) o atraso é 3x o valor base."""
+        wrapper = self._wrapper(with_session=False)
+        retry_data = RequestRetryData(lock_key="test", retry_count=2)
+        try:
+            result = wrapper._handle_exception_internal(
+                exception=exception,
+                service_name=ServiceName.CRUD_FIND,
+                category=ServiceName.CRUD_FIND.service_category,
+                request=ServiceRequest(),
+                retry_data=retry_data,
+            )
+        finally:
+            self._release(wrapper)
+
+        assert result is True
+        assert retry_data.retry_delay == 3 * base_delay
+
+    def test_property_value_retry_uses_linear_delay(self):
+        """Campo ausente do XML da requisição: retry com RetryCount * Stable."""
+        wrapper = self._wrapper(with_session=False)
+        retry_data = RequestRetryData(lock_key="test", retry_count=1)
+        try:
+            result = wrapper._handle_exception_internal(
+                exception=ServiceRequestPropertyValueException("CODPARC", "Parceiro"),
+                service_name=ServiceName.CRUD_FIND,
+                category=ServiceName.CRUD_FIND.service_category,
+                request=ServiceRequest(service=ServiceName.CRUD_FIND),
+                retry_data=retry_data,
+            )
+        finally:
+            self._release(wrapper)
+
+        assert result is True
+        assert retry_data.retry_delay == 2 * RequestRetryDelay.STABLE
+
+    def test_property_value_present_in_request_is_not_retried(self):
+        """.NET compara o nome do campo com o XML sem diferenciar maiúsculas."""
+        wrapper = self._wrapper(with_session=False)
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+        request.request_body.entity = Entity(name="Parceiro", fields=[Field(name="codparc")])
+        retry_data = RequestRetryData(lock_key="test", retry_count=0)
+        try:
+            result = wrapper._handle_exception_internal(
+                exception=ServiceRequestPropertyValueException("CODPARC", "Parceiro"),
+                service_name=ServiceName.CRUD_FIND,
+                category=ServiceName.CRUD_FIND.service_category,
+                request=request,
+                retry_data=retry_data,
+            )
+        finally:
+            self._release(wrapper)
+
+        assert result is False
+        assert retry_data.retry_delay == 0
+
+    def test_inaccessible_outside_authorization_reauthenticates_without_delay(self):
+        """.NET: fora da categoria Authorization apenas reautentica, sem atraso."""
+        wrapper = self._wrapper()
+        retry_data = RequestRetryData(lock_key="test", retry_count=0)
+        try:
+            with patch.object(SankhyaWrapper, "_invalidate") as mock_invalidate, \
+                    patch.object(SankhyaWrapper, "authenticate") as mock_authenticate:
+                result = wrapper._handle_exception_internal(
+                    exception=ServiceRequestInaccessibleException("example.com", 8180),
+                    service_name=ServiceName.CRUD_FIND,
+                    category=ServiceName.CRUD_FIND.service_category,
+                    request=ServiceRequest(),
+                    retry_data=retry_data,
+                )
+        finally:
+            self._release(wrapper)
+
+        assert result is True
+        assert retry_data.retry_delay == 0
+        mock_invalidate.assert_called_once()
+        mock_authenticate.assert_called_once_with("user", "pass")
+
+    def test_inaccessible_on_authorization_uses_linear_breakdown_delay(self):
+        """.NET: na categoria Authorization o atraso é RetryCount * Breakdown."""
+        wrapper = self._wrapper(with_session=False)
+        retry_data = RequestRetryData(lock_key="test", retry_count=1)
+        try:
+            result = wrapper._handle_exception_internal(
+                exception=ServiceRequestInaccessibleException("example.com", 8180),
+                service_name=ServiceName.LOGIN,
+                category=ServiceName.LOGIN.service_category,
+                request=ServiceRequest(service=ServiceName.LOGIN),
+                retry_data=retry_data,
+            )
+        finally:
+            self._release(wrapper)
+
+        assert result is True
+        assert retry_data.retry_delay == 2 * RequestRetryDelay.BREAKDOWN
 
 
 class TestSankhyaWrapperFileOperations:

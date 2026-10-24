@@ -455,6 +455,11 @@ class SankhyaWrapper(LowLevelSankhyaWrapper):
 
         with lock:
             while True:
+                # Como no .NET (SankhyaWrapper.ServiceInvokerInternal), o atraso
+                # é zerado a cada tentativa: um retry que não define atraso
+                # (ex.: reautenticação) não repete o atraso de um retry anterior.
+                retry_data.retry_delay = 0
+
                 try:
                     # Incrementa contador de requisições
                     self._request_count += 1
@@ -588,7 +593,10 @@ class SankhyaWrapper(LowLevelSankhyaWrapper):
         Returns:
             True se deve fazer retry, False caso contrário
         """
-        # Verifica se atingiu máximo de retries
+        # Verifica se atingiu máximo de retries.
+        # retry_count conta os retries já feitos; no .NET, RetryCount conta as
+        # tentativas e é incrementado antes de cada uma (RetryCount = retry_count + 1),
+        # logo "retry_count >= 3" equivale a "RetryCount > 3": 1 tentativa + 3 retries.
         if retry_data.retry_count >= self._max_retries:
             logger.warning(f"Máximo de retries atingido ({self._max_retries})")
             return False
@@ -633,6 +641,10 @@ class SankhyaWrapper(LowLevelSankhyaWrapper):
         Returns:
             True se deve fazer retry, False caso contrário
         """
+        # Número da tentativa que falhou (RetryData.RetryCount no .NET). Como no
+        # .NET, o atraso cresce linearmente: RetryCount * RequestRetryDelay.X.
+        attempt = retry_data.retry_count + 1
+
         # ServiceRequestInvalidAuthorizationException
         if isinstance(exception, ServiceRequestInvalidAuthorizationException):
             session_id = self.session_id
@@ -657,9 +669,10 @@ class SankhyaWrapper(LowLevelSankhyaWrapper):
             property_name = exception.property_name if hasattr(exception, "property_name") else ""
             xml_str = request.to_xml_string()
 
-            # Se property_name não está no XML, pode ser erro transitório
-            if property_name and property_name not in xml_str:
-                retry_data.retry_delay = RequestRetryDelay.STABLE
+            # Se property_name não está no XML (comparação sem diferenciar
+            # maiúsculas, como no .NET), pode ser erro transitório
+            if property_name and property_name.lower() not in xml_str.lower():
+                retry_data.retry_delay = attempt * RequestRetryDelay.STABLE
                 return True
 
             return False
@@ -675,39 +688,42 @@ class SankhyaWrapper(LowLevelSankhyaWrapper):
 
         # ServiceRequestDeadlockException
         if isinstance(exception, ServiceRequestDeadlockException):
-            retry_data.retry_delay = RequestRetryDelay.STABLE
+            retry_data.retry_delay = attempt * RequestRetryDelay.STABLE
             return True
 
         # ServiceRequestTimeoutException
         if isinstance(exception, ServiceRequestTimeoutException):
-            retry_data.retry_delay = RequestRetryDelay.FREE
+            retry_data.retry_delay = attempt * RequestRetryDelay.FREE
             return True
 
         # ServiceRequestInaccessibleException
         if isinstance(exception, ServiceRequestInaccessibleException):
+            # Fora do serviço de autenticação, o .NET apenas reautentica e
+            # repete a requisição, sem atraso.
             if category != ServiceCategory.AUTHORIZATION:
                 if self._session_info:
                     username = self._session_info.username
                     password = self._session_info.password
                     self._invalidate()
                     self.authenticate(username, password)
+                return True
 
-            retry_data.retry_delay = RequestRetryDelay.BREAKDOWN
+            retry_data.retry_delay = attempt * RequestRetryDelay.BREAKDOWN
             return True
 
         # ServiceRequestUnavailableException
         if isinstance(exception, ServiceRequestUnavailableException):
-            retry_data.retry_delay = RequestRetryDelay.UNSTABLE
+            retry_data.retry_delay = attempt * RequestRetryDelay.UNSTABLE
             return True
 
         # ServiceRequestCanceledQueryException
         if isinstance(exception, ServiceRequestCanceledQueryException):
-            retry_data.retry_delay = RequestRetryDelay.STABLE
+            retry_data.retry_delay = attempt * RequestRetryDelay.STABLE
             return True
 
         # requests.RequestException (erros de rede)
         if isinstance(exception, requests.RequestException):
-            retry_data.retry_delay = RequestRetryDelay.UNSTABLE
+            retry_data.retry_delay = attempt * RequestRetryDelay.UNSTABLE
             return True
 
         # Exceção não tratada - não faz retry
