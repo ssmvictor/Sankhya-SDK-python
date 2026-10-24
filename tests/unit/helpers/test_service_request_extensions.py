@@ -83,3 +83,348 @@ class TestServiceRequestExtensions:
         
         assert isinstance(timestamp, str)
         assert timestamp.isdigit()
+
+
+# ---------------------------------------------------------------------------
+# Montagem das requisições (porta de HandleService / Resolve do .NET)
+# ---------------------------------------------------------------------------
+
+from lxml import etree
+
+from sankhya_sdk.enums.parameter_type import ParameterType
+from sankhya_sdk.enums.service_name import ServiceName
+from sankhya_sdk.exceptions import InvalidServiceRequestOperationException
+from sankhya_sdk.helpers.filter_expression import LiteralCriteria as FilterLiteralCriteria
+from sankhya_sdk.models.service.basic_types import (
+    LiteralCriteria,
+    LiteralCriteriaSql,
+    Parameter,
+)
+from sankhya_sdk.models.service.service_request import ServiceRequest
+from sankhya_sdk.models.transport.neighborhood import Neighborhood
+from sankhya_sdk.models.transport.partner import Partner
+
+
+FIXED_TIMESTAMP = "1700000000"
+
+
+@pytest.fixture
+def fixed_timestamp(monkeypatch):
+    """Fixa o timestamp usado no datasetid."""
+    monkeypatch.setattr(
+        ServiceRequestExtensions,
+        "_get_unix_timestamp",
+        staticmethod(lambda: FIXED_TIMESTAMP),
+    )
+
+
+def _body(request: ServiceRequest) -> etree._Element:
+    """Serializa a requisição (ServiceRequest/RequestBody.to_xml) e retorna o requestBody."""
+    root = etree.fromstring(request.to_xml_bytes())
+    body = root.find("requestBody")
+    assert body is not None
+    return body
+
+
+@pytest.mark.usefixtures("fixed_timestamp")
+class TestHandleServiceCrudServiceFind:
+    """CRUDServiceProvider.loadRecords (.NET HandleService, CrudServiceFind)."""
+
+    def test_find_by_key_builds_data_set(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        ServiceRequestExtensions.resolve_with_entity(request, Partner(code=123))
+
+        data_set = _body(request).find("dataSet")
+        assert data_set is not None
+        assert data_set.get("rootEntity") == "Parceiro"
+        assert data_set.get("includePresentationFields") == "N"
+        assert data_set.get("parallelLoader") == "true"
+        assert data_set.get("datasetid") == f"{FIXED_TIMESTAMP}_1"
+        assert data_set.findtext("criteria/expression") == "CODPARC = 123"
+
+        root_entity = data_set.findall("entity")[0]
+        assert root_entity.get("path") == ""
+        assert "name" not in root_entity.attrib
+        field_list = root_entity.find("fieldset").get("list").split(",")
+        assert field_list[:2] == ["CODPARC", "NOMEPARC"]
+        assert "CODCID" in field_list
+
+    def test_find_with_reference_adds_entity_per_reference(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        partner = Partner(code=1, neighborhood=Neighborhood(code=2, name="Centro"))
+
+        ServiceRequestExtensions.resolve_with_entity(request, partner)
+
+        entities = _body(request).find("dataSet").findall("entity")
+        by_path = {e.get("path"): e.find("fieldset").get("list") for e in entities}
+        assert by_path["Bairro"].split(",")[:2] == ["CODBAI", "NOMEBAI"]
+
+    def test_find_without_criteria_sends_empty_criteria(self):
+        """O .NET sempre atribui result.LiteralCriteria (vazio) no HandleService."""
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        ServiceRequestExtensions.resolve_with_entity(request, Partner())
+
+        criteria = _body(request).find("dataSet/criteria")
+        assert criteria is not None
+        assert criteria.find("expression") is None
+
+    def test_resolve_generic_does_not_set_criteria(self):
+        """Resolve<T>() do .NET não define LiteralCriteria."""
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        ServiceRequestExtensions.resolve_generic(request, Partner)
+
+        data_set = _body(request).find("dataSet")
+        assert data_set.find("criteria") is None
+        assert data_set.findall("entity")[0].get("path") == ""
+
+
+@pytest.mark.usefixtures("fixed_timestamp")
+class TestHandleServiceCrudServiceSave:
+    """CRUDServiceProvider.saveRecord (.NET HandleService, CrudServiceSave)."""
+
+    def test_update_builds_data_row(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            request, Partner(code=123, name="Cliente")
+        )
+
+        data_set = _body(request).find("dataSet")
+        assert data_set.get("rootEntity") == "Parceiro"
+        assert data_set.get("includePresentationFields") == "N"
+        assert data_set.get("parallelLoader") == "true"
+        assert data_set.get("datasetid") == f"{FIXED_TIMESTAMP}_1"
+        entity = data_set.find("entity")
+        assert entity.get("path") == ""
+        assert entity.find("fieldset").get("list") == "*"
+        data_rows = data_set.findall("dataRow")
+        assert len(data_rows) == 1
+        assert data_rows[0].findtext("key/CODPARC") == "123"
+        local_fields = data_rows[0].find("localFields")
+        assert {child.tag: child.text for child in local_fields} == {"NOMEPARC": "Cliente"}
+
+    def test_insert_without_key_sends_empty_key(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(request, Partner(name="Novo"))
+
+        data_row = _body(request).find("dataSet/dataRow")
+        assert data_row.findtext("localFields/NOMEPARC") == "Novo"
+        key = data_row.find("key")
+        assert key is not None
+        assert len(key) == 0
+
+    def test_batch_save_builds_one_data_row_per_entity(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_collection(
+            request, [Partner(name="A"), Partner(code=2, name="B")]
+        )
+
+        data_rows = _body(request).find("dataSet").findall("dataRow")
+        assert [r.findtext("localFields/NOMEPARC") for r in data_rows] == ["A", "B"]
+        assert [r.findtext("key/CODPARC") for r in data_rows] == [None, "2"]
+
+
+@pytest.mark.usefixtures("fixed_timestamp")
+class TestHandleServiceCrudServiceRemove:
+    """CRUDServiceProvider.removeRecord (.NET HandleService, CrudServiceRemove)."""
+
+    def test_remove_builds_entity_with_ids(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_REMOVE)
+
+        ServiceRequestExtensions.resolve_with_entity(request, Partner(code=123))
+
+        entity = _body(request).find("entity")
+        assert entity is not None
+        assert "name" not in entity.attrib
+        assert entity.get("rootEntity") == "Parceiro"
+        assert entity.get("datasetid") == f"{FIXED_TIMESTAMP}_2"
+        assert [i.findtext("CODPARC") for i in entity.findall("id")] == ["123"]
+
+    def test_batch_remove_builds_one_id_per_entity(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_REMOVE)
+
+        ServiceRequestExtensions.resolve_with_entities(
+            request, [Partner(code=1), Partner(code=2)]
+        )
+
+        entity = _body(request).find("entity")
+        assert [i.findtext("CODPARC") for i in entity.findall("id")] == ["1", "2"]
+
+    def test_batch_unsupported_service_raises(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        with pytest.raises(InvalidServiceRequestOperationException):
+            ServiceRequestExtensions.resolve_with_collection(request, [Partner(code=1)])
+
+
+class TestHandleServiceLegacyCrud:
+    """crud.find / crud.save / crud.remove (.NET HandleService)."""
+
+    def test_crud_find_builds_entity(self):
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+
+        ServiceRequestExtensions.resolve_with_entity(request, Partner(code=1))
+
+        entity = _body(request).find("entity")
+        assert entity.get("name") == "Parceiro"
+        assert entity.get("getPresentations") == "false"
+        assert entity.find("fields/field").get("name") == "CODPARC"
+        # Critérios como <criterio> diretos (Entity.cs: XmlElement "criterio")
+        assert entity.find("criteria") is None
+        assert [c.get("nome") for c in entity.findall("criterio")] == ["CODPARC"]
+
+    def test_crud_find_with_reference_adds_reference_fetch(self):
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+        partner = Partner(code=1, neighborhood=Neighborhood(code=2))
+
+        ServiceRequestExtensions.resolve_with_entity(request, partner)
+
+        references = request.request_body.entity.references_fetch
+        assert "Bairro" in [ref.entity_name for ref in references]
+
+    def test_crud_save_builds_campos(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            request, Partner(code=1, name="Cliente")
+        )
+
+        entity = _body(request).find("entity")
+        assert entity.get("name") == "Parceiro"
+        # Campos = FieldValues (inclui a chave definida, como no .NET)
+        assert [(c.get("nome"), c.text) for c in entity.findall("campo")] == [
+            ("CODPARC", "1"),
+            ("NOMEPARC", "Cliente"),
+        ]
+
+    def test_crud_remove_builds_campos_with_key(self):
+        request = ServiceRequest(service=ServiceName.CRUD_REMOVE)
+
+        ServiceRequestExtensions.resolve_with_entity(request, Partner(code=7))
+
+        entity = _body(request).find("entity")
+        assert [(c.get("nome"), c.text) for c in entity.findall("campo")] == [
+            ("CODPARC", "7"),
+        ]
+
+    def test_unsupported_service_raises(self):
+        request = ServiceRequest(service=ServiceName.LOGIN)
+
+        with pytest.raises(InvalidServiceRequestOperationException):
+            ServiceRequestExtensions.resolve_with_entity(request, Partner(code=1))
+
+
+class TestResolveWithOptions:
+    """Resolve<T>(T, EntityQueryOptions) do .NET."""
+
+    def test_crud_find_options(self):
+        from sankhya_sdk.helpers.entity_query_options import EntityQueryOptions
+
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+        options = EntityQueryOptions(
+            include_presentation_fields=True,
+            include_references=False,
+            max_results=10,
+        )
+
+        ServiceRequestExtensions.resolve_with_options(
+            request, Partner(code=1, neighborhood=Neighborhood(code=2)), options
+        )
+
+        entity = _body(request).find("entity")
+        assert entity.get("getPresentations") == "true"
+        assert entity.get("rowsLimit") == "10"
+        assert entity.find("referenceFetch") is None
+
+    def test_crud_service_find_options(self):
+        from sankhya_sdk.helpers.entity_query_options import EntityQueryOptions
+
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        options = EntityQueryOptions(
+            include_presentation_fields=True,
+            include_references=False,
+        )
+
+        ServiceRequestExtensions.resolve_with_options(
+            request, Partner(code=1, neighborhood=Neighborhood(code=2)), options
+        )
+
+        data_set = _body(request).find("dataSet")
+        assert data_set.get("includePresentationFields") == "S"
+        assert [e.get("path") for e in data_set.findall("entity")] == [""]
+
+
+class TestResolveWithLiteralCriteria:
+    """Resolve<T>(ILiteralCriteria) do .NET (ServiceRequestExtensions.cs:727-749)."""
+
+    def test_crud_service_find_with_filter_expression(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        ServiceRequestExtensions.resolve_with_literal_criteria(
+            request, Partner, FilterLiteralCriteria.equals("CODPARC", 42)
+        )
+
+        literal = request.request_body.data_set.literal_criteria
+        assert isinstance(literal, LiteralCriteria)
+        assert literal.expression == "CODPARC = 42"
+        criteria = _body(request).find("dataSet/criteria")
+        assert criteria.findtext("expression") == "CODPARC = 42"
+
+    def test_crud_find_with_filter_expression(self):
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+
+        ServiceRequestExtensions.resolve_with_literal_criteria(
+            request, Partner, FilterLiteralCriteria("NOMEPARC LIKE '%A%'")
+        )
+
+        assert isinstance(request.request_body.entity.literal_criteria, LiteralCriteria)
+        entity = _body(request).find("entity")
+        assert entity.findtext("literalCriteria/expression") == "NOMEPARC LIKE '%A%'"
+
+    def test_model_literal_criteria_keeps_parameters(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        criteria = LiteralCriteria(
+            expression="CODPARC > ?",
+            parameters=[Parameter(type=ParameterType.INTEGER, value="0")],
+        )
+
+        ServiceRequestExtensions.resolve_with_literal_criteria(request, Partner, criteria)
+
+        xml_criteria = _body(request).find("dataSet/criteria")
+        assert xml_criteria.findtext("expression") == "CODPARC > ?"
+        assert [p.text for p in xml_criteria.findall("parameter")] == ["0"]
+
+    def test_query_builder_parameters(self):
+        from sankhya_sdk.models.service.query_types import QueryBuilder
+
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        builder = QueryBuilder("Parceiro").where("CODPARC", 5, ">", ParameterType.INTEGER)
+
+        ServiceRequestExtensions.resolve_with_literal_criteria(request, Partner, builder)
+
+        literal = request.request_body.data_set.literal_criteria
+        assert literal.expression == builder.build_expression()
+        assert [p.value for p in literal.parameters] == ["5"]
+
+    def test_literal_criteria_sql_on_crud_find(self):
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+        criteria = LiteralCriteriaSql(expression="CODPARC = 1")
+
+        ServiceRequestExtensions.resolve_with_literal_criteria(request, Partner, criteria)
+
+        assert request.request_body.entity.literal_criteria_sql is criteria
+        entity = _body(request).find("entity")
+        assert entity.findtext("criterioLiteral/expressao") == "CODPARC = 1"
+
+    def test_literal_criteria_sql_on_crud_service_find_raises(self):
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        with pytest.raises(InvalidServiceRequestOperationException):
+            ServiceRequestExtensions.resolve_with_literal_criteria(
+                request, Partner, LiteralCriteriaSql(expression="CODPARC = 1")
+            )

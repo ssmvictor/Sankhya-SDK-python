@@ -531,7 +531,11 @@ class ServiceRequestExtensions:
             request, criteria, ReferenceLevel.THIRD
         )
         
-        ServiceRequestExtensions._apply_result_to_request(request, result)
+        # Resolve<T>() do .NET não define Criteria (crud.find) nem
+        # LiteralCriteria (CRUDServiceProvider.loadRecords)
+        ServiceRequestExtensions._apply_result_to_request(
+            request, result, include_criteria=False
+        )
 
     @staticmethod
     def resolve_with_entity(
@@ -592,6 +596,23 @@ class ServiceRequestExtensions:
         )
 
     @staticmethod
+    def resolve_with_entities(
+        request: "ServiceRequest",
+        criteria_list: List[T],
+    ) -> None:
+        """
+        Resolve uma requisição para operações em batch.
+
+        Alias de ``resolve_with_collection`` (``Resolve<T>(ICollection<T>)``
+        no .NET), usado pelos wrappers on-demand.
+
+        Args:
+            request: Requisição a configurar
+            criteria_list: Lista de entidades
+        """
+        ServiceRequestExtensions.resolve_with_collection(request, criteria_list)
+
+    @staticmethod
     def resolve_with_literal_criteria(
         request: "ServiceRequest",
         entity_type: Type[T],
@@ -600,20 +621,50 @@ class ServiceRequestExtensions:
         """
         Resolve uma requisição com critérios literais.
         
+        Porta de ``Resolve<T>(ILiteralCriteria)`` (.NET): o critério literal
+        vai para ``Entity.LiteralCriteria`` (crud.find) ou
+        ``DataSet.LiteralCriteria`` (CRUDServiceProvider.loadRecords); o
+        critério SQL (``LiteralCriteriaSql``) só é aceito em crud.find.
+
         Args:
             request: Requisição a configurar
             entity_type: Tipo da entidade
-            literal_criteria: Expressão de filtro
+            literal_criteria: Expressão de filtro (``IFilterExpression``,
+                ``LiteralCriteria`` ou ``LiteralCriteriaSql`` dos modelos)
+
+        Raises:
+            InvalidServiceRequestOperationException: Se o critério não for
+                suportado pelo serviço
         """
+        from sankhya_sdk.models.service.basic_types import (
+            LiteralCriteria,
+            LiteralCriteriaSql,
+        )
+
         ServiceRequestExtensions.resolve_generic(request, entity_type)
         
-        expression = literal_criteria.build_expression()
+        literal: Optional[LiteralCriteria] = None
+        literal_sql: Optional[LiteralCriteriaSql] = None
         
-        # Aplica o critério literal
-        if request.request_body.entity:
-            request.request_body.entity.literal_criteria = expression
-        elif request.request_body.data_set:
-            request.request_body.data_set.literal_criteria = expression
+        if isinstance(literal_criteria, LiteralCriteriaSql):
+            literal_sql = literal_criteria
+        elif isinstance(literal_criteria, LiteralCriteria):
+            literal = literal_criteria
+        else:
+            build_parameters = getattr(literal_criteria, "build_parameters", None)
+            literal = LiteralCriteria(
+                expression=literal_criteria.build_expression(),
+                parameters=list(build_parameters()) if callable(build_parameters) else [],
+            )
+
+        if literal is not None and request.service == ServiceName.CRUD_FIND:
+            request.request_body.entity.literal_criteria = literal
+        elif literal is not None and request.service == ServiceName.CRUD_SERVICE_FIND:
+            request.request_body.data_set.literal_criteria = literal
+        elif literal_sql is not None and request.service == ServiceName.CRUD_FIND:
+            request.request_body.entity.literal_criteria_sql = literal_sql
+        else:
+            raise InvalidServiceRequestOperationException(service=request.service)
 
     @staticmethod
     def resolve_with_options(
@@ -642,99 +693,94 @@ class ServiceRequestExtensions:
     def _apply_result_to_request(
         request: "ServiceRequest",
         result: EntityResolverResult,
+        include_criteria: bool = True,
     ) -> None:
         """
         Aplica o resultado do parsing à requisição.
         
+        Porta de ``HandleService`` (ServiceRequestExtensions.cs, .NET): cada
+        serviço recebe uma nova ``Entity``/``DataSet`` no corpo da requisição.
+
         Args:
             request: Requisição a configurar
             result: Resultado do parsing
+            include_criteria: Se False (``Resolve<T>()`` no .NET), não define
+                os critérios de crud.find nem o critério literal do dataSet
+
+        Raises:
+            InvalidServiceRequestOperationException: Se o serviço não for suportado
         """
+        from sankhya_sdk.models.service.basic_types import (
+            Criteria,
+            Field,
+            FieldValue,
+            LiteralCriteria,
+        )
+        from sankhya_sdk.models.service.entity_types import DataSet, Entity
+
         timestamp = ServiceRequestExtensions._get_unix_timestamp()
         
         if request.service == ServiceName.CRUD_FIND:
-            # Configura Entity para CRUD.find
-            if request.request_body.entity is None:
-                from sankhya_sdk.models.service.request_body import Entity
-                request.request_body.entity = Entity()
-            
-            entity = request.request_body.entity
-            entity.name = result.name
-            entity.fields = [f["name"] for f in result.fields]
-            entity.criteria = result.criteria
-            entity.include_presentation_fields = False
-            
-            if result.references:
-                entity.references_fetch = [
-                    {"name": k, "fields": [f["name"] for f in v]}
-                    for k, v in result.references.items()
+            # Entity para crud.find
+            entity = Entity(
+                name=result.name,
+                fields=[Field(name=f["name"]) for f in result.fields],
+                include_presentation_fields=False,
+            )
+            if include_criteria:
+                entity.criteria = [
+                    Criteria(name=c["name"], value=c["value"])
+                    for c in result.criteria
                 ]
+            if result.references:
+                entity.references_fetch = (
+                    ServiceRequestExtensions._build_references_fetch(result)
+                )
+            request.request_body.entity = entity
+            
+        elif request.service in [ServiceName.CRUD_SAVE, ServiceName.CRUD_REMOVE]:
+            # Entity com <campo> para crud.save / crud.remove
+            request.request_body.entity = Entity(
+                name=result.name,
+                campos=[
+                    FieldValue(name=f["name"], value=f["value"])
+                    for f in result.field_values
+                ],
+            )
         
         elif request.service == ServiceName.CRUD_SERVICE_FIND:
-            # Configura DataSet para CRUDServiceProvider.find
-            if request.request_body.data_set is None:
-                from sankhya_sdk.models.service.request_body import DataSet
-                request.request_body.data_set = DataSet()
-            
-            ds = request.request_body.data_set
-            ds.root_entity = result.name
-            ds.include_presentation_fields = False
-            ds.parallel_loader = True
-            ds.data_set_id = f"{timestamp}_1"
-            ds.literal_criteria = result.literal_criteria
-            
-            # Configura entidades
-            entities = [{"path": "", "fieldset": ",".join(f["name"] for f in result.fields)}]
-            
-            for ref_key, ref_fields in result.references.items():
-                entities.append({
-                    "path": ref_key,
-                    "fieldset": ",".join(f["name"] for f in ref_fields),
-                })
-            
-            ds.entities = entities
-        
-        elif request.service in [ServiceName.CRUD_SAVE, ServiceName.CRUD_REMOVE]:
-            # Configura para operações de CRUD
-            if request.request_body.entity is None:
-                from sankhya_sdk.models.service.request_body import Entity
-                request.request_body.entity = Entity()
-            
-            entity = request.request_body.entity
-            entity.name = result.name
-            entity.campos = result.field_values
+            # DataSet para CRUDServiceProvider.loadRecords
+            data_set = DataSet(
+                root_entity=result.name,
+                include_presentation_fields=False,
+                parallel_loader=True,
+                data_set_id=f"{timestamp}_1",
+                entities=ServiceRequestExtensions._build_data_set_entities(result),
+            )
+            if include_criteria:
+                data_set.literal_criteria = LiteralCriteria(
+                    expression=result.literal_criteria or None
+                )
+            request.request_body.data_set = data_set
         
         elif request.service == ServiceName.CRUD_SERVICE_SAVE:
-            # Configura DataSet para save
-            if request.request_body.data_set is None:
-                from sankhya_sdk.models.service.request_body import DataSet
-                request.request_body.data_set = DataSet()
-            
-            ds = request.request_body.data_set
-            ds.root_entity = result.name
-            ds.include_presentation_fields = False
-            ds.parallel_loader = True
-            ds.data_set_id = f"{timestamp}_1"
-            ds.entities = [{"path": "", "fieldset": "*"}]
-            ds.data_rows = [{
-                "keys": {k["name"]: k["value"] for k in result.keys},
-                "local_fields": {
-                    f["name"]: f["value"]
-                    for f in result.field_values
-                    if f not in result.keys
-                },
-            }]
+            # DataSet com dataRow para CRUDServiceProvider.saveRecord
+            request.request_body.data_set = DataSet(
+                root_entity=result.name,
+                include_presentation_fields=False,
+                parallel_loader=True,
+                data_set_id=f"{timestamp}_1",
+                entities=[Entity(path="", fieldset=Field(name="", list="*"))],
+                data_rows=[ServiceRequestExtensions._build_data_row(result)],
+            )
         
         elif request.service == ServiceName.CRUD_SERVICE_REMOVE:
-            # Configura para remoção
-            if request.request_body.entity is None:
-                from sankhya_sdk.models.service.request_body import Entity
-                request.request_body.entity = Entity()
-            
-            entity = request.request_body.entity
-            entity.root_entity = result.name
-            entity.data_set_id = f"{timestamp}_2"
-            entity.ids = [{k["name"]: k["value"] for k in result.keys}]
+            # Entity com <id> para CRUDServiceProvider.removeRecord
+            request.request_body.entity = Entity(
+                root_entity=result.name,
+                data_set_id=f"{timestamp}_2",
+                ids=[ServiceRequestExtensions._build_id(result)],
+            )
         
         else:
             raise InvalidServiceRequestOperationException(service=request.service)
@@ -748,54 +794,144 @@ class ServiceRequestExtensions:
         """
         Aplica resultados em batch à requisição.
         
+        Porta de ``Resolve<T>(ICollection<T>)`` (.NET).
+
         Args:
             request: Requisição a configurar
             sample: Resultado de exemplo para estrutura
             results: Lista de resultados
+
+        Raises:
+            InvalidServiceRequestOperationException: Se o serviço não for suportado
         """
+        from sankhya_sdk.models.service.basic_types import Field
+        from sankhya_sdk.models.service.entity_types import DataSet, Entity
+
         timestamp = ServiceRequestExtensions._get_unix_timestamp()
         
         if request.service == ServiceName.CRUD_SERVICE_SAVE:
-            if request.request_body.data_set is None:
-                from sankhya_sdk.models.service.request_body import DataSet
-                request.request_body.data_set = DataSet()
-            
-            ds = request.request_body.data_set
-            ds.root_entity = sample.name
-            ds.include_presentation_fields = False
-            ds.parallel_loader = True
-            ds.data_set_id = f"{timestamp}_1"
-            ds.entities = [{"path": "", "fieldset": "*"}]
-            
-            data_rows = []
-            for result in results:
-                row = {
-                    "keys": {k["name"]: k["value"] for k in result.keys},
-                    "local_fields": {
-                        f["name"]: f["value"]
-                        for f in result.field_values
-                        if f not in result.keys
-                    },
-                }
-                data_rows.append(row)
-            
-            ds.data_rows = data_rows
+            request.request_body.data_set = DataSet(
+                root_entity=sample.name,
+                include_presentation_fields=False,
+                parallel_loader=True,
+                data_set_id=f"{timestamp}_1",
+                entities=[Entity(path="", fieldset=Field(name="", list="*"))],
+                data_rows=[
+                    ServiceRequestExtensions._build_data_row(result)
+                    for result in results
+                ],
+            )
         
         elif request.service == ServiceName.CRUD_SERVICE_REMOVE:
-            if request.request_body.entity is None:
-                from sankhya_sdk.models.service.request_body import Entity
-                request.request_body.entity = Entity()
-            
-            entity = request.request_body.entity
-            entity.root_entity = sample.name
-            entity.data_set_id = f"{timestamp}_2"
-            entity.ids = [
-                {k["name"]: k["value"] for k in result.keys}
-                for result in results
-            ]
+            request.request_body.entity = Entity(
+                root_entity=sample.name,
+                data_set_id=f"{timestamp}_2",
+                ids=[ServiceRequestExtensions._build_id(result) for result in results],
+            )
         
         else:
             raise InvalidServiceRequestOperationException(service=request.service)
+
+    @staticmethod
+    def _build_data_set_entities(result: EntityResolverResult) -> List[Any]:
+        """
+        Monta as entidades (raiz e referências) de um dataSet de consulta.
+
+        Args:
+            result: Resultado do parsing
+
+        Returns:
+            Lista de ``Entity`` com ``path`` e ``fieldset``
+        """
+        from sankhya_sdk.models.service.basic_types import Field
+        from sankhya_sdk.models.service.entity_types import Entity
+
+        entities = [
+            Entity(
+                path="",
+                fieldset=Field(
+                    name="", list=",".join(f["name"] for f in result.fields)
+                ),
+            )
+        ]
+        for ref_key, ref_fields in result.references.items():
+            entities.append(
+                Entity(
+                    path=ref_key,
+                    fieldset=Field(
+                        name="", list=",".join(f["name"] for f in ref_fields)
+                    ),
+                )
+            )
+        return entities
+
+    @staticmethod
+    def _build_references_fetch(result: EntityResolverResult) -> List[Any]:
+        """
+        Monta os ``referenceFetch`` de crud.find a partir das referências.
+
+        Args:
+            result: Resultado do parsing
+
+        Returns:
+            Lista de ``ReferenceFetch``
+        """
+        from sankhya_sdk.models.service.basic_types import ReferenceFetch
+
+        return [
+            ReferenceFetch(
+                entity_name=ref_key,
+                fields=[f["name"] for f in ref_fields],
+            )
+            for ref_key, ref_fields in result.references.items()
+        ]
+
+    @staticmethod
+    def _build_data_row(result: EntityResolverResult) -> Any:
+        """
+        Monta o ``dataRow`` de CRUDServiceProvider.saveRecord.
+
+        As chaves vão para ``<key>`` e os demais valores
+        (``FieldValues.Except(Keys)`` no .NET) para ``<localFields>``.
+
+        Args:
+            result: Resultado do parsing
+
+        Returns:
+            ``DataSetRow`` com chaves e campos locais
+        """
+        from sankhya_sdk.models.service.entity_types import DataSetRow
+        from .entity_dynamic_serialization import EntityDynamicSerialization
+
+        keys = EntityDynamicSerialization()
+        for key in result.keys:
+            keys.set_member(key["name"], key["value"])
+
+        local_fields = EntityDynamicSerialization()
+        for field_value in _except_field_values(result.field_values, result.keys):
+            local_fields.set_member(field_value["name"], field_value["value"])
+
+        return DataSetRow(keys=keys.to_dict(), local_fields=local_fields.to_dict())
+
+    @staticmethod
+    def _build_id(result: EntityResolverResult) -> Dict[str, Any]:
+        """
+        Monta o ``<id>`` de CRUDServiceProvider.removeRecord.
+
+        No .NET as chaves usam ``DynamicSerializationOption.Uppercase``.
+
+        Args:
+            result: Resultado do parsing
+
+        Returns:
+            Dicionário serializável com as chaves primárias
+        """
+        from .entity_dynamic_serialization import EntityDynamicSerialization
+
+        entity_id = EntityDynamicSerialization(key_filter="uppercase")
+        for key in result.keys:
+            entity_id.set_member(key["name"], key["value"])
+        return entity_id.to_dict()
 
     @staticmethod
     def _apply_options_to_request(
@@ -862,6 +998,42 @@ def _int_to_reference_level(value: int) -> ReferenceLevel:
         6: ReferenceLevel.SIXTH,
     }
     return mapping.get(value, ReferenceLevel.NONE)
+
+
+def _except_field_values(
+    field_values: List[Dict[str, Any]],
+    keys: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Retorna os valores de campo que não são chaves.
+
+    Equivale a ``FieldValues.Except(Keys)`` no .NET: a comparação de
+    ``FieldValue`` ignora maiúsculas/minúsculas no nome e no valor, e o
+    resultado não contém repetições.
+
+    Args:
+        field_values: Valores dos campos (``{"name", "value"}``)
+        keys: Valores das chaves (``{"name", "value"}``)
+
+    Returns:
+        Valores de campo que não estão entre as chaves
+    """
+    def identity(item: Dict[str, Any]) -> tuple:
+        value = item.get("value")
+        return (
+            str(item.get("name") or "").lower(),
+            value.lower() if isinstance(value, str) else value,
+        )
+
+    excluded = {identity(key) for key in keys}
+    result: List[Dict[str, Any]] = []
+    for field_value in field_values:
+        item_identity = identity(field_value)
+        if item_identity in excluded:
+            continue
+        excluded.add(item_identity)
+        result.append(field_value)
+    return result
 
 
 # Funções de conveniência para uso standalone
