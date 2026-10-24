@@ -404,13 +404,21 @@ class TestSankhyaContextLifecycle:
         with SankhyaContext._wrappers_lock:
             assert main_token not in SankhyaContext._wrappers
 
-    def test_del_calls_dispose(self, mock_wrapper):
-        """Test __del__ calls dispose if not already disposed."""
+    def test_del_does_not_dispose_shared_wrappers(self, mock_wrapper):
+        """Test __del__ only marks disposed, like .NET Dispose(false)."""
+        other_wrapper = MagicMock()
+        other_token = uuid.uuid4()
+        with SankhyaContext._wrappers_lock:
+            SankhyaContext._wrappers[other_token] = other_wrapper
+
         ctx = SankhyaContext(mock_wrapper)
         ctx.__del__()
-        
-        mock_wrapper.dispose.assert_called_once()
+
         assert ctx._disposed is True
+        mock_wrapper.dispose.assert_not_called()
+        other_wrapper.dispose.assert_not_called()
+        with SankhyaContext._wrappers_lock:
+            assert SankhyaContext._wrappers.get(other_token) is other_wrapper
 
 
 class TestSankhyaContextManager:

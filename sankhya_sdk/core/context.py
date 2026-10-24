@@ -156,17 +156,16 @@ class SankhyaContext:
 
     def __del__(self) -> None:
         """
-        Destrutor - garante limpeza de recursos.
+        Destrutor - apenas marca o contexto como descartado.
 
-        Chama dispose() se ainda não foi descartado.
-        Equivalente ao finalizer C# ~SankhyaContext().
+        Equivalente ao finalizer C# ``~SankhyaContext() => Dispose(false)``,
+        que retorna logo após marcar ``_disposed`` (SankhyaContext.cs:55,
+        165-176). Não chama dispose(): ele finaliza todos os wrappers do
+        registro de classe, inclusive sessões de outros contextos ainda em
+        uso, e o coletor de lixo pode rodar a qualquer momento. Para liberar
+        as sessões, chame dispose() ou use o contexto em um bloco ``with``.
         """
-        if not self._disposed:
-            try:
-                self.dispose()
-            except Exception:
-                # Silencia exceções no destrutor
-                pass
+        self._disposed = True
 
     # ==========================================================================
     # Properties
