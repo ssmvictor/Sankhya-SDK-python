@@ -9,13 +9,14 @@ comportamento esperado não ocorre (evitam travar a suíte).
 """
 
 import asyncio
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
+from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensions
 from sankhya_sdk.exceptions import (
     CanceledOnDemandRequestWrapperException,
     ServiceRequestCompetitionException,
@@ -255,3 +256,111 @@ class TestAsyncOnDemandCancellation:
             await _dispose_quietly(wrapper)
 
         assert service.batches == []
+
+
+# =============================================================================
+# Montagem das requisições (.NET OnDemandRequestWrapper.cs:222-237, 291-318)
+# =============================================================================
+
+
+def _resolve_failing_for(name: str) -> Callable:
+    """resolve_with_entity real, exceto para a entidade ``name``."""
+    original = ServiceRequestExtensions.resolve_with_entity
+
+    def resolve(request, entity, *args, **kwargs):
+        if entity.name == name:
+            raise ValueError(f"entidade inválida: {name}")
+        return original(request, entity, *args, **kwargs)
+
+    return resolve
+
+
+class TestAsyncOnDemandRequestBuilding:
+    """Lotes usam Resolve(ICollection) e nenhuma entidade é perdida em silêncio."""
+
+    @pytest.mark.asyncio
+    async def test_batch_is_built_from_the_whole_collection(self):
+        """O lote é uma única requisição montada com resolve_with_collection."""
+        service = _RecordingService()
+        # Throughput acima do número de entidades: só o flush envia
+        wrapper = await _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        partners = [Partner(name="A"), Partner(name="B")]
+        try:
+            with patch.object(
+                ServiceRequestExtensions,
+                "resolve_with_collection",
+                wraps=ServiceRequestExtensions.resolve_with_collection,
+            ) as resolve:
+                for partner in partners:
+                    await wrapper.add(partner)
+                await _flush(wrapper)
+
+            resolve.assert_called_once()
+            assert resolve.call_args.args[1] == partners
+            assert service.batches == [["A", "B"]]
+            assert wrapper.entities_sent == 2
+            assert wrapper.entities_sent_successfully == 2
+        finally:
+            await _dispose_quietly(wrapper)
+
+    @pytest.mark.asyncio
+    async def test_batch_build_failure_falls_back_to_individual_requests(
+        self, failure_events
+    ):
+        """Falha ao montar o lote: as entidades são enviadas individualmente."""
+        service = _RecordingService()
+        wrapper = await _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        try:
+            with patch.object(
+                ServiceRequestExtensions,
+                "resolve_with_collection",
+                side_effect=RuntimeError("falha ao montar o lote"),
+            ):
+                await wrapper.add(Partner(name="A"))
+                await wrapper.add(Partner(name="B"))
+                await _flush(wrapper)
+
+            assert service.batches == [["A"], ["B"]]
+            assert wrapper.entities_sent == 2
+            assert wrapper.entities_sent_successfully == 2
+            assert failure_events == []
+        finally:
+            await _dispose_quietly(wrapper)
+
+    @pytest.mark.asyncio
+    async def test_entity_build_failure_publishes_failure_event(
+        self, failure_events
+    ):
+        """Entidade que não pode ser montada gera OnDemandRequestFailureEvent."""
+        service = _RecordingService()
+        wrapper = await _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        invalid = Partner(name="B")
+        try:
+            with patch.object(
+                ServiceRequestExtensions,
+                "resolve_with_collection",
+                side_effect=RuntimeError("falha ao montar o lote"),
+            ), patch.object(
+                ServiceRequestExtensions,
+                "resolve_with_entity",
+                side_effect=_resolve_failing_for("B"),
+            ):
+                await wrapper.add(Partner(name="A"))
+                await wrapper.add(invalid)
+                await wrapper.add(Partner(name="C"))
+                await _flush(wrapper)
+
+            assert service.batches == [["A"], ["C"]]
+            assert wrapper.entities_sent == 3
+            assert wrapper.entities_sent_successfully == 2
+            assert len(failure_events) == 1
+            assert failure_events[0].entity is invalid
+            assert isinstance(failure_events[0].exception, ValueError)
+        finally:
+            await _dispose_quietly(wrapper)

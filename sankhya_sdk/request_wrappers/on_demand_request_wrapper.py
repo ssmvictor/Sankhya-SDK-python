@@ -386,19 +386,32 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         """
         Processa um lote de entidades.
         
+        Equivalente ao final de ``ProcessInternal`` do .NET
+        (OnDemandRequestWrapper.cs:222-237): ``request.Resolve(items)`` monta
+        a requisição em lote e, se o lote falhar, as entidades são reenviadas
+        individualmente.
+        
         Args:
             items: Lista de entidades a processar
         """
         if not items:
             return
         
-        # Cria requisição
-        request = ServiceRequest(service=self._service)
-        ServiceRequestExtensions.resolve_with_entities(request, items)
+        self._entities_sent += len(items)
+        
+        # Cria requisição (Resolve<T>(ICollection<T>) no .NET)
+        try:
+            request = ServiceRequest(service=self._service)
+            ServiceRequestExtensions.resolve_with_collection(request, items)
+        except Exception as e:
+            # Não descarta o lote: cada entidade é montada e enviada sozinha,
+            # e as que falharem geram OnDemandRequestFailureEvent
+            logger.error(f"Erro ao montar requisição em lote: {e}", exc_info=True)
+            self._process_items_separately(items)
+            return
         
         # Tenta processar em lote
         success, exception = self._process_request(request)
-        self._entities_sent += len(items)
         
         if success:
             self._entities_sent_successfully += len(items)
@@ -455,26 +468,41 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             items: Lista de entidades a processar individualmente
         """
         for item in items:
-            request = ServiceRequest(service=self._service)
-            ServiceRequestExtensions.resolve_with_entity(request, item)
+            # Resolve<T>(T) no .NET
+            try:
+                request = ServiceRequest(service=self._service)
+                ServiceRequestExtensions.resolve_with_entity(request, item)
+            except Exception as e:
+                logger.error(f"Erro ao montar requisição: {e}", exc_info=True)
+                self._publish_failure(item, e)
+                continue
             
             success, exception = self._process_request(request)
             
             if success:
                 self._entities_sent_successfully += 1
             elif exception:
-                # Dispara evento de falha
-                is_update = _is_update_operation(item)
-                failure_event = OnDemandRequestFailureEvent(
-                    entity=item,
-                    is_update=is_update,
-                    exception=exception,
-                )
-                EventBus.publish(failure_event)
-                logger.warning(
-                    f"Entidade falhou: {type(item).__name__}, "
-                    f"is_update={is_update}"
-                )
+                self._publish_failure(item, exception)
+
+    def _publish_failure(self, item: TEntity, exception: BaseException) -> None:
+        """
+        Dispara o OnDemandRequestFailureEvent de uma entidade que falhou.
+        
+        Args:
+            item: Entidade que falhou
+            exception: Exceção que causou a falha
+        """
+        is_update = _is_update_operation(item)
+        failure_event = OnDemandRequestFailureEvent(
+            entity=item,
+            is_update=is_update,
+            exception=exception,
+        )
+        EventBus.publish(failure_event)
+        logger.warning(
+            f"Entidade falhou: {type(item).__name__}, "
+            f"is_update={is_update}"
+        )
 
     def _invoke_service(self, request: ServiceRequest) -> None:
         """
