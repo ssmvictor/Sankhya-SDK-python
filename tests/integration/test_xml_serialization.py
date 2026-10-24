@@ -4,14 +4,12 @@ Testes de integração para serialização XML.
 Testa serialização/deserialização completa de requests/responses.
 """
 
-import pytest
-from lxml import etree
-
+from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerialization
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
-from sankhya_sdk.models.service.request_body import RequestBody
 from sankhya_sdk.models.service.entity_types import Entity, DataSet
 from sankhya_sdk.models.service.basic_types import Field, LiteralCriteria, Parameter
+from sankhya_sdk.models.transport.partner import Partner
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_response_status import ServiceResponseStatus
 from sankhya_sdk.enums.parameter_type import ParameterType
@@ -137,8 +135,20 @@ class TestComplexXmlStructures:
         assert len(resp.entities) == 3
         assert resp.response_body.crud_service_entities.total == 3
         
+        # Como no .NET (ServiceResponse.ParseDynamic, ServiceResponse.cs:245:
+        # ReadElementContentAsString), os campos das entidades dinâmicas são
+        # os textos do XML; a conversão de tipo ocorre em convert_to_type
         codes = resp.get_all_entity_fields("CODPARC")
-        assert codes == [1, 2, 3]
+        assert codes == ["1", "2", "3"]
+        
+        partners = [
+            EntityDynamicSerialization(dict(entity.fields)).convert_to_type(Partner)
+            for entity in resp.entities
+        ]
+        assert [partner.code for partner in partners] == [1, 2, 3]
+        assert [partner.name for partner in partners] == [
+            "Cliente A", "Cliente B", "Cliente C"
+        ]
 
 
 class TestRealWorldXml:
