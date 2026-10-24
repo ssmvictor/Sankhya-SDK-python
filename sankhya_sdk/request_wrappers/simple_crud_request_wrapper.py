@@ -469,7 +469,7 @@ class SimpleCRUDRequestWrapper:
         ServiceRequestExtensions.resolve_with_entity(request, entity)
         
         response = cls._invoke_service(request)
-        return cls._process_single_response(response, type(entity))
+        return cls._process_single_response(response, type(entity), request=request)
     
     @classmethod
     async def update_async(cls, entity: T) -> T:
@@ -488,7 +488,7 @@ class SimpleCRUDRequestWrapper:
         ServiceRequestExtensions.resolve_with_entity(request, entity)
         
         response = await cls._invoke_service_async(request)
-        return cls._process_single_response(response, type(entity))
+        return cls._process_single_response(response, type(entity), request=request)
     
     # =========================================================================
     # Remove Operations
@@ -553,7 +553,9 @@ class SimpleCRUDRequestWrapper:
             ServiceRequestExtensions.resolve_with_entity(request, entity)
         
         response = cls._invoke_service(request)
-        return cls._process_find_response(response, type(entity), optional=True)
+        return cls._process_find_response(
+            response, type(entity), optional=True, request=request
+        )
     
     @classmethod
     def _can_find_with_criteria_internal(
@@ -572,7 +574,9 @@ class SimpleCRUDRequestWrapper:
             ServiceRequestExtensions._apply_options_to_request(request, options)
         
         response = cls._invoke_service(request)
-        return cls._process_find_response(response, entity_type, optional=True)
+        return cls._process_find_response(
+            response, entity_type, optional=True, request=request
+        )
     
     @classmethod
     def _must_find_internal(
@@ -642,7 +646,9 @@ class SimpleCRUDRequestWrapper:
             ServiceRequestExtensions.resolve_with_entity(request, entity)
         
         response = await cls._invoke_service_async(request)
-        return cls._process_find_response(response, type(entity), optional=True)
+        return cls._process_find_response(
+            response, type(entity), optional=True, request=request
+        )
     
     @classmethod
     async def _can_find_with_criteria_internal_async(
@@ -661,7 +667,9 @@ class SimpleCRUDRequestWrapper:
             ServiceRequestExtensions._apply_options_to_request(request, options)
         
         response = await cls._invoke_service_async(request)
-        return cls._process_find_response(response, entity_type, optional=True)
+        return cls._process_find_response(
+            response, entity_type, optional=True, request=request
+        )
     
     @classmethod
     async def _must_find_internal_async(
@@ -735,14 +743,19 @@ class SimpleCRUDRequestWrapper:
         response: ServiceResponse,
         entity_type: Type[T],
         optional: bool = False,
+        request: Optional[ServiceRequest] = None,
     ) -> Optional[T]:
         """
         Processa resposta de busca retornando uma única entidade.
+        
+        Como ``CanFindInternal``/``MustFindInternal`` (.NET), as exceções
+        recebem a requisição e a resposta que as originaram.
         
         Args:
             response: Resposta do serviço
             entity_type: Tipo da entidade esperada
             optional: Se True, retorna None quando não encontrada
+            request: Requisição que originou a resposta (opcional)
             
         Returns:
             Entidade convertida ou None
@@ -757,17 +770,15 @@ class SimpleCRUDRequestWrapper:
             if optional:
                 return None
             raise ServiceRequestUnexpectedResultException(
-                message=f"Nenhuma entidade {entity_type.__name__} encontrada",
-                request=None,
+                request=request,
+                response=response,
             )
         
         if len(entities) > 1:
             raise ServiceRequestTooManyResultsException(
-                message=(
-                    f"Múltiplos resultados ({len(entities)}) para "
-                    f"{entity_type.__name__}"
-                ),
-                request=None,
+                result_length=len(entities),
+                request=request,
+                response=response,
             )
         
         return entities[0].convert_to_type(entity_type)
@@ -796,26 +807,40 @@ class SimpleCRUDRequestWrapper:
         cls,
         response: ServiceResponse,
         entity_type: Type[T],
+        request: Optional[ServiceRequest] = None,
     ) -> T:
         """
         Processa resposta esperando exatamente uma entidade.
         
+        Equivale a ``response.Entities.Single()`` em ``Update`` (.NET): a
+        resposta deve conter exatamente uma entidade.
+        
         Args:
             response: Resposta do serviço
             entity_type: Tipo da entidade esperada
+            request: Requisição que originou a resposta (opcional)
             
         Returns:
             Entidade convertida
             
         Raises:
             ServiceRequestUnexpectedResultException: Se não houver entidade
+            ServiceRequestTooManyResultsException: Se houver mais de uma
+                entidade (``Single()`` falha no .NET)
         """
         entities = cls._extract_entities_from_response(response)
         
         if len(entities) == 0:
             raise ServiceRequestUnexpectedResultException(
-                message=f"Nenhuma entidade retornada para {entity_type.__name__}",
-                request=None,
+                request=request,
+                response=response,
+            )
+        
+        if len(entities) > 1:
+            raise ServiceRequestTooManyResultsException(
+                result_length=len(entities),
+                request=request,
+                response=response,
             )
         
         return entities[0].convert_to_type(entity_type)

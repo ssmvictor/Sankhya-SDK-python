@@ -796,6 +796,117 @@ class TestParsedServiceResponse:
         assert invoker.call_args[0][0].service == ServiceName.CRUD_SERVICE_SAVE
 
 
+class TestParsedServiceResponseErrors:
+    """
+    Exceções de resultado inesperado com respostas reais.
+
+    Como no .NET (``ServiceRequestTooManyResultsException(request, response,
+    count)`` e ``ServiceRequestUnexpectedResultException(request, response)``),
+    as exceções carregam a requisição enviada e a resposta recebida.
+    """
+
+    @pytest.fixture(autouse=True)
+    def initialized(self, mock_context):
+        """Inicializa o wrapper com o contexto simulado."""
+        SimpleCRUDRequestWrapper.initialize(mock_context)
+
+    def test_try_find_too_many_results_raises(self):
+        """Mais de uma entidade em try_find lança ServiceRequestTooManyResultsException."""
+        response = _service_response(_partner_entities_xml(1, 2))
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            with pytest.raises(ServiceRequestTooManyResultsException) as exc_info:
+                SimpleCRUDRequestWrapper.try_find(Partner())
+
+        assert exc_info.value.request is invoker.call_args[0][0]
+        assert exc_info.value.response is response
+        assert "resulted in 2 entities" in str(exc_info.value)
+
+    def test_find_with_criteria_too_many_results_raises(self):
+        """Mais de uma entidade em find_with_criteria lança TooManyResults."""
+        response = _service_response(_partner_entities_xml(1, 2, 3))
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ):
+            with pytest.raises(ServiceRequestTooManyResultsException) as exc_info:
+                SimpleCRUDRequestWrapper.find_with_criteria(
+                    Partner, LiteralCriteria.equals("ATIVO", "S")
+                )
+
+        assert exc_info.value.response is response
+        assert "resulted in 3 entities" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_try_find_async_too_many_results_raises(self):
+        """Mais de uma entidade em try_find_async lança TooManyResults."""
+        response = _service_response(_partner_entities_xml(1, 2))
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=response,
+        ) as invoker:
+            with pytest.raises(ServiceRequestTooManyResultsException) as exc_info:
+                await SimpleCRUDRequestWrapper.try_find_async(Partner())
+
+        assert exc_info.value.request is invoker.call_args[0][0]
+        assert exc_info.value.response is response
+
+    def test_update_too_many_results_raises(self):
+        """update exige exatamente uma entidade (``Entities.Single()`` no .NET)."""
+        response = _service_response(
+            _partner_entities_xml(1, 2),
+            service="CRUDServiceProvider.saveRecord",
+        )
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            with pytest.raises(ServiceRequestTooManyResultsException) as exc_info:
+                SimpleCRUDRequestWrapper.update(Partner(code=1))
+
+        assert exc_info.value.request is invoker.call_args[0][0]
+        assert exc_info.value.response is response
+
+    def test_update_without_entities_raises_with_request_and_response(self):
+        """update sem entidade lança UnexpectedResult com requisição e resposta."""
+        response = _service_response(
+            "", service="CRUDServiceProvider.saveRecord"
+        )
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
+                SimpleCRUDRequestWrapper.update(Partner(code=1))
+
+        request = invoker.call_args[0][0]
+        assert exc_info.value.request is request
+        assert exc_info.value.response is response
+        assert request.service == ServiceName.CRUD_SERVICE_SAVE
+
+    @pytest.mark.asyncio
+    async def test_update_async_too_many_results_raises(self):
+        """update_async também exige exatamente uma entidade."""
+        response = _service_response(
+            _partner_entities_xml(1, 2),
+            service="CRUDServiceProvider.saveRecord",
+        )
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=response,
+        ):
+            with pytest.raises(ServiceRequestTooManyResultsException):
+                await SimpleCRUDRequestWrapper.update_async(Partner(code=1))
+
+
 # =============================================================================
 # LiteralCriteria Tests
 # =============================================================================
