@@ -85,12 +85,19 @@ class TestEntityDynamicSerialization:
         assert serializer.get_member("CODPARC") == 5
 
     def test_get_member_roundtrip_uppercase_filter(self):
-        """Verifica que get_member lê o que set_member gravou (uppercase)."""
+        """
+        Verifica que get_member lê o que set_member gravou (uppercase).
+
+        Como no DynamicSerialization (.NET), SetMember guarda a chave como
+        informada e TryGetMember faz busca exata; o filtro uppercase só é
+        aplicado na serialização.
+        """
         serializer = EntityDynamicSerialization(key_filter="uppercase")
         serializer.set_member("codparc", "123")
         
         assert serializer.get_member("codparc") == "123"
-        assert serializer.get_member("CODPARC") == "123"
+        assert serializer.get_member("CODPARC") is None
+        assert serializer.to_dict() == {"CODPARC": "123"}
 
     def test_get_member_roundtrip_lowercase_filter(self):
         """Verifica que get_member lê o que set_member gravou (lowercase)."""
@@ -98,7 +105,17 @@ class TestEntityDynamicSerialization:
         serializer.set_member("CODPARC", "123")
         
         assert serializer.get_member("CODPARC") == "123"
-        assert serializer.get_member("codparc") == "123"
+        assert serializer.get_member("codparc") is None
+        assert serializer.to_dict() == {"codparc": "123"}
+
+    def test_get_member_does_not_apply_key_filter(self):
+        """TryGetMember (.NET) não normaliza o nome procurado."""
+        serializer = EntityDynamicSerialization(
+            {"codparc": "1"}, key_filter="uppercase"
+        )
+
+        assert serializer.get_member("codparc") == "1"
+        assert serializer.get_member("CODPARC") is None
 
     def test_set_member(self):
         """Verifica set_member."""
@@ -108,18 +125,35 @@ class TestEntityDynamicSerialization:
         assert serializer.dictionary["CODPARC"] == "123"
 
     def test_set_member_uppercase_filter(self):
-        """Verifica set_member com filtro uppercase."""
+        """
+        Verifica set_member com filtro uppercase.
+
+        A chave é armazenada como informada (SetMember/GetDictionary no .NET)
+        e o filtro é aplicado apenas na serialização (to_dict).
+        """
         serializer = EntityDynamicSerialization(key_filter="uppercase")
         serializer.set_member("codparc", "123")
         
-        assert "CODPARC" in serializer.dictionary
+        assert serializer.dictionary == {"codparc": "123"}
+        assert "CODPARC" in serializer.to_dict()
 
     def test_set_member_lowercase_filter(self):
         """Verifica set_member com filtro lowercase."""
         serializer = EntityDynamicSerialization(key_filter="lowercase")
         serializer.set_member("CODPARC", "123")
         
-        assert "codparc" in serializer.dictionary
+        assert serializer.dictionary == {"CODPARC": "123"}
+        assert "codparc" in serializer.to_dict()
+
+    def test_to_dict_without_filter_keeps_keys(self):
+        """Sem filtro, a serialização mantém as chaves e não altera o original."""
+        serializer = EntityDynamicSerialization({"CodParc": "1"})
+
+        serialized = serializer.to_dict()
+        serialized["X"] = "2"
+
+        assert serialized["CodParc"] == "1"
+        assert serializer.dictionary == {"CodParc": "1"}
 
     def test_contains(self):
         """Verifica operador __contains__."""
@@ -128,12 +162,42 @@ class TestEntityDynamicSerialization:
         
         assert "CODPARC" in serializer
 
+    def test_contains_is_exact_like_get_member(self):
+        """__contains__ e get_member usam a mesma busca exata."""
+        serializer = EntityDynamicSerialization({"CODPARC": "123"})
+
+        assert "codparc" not in serializer
+        assert serializer.get_member("codparc") is None
+
     def test_getitem(self):
         """Verifica operador __getitem__."""
         data = {"CODPARC": "123"}
         serializer = EntityDynamicSerialization(data)
         
         assert serializer["CODPARC"] == "123"
+
+    def test_getitem_returns_falsy_values(self):
+        """__getitem__ não descarta valores falsy (0, "", False)."""
+        serializer = EntityDynamicSerialization(
+            {"vlrdesc": 0, "obs": "", "ativo": False}
+        )
+
+        assert serializer["vlrdesc"] == 0
+        assert serializer["obs"] == ""
+        assert serializer["ativo"] is False
+
+    def test_getitem_falsy_value_does_not_fall_through_to_uppercase(self):
+        """Valor falsy na chave exata não é trocado pelo da chave uppercase."""
+        serializer = EntityDynamicSerialization({"codparc": 0, "CODPARC": 5})
+
+        assert serializer["codparc"] == 0
+
+    def test_getitem_is_exact_like_get_member(self):
+        """__getitem__ e get_member usam a mesma busca exata."""
+        serializer = EntityDynamicSerialization({"CODPARC": "123"})
+
+        assert serializer["codparc"] is None
+        assert serializer["codparc"] == serializer.get_member("codparc")
 
     def test_setitem(self):
         """Verifica operador __setitem__."""
@@ -202,6 +266,75 @@ class TestValueConversion:
             serializer._convert_to_datetime("invalid-date")
 
 
+class TestConvertToTypeFromStrings:
+    """
+    Conversão de valores texto (como lidos do XML) para entidades tipadas.
+
+    No .NET, ParseDynamic mantém todos os valores como string e
+    ConvertToType converte cada um para o tipo da propriedade.
+    """
+
+    def test_partner_from_string_values(self):
+        """Documentos mantêm zeros à esquerda; códigos e flags S/N são convertidos."""
+        from sankhya_sdk.models.transport.partner import Partner
+
+        serializer = EntityDynamicSerialization({
+            "CODPARC": "42",
+            "NOMEPARC": "Cliente",
+            "CGC_CPF": "01234567890",
+            "CEP": "01310100",
+            "ATIVO": "S",
+            "CLIENTE": "N",
+            "CODCID": "007",
+        })
+
+        partner = serializer.convert_to_type(Partner)
+
+        assert partner.code == 42
+        assert partner.name == "Cliente"
+        assert partner.document == "01234567890"
+        assert partner.zip_code == "01310100"
+        assert partner.is_active is True
+        assert partner.is_client is False
+        assert partner.code_city == 7
+
+    def test_enum_from_internal_value(self):
+        """Enums são convertidos pelo valor interno (TIPPESSOA "F"/"J")."""
+        from sankhya_sdk.enums.fiscal_person_type import FiscalPersonType
+        from sankhya_sdk.models.transport.partner import Partner
+
+        individual = EntityDynamicSerialization(
+            {"CODPARC": "1", "TIPPESSOA": "F"}
+        ).convert_to_type(Partner)
+        corporation = EntityDynamicSerialization(
+            {"CODPARC": "2", "TIPPESSOA": "J"}
+        ).convert_to_type(Partner)
+
+        assert individual.fiscal_type is FiscalPersonType.INDIVIDUAL
+        assert corporation.fiscal_type is FiscalPersonType.CORPORATION
+
+    def test_timedelta_from_hhmmss(self):
+        """Horários no formato HHMMSS (HRMOV) viram timedelta."""
+        from datetime import timedelta
+
+        from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
+
+        header = EntityDynamicSerialization(
+            {"NUNOTA": "10", "HRMOV": "103015"}
+        ).convert_to_type(InvoiceHeader)
+
+        assert header.movement_time == timedelta(hours=10, minutes=30, seconds=15)
+
+    def test_convert_to_bool_uses_sankhya_format(self):
+        """Valores S/N e true/false, como deserialize_bool da camada de transporte."""
+        serializer = EntityDynamicSerialization()
+
+        assert serializer._convert_to_bool("S") is True
+        assert serializer._convert_to_bool("N") is False
+        assert serializer._convert_to_bool("true") is True
+        assert serializer._convert_to_bool("false") is False
+
+
 class TestChangeKeys:
     """Testes para change_keys."""
 
@@ -239,6 +372,26 @@ class TestChangeKeys:
         
         # Não deve lançar exceção
         serializer.change_keys(None)
+
+    def test_change_keys_missing_positional_keys(self):
+        """
+        Chaves já nomeadas (sem fN) não são apagadas.
+
+        No .NET, ChangeKeys acessa Dictionary["fN"] e lança exceção quando a
+        chave não existe; aqui o erro é sinalizado sem alterar o dicionário.
+        """
+        data = {"CODPARC": "123", "NOMEPARC": "Test"}
+        serializer = EntityDynamicSerialization(data)
+
+        new_keys = Metadata(fields=[
+            {"name": "CODPARC"},
+            {"name": "NOMEPARC"},
+        ])
+
+        with pytest.raises(ValueError, match="Key not found"):
+            serializer.change_keys(new_keys)
+
+        assert serializer.dictionary == {"CODPARC": "123", "NOMEPARC": "Test"}
 
 
 class TestLevelConversion:

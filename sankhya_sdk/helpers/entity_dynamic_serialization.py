@@ -67,14 +67,15 @@ class EntityDynamicSerialization:
         
         Args:
             data: Dicionário com os dados
-            key_filter: Filtro de chaves ('uppercase', 'lowercase', 'none')
+            key_filter: Filtro de chaves ('uppercase', 'lowercase', 'none'),
+                aplicado apenas na serialização (``to_dict``)
         """
         self._dictionary: Dict[str, Any] = data or {}
         self._key_filter = key_filter
 
     @property
     def dictionary(self) -> Dict[str, Any]:
-        """Retorna o dicionário interno."""
+        """Retorna o dicionário interno (chaves como foram definidas)."""
         return self._dictionary
 
     def _filter_key(self, name: str) -> str:
@@ -98,11 +99,9 @@ class EntityDynamicSerialization:
         Obtém um membro do dicionário.
         
         A busca é exata e case-sensitive, como ``TryGetMember`` do
-        ``DynamicSerialization`` (.NET): não há fallback para uppercase.
-        O nome passa pelo mesmo filtro de chaves aplicado em
-        ``set_member``, garantindo que um valor definido com
-        ``set_member(name, ...)`` seja lido com ``get_member(name)``.
-        Valores "falsy" (0, "", False) são retornados como estão.
+        ``DynamicSerialization`` (.NET, CrispyWaffle): o nome não passa pelo
+        filtro de chaves e não há fallback para uppercase. Valores "falsy"
+        (0, "", False) são retornados como estão.
         
         Args:
             name: Nome do membro
@@ -110,17 +109,36 @@ class EntityDynamicSerialization:
         Returns:
             Valor ou None se não existir
         """
-        return self._dictionary.get(self._filter_key(name))
+        return self._dictionary.get(name)
 
     def set_member(self, name: str, value: Any) -> None:
         """
         Define um membro no dicionário.
         
+        Como ``SetMember`` do ``DynamicSerialization`` (.NET), a chave é
+        armazenada como informada; o filtro de chaves (key_filter) só é
+        aplicado na serialização (``to_dict``).
+
         Args:
             name: Nome do membro
             value: Valor a definir
         """
-        self._dictionary[self._filter_key(name)] = value
+        self._dictionary[name] = value
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Retorna o dicionário serializável, com o filtro de chaves aplicado.
+
+        Equivale a ``WriteXml``/``GetObjectData`` do ``DynamicSerialization``
+        (.NET), que aplicam ``Filter(key)`` aos nomes ao serializar.
+
+        Returns:
+            Novo dicionário com as chaves filtradas
+        """
+        return {
+            self._filter_key(key): value
+            for key, value in self._dictionary.items()
+        }
 
     def convert_to_type(self, entity_type: Type[T]) -> T:
         """
@@ -400,6 +418,13 @@ class EntityDynamicSerialization:
             elif annotation is datetime:
                 return self._convert_to_datetime(str_value)
             
+            elif self._is_transport_type(annotation):
+                # Enums com valor interno (ex.: "F" -> FiscalPersonType) e
+                # horários HHMMSS: mesma conversão da camada de transporte
+                from sankhya_sdk.models.transport.base import TransportEntityBase
+
+                return TransportEntityBase._deserialize_value(str_value, annotation)
+
             else:
                 # Tenta conversão direta
                 return annotation(str_value) if callable(annotation) else str_value
@@ -407,9 +432,31 @@ class EntityDynamicSerialization:
         except (ValueError, TypeError):
             return None
 
+    @staticmethod
+    def _is_transport_type(annotation: Any) -> bool:
+        """
+        Verifica se o tipo é convertido pela camada de transporte.
+
+        Args:
+            annotation: Tipo do campo
+
+        Returns:
+            True para MetadataEnum e timedelta
+        """
+        from datetime import timedelta
+
+        from sankhya_sdk.enums._metadata import MetadataEnum
+
+        return isinstance(annotation, type) and issubclass(
+            annotation, (MetadataEnum, timedelta)
+        )
+
     def _convert_to_bool(self, value: str) -> bool:
         """
         Converte string para boolean.
+
+        Usa o mesmo conversor da camada de transporte (``deserialize_bool``
+        com formato "S|N").
         
         Args:
             value: String a converter
@@ -417,7 +464,10 @@ class EntityDynamicSerialization:
         Returns:
             Valor boolean
         """
-        return value.lower() in ("true", "1", "s", "sim", "yes", "y")
+        from sankhya_sdk.models.service.xml_serialization import deserialize_bool
+        from sankhya_sdk.models.service.constants import SankhyaConstants
+
+        return deserialize_bool(value, SankhyaConstants.BOOL_FORMAT_S_N)
 
     def _convert_to_datetime(self, value: str) -> datetime:
         """
@@ -505,7 +555,10 @@ class EntityDynamicSerialization:
             new_keys: Metadados com novos nomes
             
         Raises:
-            ValueError: Se o número de chaves não corresponder
+            ValueError: Se o número de chaves não corresponder ou se alguma
+                chave 'fN' esperada não existir (no .NET, ``ChangeKeys``
+                lança ``KeyNotFoundException``); nesse caso o dicionário
+                não é alterado
         """
         if new_keys is None:
             return
@@ -515,13 +568,24 @@ class EntityDynamicSerialization:
                 f"Key count mismatch: {len(new_keys.fields)} vs {len(self._dictionary)}"
             )
         
+        missing_keys = [
+            f"f{index}"
+            for index in range(len(new_keys.fields))
+            if f"f{index}" not in self._dictionary
+        ]
+        if missing_keys:
+            # Antes as chaves ausentes eram ignoradas e o dicionário era
+            # substituído por um dicionário vazio/parcial (perda de dados).
+            raise ValueError(
+                f"Key not found in dictionary: {', '.join(missing_keys)}"
+            )
+
         new_dict = {}
         
         for index, field in enumerate(new_keys.fields):
             old_key = f"f{index}"
-            if old_key in self._dictionary:
-                value = self._dictionary[old_key]
-                new_dict[field.get("name", old_key)] = value
+            value = self._dictionary[old_key]
+            new_dict[field.get("name", old_key)] = value
         
         self._dictionary = new_dict
 
@@ -554,12 +618,17 @@ class EntityDynamicSerialization:
         return mapping.get(value, ReferenceLevel.NONE)
 
     def __contains__(self, key: str) -> bool:
-        """Verifica se contém a chave."""
-        return key in self._dictionary or key.upper() in self._dictionary
+        """Verifica se contém a chave (busca exata, como ``get_member``)."""
+        return key in self._dictionary
 
     def __getitem__(self, key: str) -> Any:
-        """Obtém item por chave."""
-        return self._dictionary.get(key) or self._dictionary.get(key.upper())
+        """
+        Obtém item por chave (busca exata, como ``get_member``).
+
+        Valores "falsy" (0, "", False) são retornados como estão; chaves
+        inexistentes retornam None, como ``TryGetMember`` (.NET).
+        """
+        return self.get_member(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
         """Define item por chave."""
