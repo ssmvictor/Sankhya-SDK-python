@@ -825,7 +825,8 @@ class KnowServicesRequestWrapper:
                 if hasattr(rb.primary_key, "nunota"):
                     new_nunota = rb.primary_key.nunota or 0
                 elif hasattr(rb.primary_key, "values"):
-                    new_nunota = rb.primary_key.values.get("NUNOTA", 0)
+                    # Key.values guarda o texto do XML (<pk><NUNOTA>...</NUNOTA></pk>)
+                    new_nunota = int(rb.primary_key.values.get("NUNOTA") or 0)
         
         logger.info(f"Nota duplicada: novo NUNOTA={new_nunota}")
         return new_nunota

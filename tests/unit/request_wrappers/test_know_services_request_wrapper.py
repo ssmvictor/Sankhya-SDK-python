@@ -28,9 +28,11 @@ from sankhya_sdk.exceptions import (
 )
 from sankhya_sdk.models.service.event_types import (
     ClientEvent,
+    ClientEvents,
     SystemWarningRecipient,
 )
-from sankhya_sdk.models.service.invoice_types import Invoice, InvoiceItem
+from sankhya_sdk.models.service.invoice_types import Invoice, InvoiceItem, Invoices
+from sankhya_sdk.models.service.response_body import ResponseBody
 from sankhya_sdk.models.service.service_response import ServiceResponse
 from sankhya_sdk.models.service.user_types import SessionInfo
 from sankhya_sdk.request_wrappers.know_services_request_wrapper import (
@@ -373,10 +375,13 @@ class TestBilling:
 
     def test_bill(self, mock_context, mock_response):
         """Test bill returns NUNOTA and events."""
-        mock_response.response_body.invoice = MagicMock()
-        mock_response.response_body.invoice.unique_number = 12345
-        mock_response.response_body.client_events = MagicMock()
-        mock_response.response_body.client_events.items = [ClientEvent(type="test")]
+        # Real ResponseBody: the billed invoice comes in <notas><nota>, i.e.
+        # response_body.invoices.items[0] (.NET: ResponseBody.Invoices.Invoice)
+        response_events = [ClientEvent(type="test")]
+        mock_response.response_body = ResponseBody(
+            invoices=Invoices(items=[Invoice(unique_number=12345)]),
+            client_events=ClientEvents(items=response_events),
+        )
         
         with patch.object(
             KnowServicesRequestWrapper,
@@ -393,6 +398,7 @@ class TestBilling:
             
             assert nunota == 12345
             assert events is not None
+            assert events == response_events
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_BILL
 
@@ -436,11 +442,45 @@ class TestBilling:
             # Should not raise
             KnowServicesRequestWrapper.confirm_invoice(12345)
 
-    def test_duplicate_invoice(self, mock_context, mock_response):
+    def test_duplicate_invoice(self, mock_context):
         """Test duplicate_invoice returns new NUNOTA."""
-        mock_pk = MagicMock()
-        mock_pk.nunota = 54321
-        mock_response.response_body.primary_key = mock_pk
+        # Real primary-key response: <pk><NUNOTA>...</NUNOTA></pk> is
+        # deserialized as Key(values={"NUNOTA": "54321"}) (XML text).
+        response = ServiceResponse.from_xml_string(
+            '<serviceResponse serviceName="CACSP.duplicarNota" status="1">'
+            "<responseBody><pk><NUNOTA>54321</NUNOTA></pk></responseBody>"
+            "</serviceResponse>"
+        )
+
+        with patch.object(
+            KnowServicesRequestWrapper,
+            "_invoke_service",
+            return_value=response,
+        ):
+            KnowServicesRequestWrapper.initialize(mock_context)
+
+            new_nunota = KnowServicesRequestWrapper.duplicate_invoice(
+                single_number=12345,
+                code_operation_type=2,
+            )
+
+            assert new_nunota == 54321
+            assert isinstance(new_nunota, int)
+            request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
+            assert request.service == ServiceName.INVOICE_DUPLICATE
+
+    def test_duplicate_invoice_from_invoices_response(self, mock_context, mock_response):
+        """Test duplicate_invoice reads destiny NUNOTA from invoices (.NET path)."""
+        # .NET: response.ResponseBody.Invoices.Invoice.SingleNumberDuplicationDestiny
+        mock_response.response_body = ResponseBody(
+            invoices=Invoices(
+                items=[
+                    Invoice(
+                        extra_data={"singleNumberDuplicationDestiny": "54321"}
+                    )
+                ]
+            )
+        )
         
         with patch.object(
             KnowServicesRequestWrapper,
@@ -455,8 +495,6 @@ class TestBilling:
             )
             
             assert new_nunota == 54321
-            request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
-            assert request.service == ServiceName.INVOICE_DUPLICATE
 
 
 # =============================================================================
