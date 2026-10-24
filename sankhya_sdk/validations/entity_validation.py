@@ -137,12 +137,17 @@ class EntityValidation:
     """
 
     PROPERTY_FOREIGN_KEY_RESTRICTION_PATTERN: Pattern[str] = re.compile(
-        r"conflito com a restrição FOREIGN KEY \"(?P<constraintName>.+?)\"\.?\s*"
-        r"O conflito ocorreu no banco de dados \"(?P<database>.+?)\",\s*"
+        r"conflit(?:ou|o) com a restrição (?:do )?FOREIGN KEY \"(?P<constraintName>.+?)\"\.?\s*"
+        r"O conflito ocorreu no ban[cd]o de dados \"(?P<database>.+?)\",\s*"
         r"tabela \"(?P<table>.+?)\"(?:,\s*column '(?P<column>.+?)')?",
         _FLAGS
     )
     """Matches foreign key constraint violation errors.
+
+    Accepts the SQL Server message ("A instrução INSERT conflitou com a
+    restrição do FOREIGN KEY ...") matched by the .NET pattern, including its
+    "bando de dados" spelling, as well as the "conflito com a restrição
+    FOREIGN KEY" variant.
 
     Named groups:
         - constraintName: The constraint name

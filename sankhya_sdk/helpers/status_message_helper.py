@@ -10,7 +10,6 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Helpers/StatusMessageHelper.cs
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Callable, Dict, Optional, Type
 
 from sankhya_sdk.exceptions import (
@@ -41,6 +40,7 @@ from sankhya_sdk.exceptions import (
     ServiceRequestUnbalancedDelimiterException,
     ServiceRequestUnexpectedResultException,
 )
+from sankhya_sdk.validations.entity_validation import EntityValidation
 
 if TYPE_CHECKING:
     from sankhya_sdk.enums.service_name import ServiceName
@@ -55,73 +55,44 @@ ExceptionFactory = Callable[
 ]
 
 
-# Padrões regex para validação de entidades
-PROPERTY_VALUE_ERROR_PATTERN = re.compile(
-    r"O valor do campo '(?P<propertyName>\w+)' é inválido",
-    re.IGNORECASE
+# Padrões regex para validação de entidades.
+# Assim como no .NET (StatusMessageHelper usa Validations/EntityValidation.cs),
+# os padrões são os de EntityValidation, que reconhecem as mensagens reais
+# retornadas pelo servidor Sankhya.
+PROPERTY_VALUE_ERROR_PATTERN = EntityValidation.PROPERTY_VALUE_ERROR_PATTERN
+
+PROPERTY_NAME_ERROR_PATTERN = EntityValidation.PROPERTY_NAME_ERROR_PATTERN
+
+PROPERTY_NAME_INVALID_ERROR_PATTERN = EntityValidation.PROPERTY_NAME_INVALID_ERROR_PATTERN
+
+PROPERTY_NAME_ASSOCIATION_ERROR_PATTERN = (
+    EntityValidation.PROPERTY_NAME_ASSOCIATION_ERROR_PATTERN
 )
 
-PROPERTY_NAME_ERROR_PATTERN = re.compile(
-    r"O campo '(?P<propertyName>\w+)' não existe",
-    re.IGNORECASE
+PROPERTY_NOT_FOUND_PATTERN = EntityValidation.PROPERTY_NOT_FOUND_PATTERN
+
+MISSING_RELATION_PATTERN = EntityValidation.MISSING_RELATION_PATTERN
+
+PROPERTY_FOREIGN_KEY_RESTRICTION_PATTERN = (
+    EntityValidation.PROPERTY_FOREIGN_KEY_RESTRICTION_PATTERN
 )
 
-PROPERTY_NAME_INVALID_ERROR_PATTERN = re.compile(
-    r"Campo inválido: (?P<propertyName>\w+)",
-    re.IGNORECASE
+DUPLICATED_DOCUMENT_PATTERN = EntityValidation.DUPLICATED_DOCUMENT_PATTERN
+
+BUSINESS_RULE_RESTRICTION_PATTERN = EntityValidation.BUSINESS_RULE_RESTRICTION_PATTERN
+
+FULL_TRANSACTION_LOGS_PATTERN = EntityValidation.FULL_TRANSACTION_LOGS_PATTERN
+
+MISSING_ATTRIBUTE_PATTERN = EntityValidation.MISSING_ATTRIBUTE_PATTERN
+
+PROPERTY_WIDTH_ERROR_PATTERN = EntityValidation.PROPERTY_WIDTH_ERROR_PATTERN
+
+REFERENCE_FIELDS_FIRST_LEVEL_PATTERN = (
+    EntityValidation.REFERENCE_FIELDS_FIRST_LEVEL_PATTERN
 )
 
-PROPERTY_NAME_ASSOCIATION_ERROR_PATTERN = re.compile(
-    r"O campo '(?P<propertyName>\w+)' não pertence à entidade '(?P<entity>\w+)'",
-    re.IGNORECASE
-)
-
-PROPERTY_NOT_FOUND_PATTERN = re.compile(
-    r"Campo '(?P<propertyName>\w+)' não encontrado na entidade '(?P<entity>\w+)'",
-    re.IGNORECASE
-)
-
-MISSING_RELATION_PATTERN = re.compile(
-    r"Relacionamento '(?P<missingRelation>\w+)' não encontrado para a entidade '(?P<entity>\w+)'",
-    re.IGNORECASE
-)
-
-PROPERTY_FOREIGN_KEY_RESTRICTION_PATTERN = re.compile(
-    r"violação.*chave estrangeira.*tabela '(?P<table>\w+)'.*coluna '(?P<column>\w+)'",
-    re.IGNORECASE
-)
-
-DUPLICATED_DOCUMENT_PATTERN = re.compile(
-    r"documento duplicado.*'(?P<name>\w+)'",
-    re.IGNORECASE
-)
-
-BUSINESS_RULE_RESTRICTION_PATTERN = re.compile(
-    r"Regra de negócio '(?P<ruleName>\w+)'.*(?P<errorMessage>.+)",
-    re.IGNORECASE
-)
-
-FULL_TRANSACTION_LOGS_PATTERN = re.compile(
-    r"log de transações.*banco de dados '(?P<database>\w+)'",
-    re.IGNORECASE
-)
-
-MISSING_ATTRIBUTE_PATTERN = re.compile(
-    r"Atributo '(?P<attributeName>\w+)' é obrigatório",
-    re.IGNORECASE
-)
-
-PROPERTY_WIDTH_ERROR_PATTERN = re.compile(
-    r"O campo '(?P<propertyName>\w+)' excede o tamanho máximo de (?P<widthAllowed>\d+).*atual: (?P<currentWidth>\d+)",
-    re.IGNORECASE
-)
-
-REFERENCE_FIELDS_FIRST_LEVEL_PATTERN = re.compile(
-    r"^(?P<entity>\w+)_(?P<field>\w+)$"
-)
-
-REFERENCE_FIELDS_SECOND_LEVEL_PATTERN = re.compile(
-    r"^(?P<parentEntity>\w+)_(?P<entity>\w+)_(?P<field>\w+)$"
+REFERENCE_FIELDS_SECOND_LEVEL_PATTERN = (
+    EntityValidation.REFERENCE_FIELDS_SECOND_LEVEL_PATTERN
 )
 
 
@@ -299,8 +270,8 @@ class StatusMessageHelper:
         if match:
             raise ServiceRequestPropertyNameException(
                 property_name=match.group("propertyName"),
-                entity=match.group("entity"),
                 request=request,
+                entity_name=match.group("entity"),
             )
 
         # Property not found
@@ -308,55 +279,55 @@ class StatusMessageHelper:
         if match:
             raise ServiceRequestPropertyNameException(
                 property_name=match.group("propertyName"),
-                entity=match.group("entity"),
                 request=request,
+                entity_name=match.group("entity"),
             )
 
         # Missing relation
         match = MISSING_RELATION_PATTERN.search(status_message)
         if match:
             raise ServiceRequestInvalidRelationException(
-                missing_relation=match.group("missingRelation"),
-                entity=match.group("entity"),
-                request=request,
+                match.group("missingRelation"),
+                match.group("entity"),
+                request,
             )
 
         # Foreign key restriction
         match = PROPERTY_FOREIGN_KEY_RESTRICTION_PATTERN.search(status_message)
         if match:
             raise ServiceRequestForeignKeyException(
-                table=match.group("table"),
-                column=match.group("column"),
-                request=request,
-                response=response,
+                match.group("table"),
+                match.group("column") or "",
+                request,
+                response,
             )
 
         # Duplicated document
         match = DUPLICATED_DOCUMENT_PATTERN.search(status_message)
         if match:
             raise ServiceRequestDuplicatedDocumentException(
-                name=match.group("name"),
-                request=request,
-                response=response,
+                match.group("name"),
+                request,
+                response,
             )
 
         # Business rule restriction
         match = BUSINESS_RULE_RESTRICTION_PATTERN.search(status_message)
         if match:
             raise ServiceRequestBusinessRuleRestrictionException(
-                rule_name=match.group("ruleName"),
-                error_message=match.group("errorMessage"),
-                request=request,
-                response=response,
+                match.group("ruleName"),
+                match.group("errorMessage"),
+                request,
+                response,
             )
 
         # Full transaction logs
         match = FULL_TRANSACTION_LOGS_PATTERN.search(status_message)
         if match:
             raise ServiceRequestFullTransactionLogsException(
-                database=match.group("database"),
-                request=request,
-                response=response,
+                match.group("database"),
+                request,
+                response,
             )
 
         # Missing attribute

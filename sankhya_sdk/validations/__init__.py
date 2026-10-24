@@ -17,7 +17,8 @@ Exceptions:
     MissingSerializeMethodError: Entity lacks serialization method.
 """
 
-from .entity_validator import EntityValidator
+from typing import Any
+
 from .entity_validation import EntityValidation
 from .exceptions import (
     EntityValidationError,
@@ -28,6 +29,22 @@ from .exceptions import (
     InvalidPropertyAttributeError,
     MissingSerializeMethodError,
 )
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily imports EntityValidator.
+
+    EntityValidator depends on ``sankhya_sdk.attributes`` and the transport
+    models, while EntityValidation (used by the StatusMessageHelper while the
+    SDK is being imported) has no dependencies. Importing EntityValidator on
+    demand keeps ``sankhya_sdk.validations.entity_validation`` importable
+    without triggering the attributes/value_objects import cycle.
+    """
+    if name == "EntityValidator":
+        from .entity_validator import EntityValidator
+
+        return EntityValidator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "EntityValidator",

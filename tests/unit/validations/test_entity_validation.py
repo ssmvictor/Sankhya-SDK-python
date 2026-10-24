@@ -260,6 +260,29 @@ class TestPropertyForeignKeyRestrictionPattern:
         assert match.group("constraintName") == "FK_PRODUTO_GRUPO"
         assert match.group("column") is None
 
+    @pytest.mark.parametrize(
+        "database_wording",
+        [
+            # Grafia usada pelo padrão do .NET (EntityValidation.cs:86-90)
+            "bando de dados",
+            # Grafia da mensagem 547 do SQL Server em pt-BR
+            "banco de dados",
+        ],
+    )
+    def test_matches_sql_server_foreign_key_message(self, database_wording: str) -> None:
+        """Pattern matches the 'conflitou com a restrição do FOREIGN KEY' message."""
+        text = (
+            'A instrução INSERT conflitou com a restrição do FOREIGN KEY "FK_TGFPAR_TSICID". '
+            f'O conflito ocorreu no {database_wording} "SANKHYA", '
+            "tabela \"dbo.TSICID\", column 'CODCID'."
+        )
+        match = EntityValidation.match_foreign_key_restriction(text)
+        assert match is not None
+        assert match.group("constraintName") == "FK_TGFPAR_TSICID"
+        assert match.group("database") == "SANKHYA"
+        assert match.group("table") == "dbo.TSICID"
+        assert match.group("column") == "CODCID"
+
 
 class TestDuplicatedDocumentPattern:
     """Tests for DUPLICATED_DOCUMENT_PATTERN."""
@@ -393,3 +416,21 @@ class TestPatternCaseSensitivity:
         text = "cnpj/cpf já existente para o parceiro: 'Teste'"
         match = EntityValidation.match_duplicated_document(text)
         assert match is not None
+
+
+class TestValidationsPackage:
+    """Tests for the sankhya_sdk.validations package exports."""
+
+    def test_entity_validator_is_exported_lazily(self) -> None:
+        """EntityValidator stays available from the package (imported on demand)."""
+        import sankhya_sdk.validations as validations
+        from sankhya_sdk.validations.entity_validator import EntityValidator
+
+        assert validations.EntityValidator is EntityValidator
+        assert "EntityValidator" in validations.__all__
+
+    def test_unknown_attribute_raises_attribute_error(self) -> None:
+        import sankhya_sdk.validations as validations
+
+        with pytest.raises(AttributeError):
+            getattr(validations, "DoesNotExist")
