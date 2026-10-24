@@ -6,16 +6,20 @@ Testa fluxos completos de criação, busca, atualização e deleção.
 
 Criação usa ``SimpleCRUDRequestWrapper.update``, que invoca
 ``CRUDServiceProvider.saveRecord`` (Create/Update), como no SDK .NET.
+
+O SimpleCRUDRequestWrapper usa uma sessão dedicada (novo login), como
+``Context.AcquireNewSession(SimpleCrud)`` no .NET; o ``FakeSankhyaServer``
+responde login/logout/DWR e entrega a fila de respostas, em ordem, apenas
+às chamadas de serviço, registrando o XML enviado em cada uma.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from sankhya_sdk.core.context import SankhyaContext
-from sankhya_sdk.core.wrapper import SankhyaWrapper
+from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import SankhyaException
 from sankhya_sdk.models.transport.partner import Partner
 from sankhya_sdk.models.transport.product import Product
@@ -25,13 +29,36 @@ from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
 )
 
 from .conftest import (
-    create_authentication_responses,
+    FakeSankhyaServer,
     create_error_response,
-    create_login_response,
-    create_logout_response,
-    create_mock_response,
     create_success_response,
+    find_criteria,
+    http_response,
+    request_xml,
+    save_data_row,
+    simple_crud_session,
 )
+
+
+FIND = ServiceName.CRUD_SERVICE_FIND.internal_value
+SAVE = ServiceName.CRUD_SERVICE_SAVE.internal_value
+REMOVE = ServiceName.CRUD_SERVICE_REMOVE.internal_value
+
+DELETE_OK = b'<?xml version="1.0"?><serviceResponse status="1"></serviceResponse>'
+
+
+def _install(mock_session_class, server: FakeSankhyaServer) -> None:
+    """Instala o servidor simulado no transporte HTTP do SDK."""
+    mock_session_class.return_value.request.side_effect = server
+
+
+def _root_entity(body: str) -> str:
+    """Entidade raiz da requisição (dataSet ou entity de removeRecord)."""
+    request_body = request_xml(body).find("requestBody")
+    element = request_body.find("dataSet")
+    if element is None:
+        element = request_body.find("entity")
+    return element.get("rootEntity")
 
 
 @pytest.mark.integration
@@ -41,67 +68,31 @@ class TestPartnerWorkflow:
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_complete_partner_workflow(self, mock_session_class):
         """Criar, buscar, atualizar, deletar Partner."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
-        
-        auth_resps = create_authentication_responses()
-        
-        # 1. Criar partner
-        create_resp = create_mock_response(
-            200, create_success_response([
+        server = FakeSankhyaServer([
+            # 1. Criar partner
+            http_response(200, create_success_response([
                 {"CODPARC": "1001", "NOMEPARC": "Novo Parceiro", "EMAIL": "email@test.com"}
-            ])
-        )
-        
-        # 2. Buscar partner criado
-        find_resp = create_mock_response(
-            200, create_success_response([
+            ])),
+            # 2. Buscar partner criado
+            http_response(200, create_success_response([
                 {"CODPARC": "1001", "NOMEPARC": "Novo Parceiro", "EMAIL": "email@test.com"}
-            ])
-        )
-        
-        # 3. Atualizar partner
-        update_resp = create_mock_response(
-            200, create_success_response([
+            ])),
+            # 3. Atualizar partner
+            http_response(200, create_success_response([
                 {"CODPARC": "1001", "NOMEPARC": "Parceiro Atualizado", "EMAIL": "novo@test.com"}
-            ])
-        )
-        
-        # 4. Buscar partner atualizado
-        find_updated_resp = create_mock_response(
-            200, create_success_response([
+            ])),
+            # 4. Buscar partner atualizado
+            http_response(200, create_success_response([
                 {"CODPARC": "1001", "NOMEPARC": "Parceiro Atualizado", "EMAIL": "novo@test.com"}
-            ])
-        )
+            ])),
+            # 5. Deletar partner
+            http_response(200, DELETE_OK),
+            # 6. Verificar deleção (não deve encontrar)
+            http_response(200, create_success_response([])),
+        ])
+        _install(mock_session_class, server)
         
-        # 5. Deletar partner
-        delete_resp = create_mock_response(
-            200, b'<?xml version="1.0"?><serviceResponse status="1"></serviceResponse>'
-        )
-        
-        # 6. Verificar deleção (não deve encontrar)
-        find_deleted_resp = create_mock_response(200, create_success_response([]))
-        
-        logout_resp = create_mock_response(200, create_logout_response())
-        
-        mock_session.request.side_effect = [
-            *auth_resps,
-            create_resp,
-            find_resp,
-            update_resp,
-            find_updated_resp,
-            delete_resp,
-            find_deleted_resp,
-            logout_resp,
-        ]
-        
-        wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-        wrapper.authenticate("user", "pass")
-        context = SankhyaContext(wrapper)
-        
-        SimpleCRUDRequestWrapper.initialize(context)
-        
-        try:
+        with simple_crud_session():
             # 1. Criar
             new_partner = Partner(name="Novo Parceiro", email_address="email@test.com")
             created = SimpleCRUDRequestWrapper.update(new_partner)
@@ -132,10 +123,21 @@ class TestPartnerWorkflow:
             # 6. Verificar deleção
             deleted = SimpleCRUDRequestWrapper.try_find(Partner(code=1001))
             assert deleted is None
-            
-        finally:
-            SimpleCRUDRequestWrapper.dispose()
-            context.dispose()
+        
+        # Sequência de serviços enviada ao servidor
+        assert server.calls == [SAVE, FIND, SAVE, FIND, REMOVE, FIND]
+        assert all(_root_entity(body) == "Parceiro" for _, body in server.requests)
+        
+        saves = [save_data_row(body) for service, body in server.requests if service == SAVE]
+        assert saves[0] == ({}, {"NOMEPARC": "Novo Parceiro", "EMAIL": "email@test.com"})
+        # Atualização: a chave vai em key e os campos alterados em localFields
+        keys, local_fields = saves[1]
+        assert keys == {"CODPARC": "1001"}
+        assert local_fields["NOMEPARC"] == "Parceiro Atualizado"
+        assert local_fields["EMAIL"] == "novo@test.com"
+        
+        finds = [find_criteria(body) for service, body in server.requests if service == FIND]
+        assert finds == ["CODPARC = 1001"] * 3
 
 
 @pytest.mark.integration
@@ -145,55 +147,25 @@ class TestProductWorkflow:
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_complete_product_workflow(self, mock_session_class):
         """Criar, buscar, atualizar, deletar Product."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
-        
-        auth_resps = create_authentication_responses()
-        
-        # 1. Criar produto
-        create_resp = create_mock_response(
-            200, create_success_response([
+        server = FakeSankhyaServer([
+            # 1. Criar produto
+            http_response(200, create_success_response([
                 {"CODPROD": "500", "DESCRPROD": "Produto Teste", "CODVOL": "UN"}
-            ])
-        )
-        
-        # 2. Buscar produto
-        find_resp = create_mock_response(
-            200, create_success_response([
+            ])),
+            # 2. Buscar produto
+            http_response(200, create_success_response([
                 {"CODPROD": "500", "DESCRPROD": "Produto Teste", "CODVOL": "UN"}
-            ])
-        )
-        
-        # 3. Atualizar produto
-        update_resp = create_mock_response(
-            200, create_success_response([
+            ])),
+            # 3. Atualizar produto
+            http_response(200, create_success_response([
                 {"CODPROD": "500", "DESCRPROD": "Produto Atualizado", "CODVOL": "KG"}
-            ])
-        )
+            ])),
+            # 4. Deletar produto
+            http_response(200, DELETE_OK),
+        ])
+        _install(mock_session_class, server)
         
-        # 4. Deletar produto
-        delete_resp = create_mock_response(
-            200, b'<?xml version="1.0"?><serviceResponse status="1"></serviceResponse>'
-        )
-        
-        logout_resp = create_mock_response(200, create_logout_response())
-        
-        mock_session.request.side_effect = [
-            *auth_resps,
-            create_resp,
-            find_resp,
-            update_resp,
-            delete_resp,
-            logout_resp,
-        ]
-        
-        wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-        wrapper.authenticate("user", "pass")
-        context = SankhyaContext(wrapper)
-        
-        SimpleCRUDRequestWrapper.initialize(context)
-        
-        try:
+        with simple_crud_session():
             # 1. Criar
             new_product = Product(name="Produto Teste", code_volume="UN")
             created = SimpleCRUDRequestWrapper.update(new_product)
@@ -211,10 +183,13 @@ class TestProductWorkflow:
             
             # 4. Deletar
             SimpleCRUDRequestWrapper.remove(Product(code=500))
-            
-        finally:
-            SimpleCRUDRequestWrapper.dispose()
-            context.dispose()
+        
+        assert server.calls == [SAVE, FIND, SAVE, REMOVE]
+        assert all(_root_entity(body) == "Produto" for _, body in server.requests)
+        keys, local_fields = save_data_row(server.requests[2][1])
+        assert keys == {"CODPROD": "500"}
+        assert local_fields["DESCRPROD"] == "Produto Atualizado"
+        assert local_fields["CODVOL"] == "KG"
 
 
 @pytest.mark.integration
@@ -224,89 +199,58 @@ class TestBulkImport:
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_bulk_partner_import(self, mock_session_class):
         """Importar múltiplos parceiros em lote."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
-        
-        auth_resps = create_authentication_responses()
-        
         # Respostas para 10 criações
-        create_resps = [
-            create_mock_response(
-                200, create_success_response([
-                    {"CODPARC": str(i), "NOMEPARC": f"Parceiro Importado {i}"}
-                ])
-            )
+        server = FakeSankhyaServer([
+            http_response(200, create_success_response([
+                {"CODPARC": str(i), "NOMEPARC": f"Parceiro Importado {i}"}
+            ]))
             for i in range(1, 11)
-        ]
+        ])
+        _install(mock_session_class, server)
         
-        logout_resp = create_mock_response(200, create_logout_response())
-        
-        mock_session.request.side_effect = auth_resps + create_resps + [logout_resp]
-        
-        wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-        wrapper.authenticate("user", "pass")
-        context = SankhyaContext(wrapper)
-        
-        SimpleCRUDRequestWrapper.initialize(context)
-        
-        try:
+        with simple_crud_session():
             imported = []
             for i in range(1, 11):
                 partner = Partner(name=f"Parceiro Importado {i}")
                 result = SimpleCRUDRequestWrapper.update(partner)
                 imported.append(result)
-            
-            assert len(imported) == 10
-            for i, p in enumerate(imported, 1):
-                assert p.code == i
-                assert f"Parceiro Importado {i}" in p.name
-                
-        finally:
-            SimpleCRUDRequestWrapper.dispose()
-            context.dispose()
+        
+        assert len(imported) == 10
+        for i, p in enumerate(imported, 1):
+            assert p.code == i
+            assert f"Parceiro Importado {i}" in p.name
+        
+        assert [save_data_row(body)[1] for body in server.bodies(ServiceName.CRUD_SERVICE_SAVE)] == [
+            {"NOMEPARC": f"Parceiro Importado {i}"} for i in range(1, 11)
+        ]
 
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_bulk_product_update(self, mock_session_class):
         """Atualizar múltiplos produtos."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
-        
-        auth_resps = create_authentication_responses()
-        
         # Respostas para 5 atualizações
-        update_resps = [
-            create_mock_response(
-                200, create_success_response([
-                    {"CODPROD": str(i), "DESCRPROD": f"Produto Atualizado {i}", "CODVOL": "UN"}
-                ])
-            )
+        server = FakeSankhyaServer([
+            http_response(200, create_success_response([
+                {"CODPROD": str(i), "DESCRPROD": f"Produto Atualizado {i}", "CODVOL": "UN"}
+            ]))
             for i in range(1, 6)
-        ]
+        ])
+        _install(mock_session_class, server)
         
-        logout_resp = create_mock_response(200, create_logout_response())
-        
-        mock_session.request.side_effect = auth_resps + update_resps + [logout_resp]
-        
-        wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-        wrapper.authenticate("user", "pass")
-        context = SankhyaContext(wrapper)
-        
-        SimpleCRUDRequestWrapper.initialize(context)
-        
-        try:
+        with simple_crud_session():
             updated = []
             for i in range(1, 6):
                 product = Product(code=i, name=f"Produto Atualizado {i}")
                 result = SimpleCRUDRequestWrapper.update(product)
                 updated.append(result)
-            
-            assert len(updated) == 5
-            for i, p in enumerate(updated, 1):
-                assert "Atualizado" in p.name
-                
-        finally:
-            SimpleCRUDRequestWrapper.dispose()
-            context.dispose()
+        
+        assert len(updated) == 5
+        for i, p in enumerate(updated, 1):
+            assert "Atualizado" in p.name
+        
+        assert [save_data_row(body) for body in server.bodies(ServiceName.CRUD_SERVICE_SAVE)] == [
+            ({"CODPROD": str(i)}, {"DESCRPROD": f"Produto Atualizado {i}"})
+            for i in range(1, 6)
+        ]
 
 
 @pytest.mark.integration
@@ -316,41 +260,26 @@ class TestComplexQueries:
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_complex_query_multiple_entities(self, mock_session_class):
         """Query que retorna múltiplas entidades relacionadas."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
-        
-        auth_resps = create_authentication_responses()
-        
         # Buscar parceiros com cidade específica
-        find_resp = create_mock_response(
-            200, create_success_response([
+        server = FakeSankhyaServer([
+            http_response(200, create_success_response([
                 {"CODPARC": "1", "NOMEPARC": "Parceiro 1", "CODCID": "100"},
                 {"CODPARC": "2", "NOMEPARC": "Parceiro 2", "CODCID": "100"},
                 {"CODPARC": "3", "NOMEPARC": "Parceiro 3", "CODCID": "100"},
-            ], total_records=3)
-        )
+            ], total_records=3)),
+        ])
+        _install(mock_session_class, server)
         
-        logout_resp = create_mock_response(200, create_logout_response())
-        
-        mock_session.request.side_effect = [*auth_resps, find_resp, logout_resp]
-        
-        wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-        wrapper.authenticate("user", "pass")
-        context = SankhyaContext(wrapper)
-        
-        SimpleCRUDRequestWrapper.initialize(context)
-        
-        try:
+        with simple_crud_session():
             # Critério CODCID = 100 a partir dos campos preenchidos da entidade
             results = SimpleCRUDRequestWrapper.find_all(Partner(code_city=100))
-            
-            assert len(results) == 3
-            for p in results:
-                assert p.code_city == 100
-                
-        finally:
-            SimpleCRUDRequestWrapper.dispose()
-            context.dispose()
+        
+        assert len(results) == 3
+        for p in results:
+            assert p.code_city == 100
+        
+        (body,) = server.bodies(ServiceName.CRUD_SERVICE_FIND)
+        assert find_criteria(body) == "CODCID = 100"
 
 
 @pytest.mark.integration
@@ -360,47 +289,29 @@ class TestTransactionRollback:
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_transaction_rollback_on_error(self, mock_session_class):
         """Testa rollback de transação em erro."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
-        
-        auth_resps = create_authentication_responses()
-        
-        # Primeira criação OK
-        create1_resp = create_mock_response(
-            200, create_success_response([
+        server = FakeSankhyaServer([
+            # Primeira criação OK
+            http_response(200, create_success_response([
                 {"CODPARC": "1", "NOMEPARC": "Parceiro 1"}
-            ])
-        )
+            ])),
+            # Segunda criação falha
+            http_response(200, create_error_response("DB.ERROR", "Erro de banco")),
+        ])
+        _install(mock_session_class, server)
         
-        # Segunda criação falha
-        create2_error = create_mock_response(
-            200, create_error_response("DB.ERROR", "Erro de banco")
-        )
-        
-        logout_resp = create_mock_response(200, create_logout_response())
-        
-        mock_session.request.side_effect = [
-            *auth_resps, create1_resp, create2_error, logout_resp
-        ]
-        
-        wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-        wrapper.authenticate("user", "pass")
-        context = SankhyaContext(wrapper)
-        
-        SimpleCRUDRequestWrapper.initialize(context)
-        
-        try:
+        with simple_crud_session():
             # Primeira criação deve funcionar
             p1 = SimpleCRUDRequestWrapper.update(Partner(name="Parceiro 1"))
             assert p1.code == 1
             
             # Segunda criação deve falhar
-            with pytest.raises(SankhyaException):
+            with pytest.raises(SankhyaException) as exc_info:
                 SimpleCRUDRequestWrapper.update(Partner(name="Parceiro 2"))
-                
-        finally:
-            SimpleCRUDRequestWrapper.dispose()
-            context.dispose()
+        
+        assert "Erro de banco" in str(exc_info.value)
+        # Mensagem sem tratamento específico não é retentada
+        # (StatusMessageHelper.cs:261, ServiceRequestUnexpectedResultException)
+        assert server.calls == [SAVE, SAVE]
 
 
 @pytest.mark.integration
@@ -410,36 +321,17 @@ class TestNeighborhoodWorkflow:
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_neighborhood_crud(self, mock_session_class):
         """CRUD completo de bairros."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
-        
-        auth_resps = create_authentication_responses()
-        
-        create_resp = create_mock_response(
-            200, create_success_response([
+        server = FakeSankhyaServer([
+            http_response(200, create_success_response([
                 {"CODBAI": "100", "NOMEBAI": "Centro"}
-            ])
-        )
-        
-        find_resp = create_mock_response(
-            200, create_success_response([
+            ])),
+            http_response(200, create_success_response([
                 {"CODBAI": "100", "NOMEBAI": "Centro"}
-            ])
-        )
+            ])),
+        ])
+        _install(mock_session_class, server)
         
-        logout_resp = create_mock_response(200, create_logout_response())
-        
-        mock_session.request.side_effect = [
-            *auth_resps, create_resp, find_resp, logout_resp
-        ]
-        
-        wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-        wrapper.authenticate("user", "pass")
-        context = SankhyaContext(wrapper)
-        
-        SimpleCRUDRequestWrapper.initialize(context)
-        
-        try:
+        with simple_crud_session():
             # Criar
             neighborhood = Neighborhood(name="Centro")
             created = SimpleCRUDRequestWrapper.update(neighborhood)
@@ -449,10 +341,11 @@ class TestNeighborhoodWorkflow:
             found = SimpleCRUDRequestWrapper.try_find(Neighborhood(code=100))
             assert found is not None
             assert found.name == "Centro"
-            
-        finally:
-            SimpleCRUDRequestWrapper.dispose()
-            context.dispose()
+        
+        assert server.calls == [SAVE, FIND]
+        assert all(_root_entity(body) == "Bairro" for _, body in server.requests)
+        assert save_data_row(server.requests[0][1]) == ({}, {"NOMEBAI": "Centro"})
+        assert find_criteria(server.requests[1][1]) == "CODBAI = 100"
 
 
 @pytest.mark.integration
@@ -462,36 +355,17 @@ class TestMixedEntityOperations:
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_create_partner_and_product(self, mock_session_class):
         """Criar parceiro e produto na mesma sessão."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
-        
-        auth_resps = create_authentication_responses()
-        
-        partner_resp = create_mock_response(
-            200, create_success_response([
+        server = FakeSankhyaServer([
+            http_response(200, create_success_response([
                 {"CODPARC": "1", "NOMEPARC": "Fornecedor"}
-            ])
-        )
-        
-        product_resp = create_mock_response(
-            200, create_success_response([
+            ])),
+            http_response(200, create_success_response([
                 {"CODPROD": "1", "DESCRPROD": "Produto do Fornecedor", "CODVOL": "UN"}
-            ])
-        )
+            ])),
+        ])
+        _install(mock_session_class, server)
         
-        logout_resp = create_mock_response(200, create_logout_response())
-        
-        mock_session.request.side_effect = [
-            *auth_resps, partner_resp, product_resp, logout_resp
-        ]
-        
-        wrapper = SankhyaWrapper(host="http://test.local", port=8180)
-        wrapper.authenticate("user", "pass")
-        context = SankhyaContext(wrapper)
-        
-        SimpleCRUDRequestWrapper.initialize(context)
-        
-        try:
+        with simple_crud_session():
             # Criar parceiro
             partner = SimpleCRUDRequestWrapper.update(Partner(name="Fornecedor"))
             assert partner.code == 1
@@ -501,7 +375,5 @@ class TestMixedEntityOperations:
                 Product(name="Produto do Fornecedor", code_volume="UN")
             )
             assert product.code == 1
-            
-        finally:
-            SimpleCRUDRequestWrapper.dispose()
-            context.dispose()
+        
+        assert [_root_entity(body) for _, body in server.requests] == ["Parceiro", "Produto"]
