@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 from typing import (
     TYPE_CHECKING,
     Generic,
@@ -66,6 +67,9 @@ TEntity = TypeVar("TEntity", bound=EntityBase)
 # Constantes
 _WAIT_TIMEOUT_SECONDS = 60.0
 _MAX_RETRY_COUNT = 3
+# threading.Event não permite aguardar dois eventos ao mesmo tempo
+# (WaitHandle.WaitAny no .NET): o cancel_token é verificado neste intervalo
+_CANCEL_POLL_INTERVAL_SECONDS = 0.1
 
 
 class OnDemandRequestWrapper(Generic[TEntity]):
@@ -109,8 +113,11 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         Args:
             service: Nome do serviço a usar (ex: CRUD_SERVICE_SAVE)
             cancel_token: Evento para sinalizar cancelamento
-            throughput: Número máximo de entidades por lote
-            allow_above_throughput: Se True, processa antes de atingir throughput
+            throughput: Quantidade de entidades na fila que dispara o envio
+                de um lote (abaixo disso só há envio em flush, cancelamento
+                ou dispose)
+            allow_above_throughput: Se True, o lote leva todas as entidades
+                disponíveis na fila; se False, no máximo ``throughput``
             context: Contexto Sankhya (opcional, usa default se não fornecido)
             session_token: Token de sessão existente (opcional)
         """
@@ -125,6 +132,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         self._flush_event = threading.Event()
         self._work_available = threading.Event()
         self._flush_complete = threading.Event()
+        self._worker_finished = threading.Event()
         
         # Sessão e contexto
         self._context = context
@@ -225,9 +233,13 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         self._flush_event.set()
         self._work_available.set()
         
+        # Worker já encerrado (ex.: após cancelamento): ninguém sinalizaria
+        # a conclusão. O worker marca o término antes de sinalizar o flush.
+        if self._worker_finished.is_set():
+            return
+        
         # Aguarda conclusão do flush
         self._flush_complete.wait()
-        self._flush_event.clear()
         
         logger.debug("Flush concluído")
 
@@ -292,96 +304,107 @@ class OnDemandRequestWrapper(Generic[TEntity]):
     # =========================================================================
 
     def _process(self) -> None:
-        """Loop principal do worker thread."""
-        while not self._should_stop():
-            try:
-                # Aguarda trabalho ou timeout
-                triggered = self._work_available.wait(timeout=_WAIT_TIMEOUT_SECONDS)
-                self._work_available.clear()
-                
-                if self._should_stop():
-                    # Processa itens restantes antes de parar
-                    self._process_remaining()
-                    break
-                
-                if triggered or not self._queue.empty():
-                    should_stop = self._process_internal()
-                    if should_stop:
-                        break
-                
-            except Exception as e:
-                logger.error(f"Erro no worker thread: {e}", exc_info=True)
+        """
+        Loop principal do worker thread.
         
-        # Sinaliza conclusão de qualquer flush pendente
-        self._flush_complete.set()
-        logger.debug("Worker thread finalizado")
+        Equivalente a ``Process`` do .NET (OnDemandRequestWrapper.cs:144-165):
+        processa até que cancelamento ou dispose encontrem a fila vazia.
+        """
+        try:
+            while True:
+                try:
+                    if self._process_internal():
+                        break
+                except Exception as e:
+                    logger.error(f"Erro no worker thread: {e}", exc_info=True)
+        finally:
+            # Marca o término antes de liberar flushes pendentes (ver flush)
+            self._worker_finished.set()
+            self._flush_complete.set()
+            logger.debug("Worker thread finalizado")
 
-    def _should_stop(self) -> bool:
-        """Verifica se deve parar o processamento."""
-        return self._stop_event.is_set() or self._cancel_token.is_set()
+    def _wait_for_work(self) -> None:
+        """
+        Aguarda sinal de trabalho, cancelamento ou timeout.
+        
+        Equivalente a ``WaitHandle.WaitAny(new[] { _event, _token.WaitHandle },
+        1 min)`` do .NET.
+        """
+        deadline = time.monotonic() + _WAIT_TIMEOUT_SECONDS
+        while not self._cancel_token.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            if self._work_available.wait(
+                timeout=min(_CANCEL_POLL_INTERVAL_SECONDS, remaining)
+            ):
+                return
 
     def _process_internal(self) -> bool:
         """
-        Processa um lote de entidades.
+        Executa uma iteração do worker.
+        
+        Equivalente a ``ProcessInternal`` do .NET
+        (OnDemandRequestWrapper.cs:167-240): com menos de ``throughput``
+        entidades na fila nada é enviado, exceto em flush, cancelamento ou
+        dispose. Com ``allow_above_throughput`` (ou envio forçado) o lote leva
+        todas as entidades disponíveis; caso contrário, no máximo
+        ``throughput``.
         
         Returns:
             True se deve parar, False para continuar.
         """
+        self._wait_for_work()
+        
+        # Consome o sinal antes de inspecionar o estado: um add() concorrente
+        # sinaliza de novo depois deste clear, então nenhum aviso se perde
+        self._work_available.clear()
+        
         is_flushing = self._flush_event.is_set()
-        is_cancelling = self._cancel_token.is_set()
-        force_process = is_flushing or is_cancelling
+        if is_flushing:
+            self._flush_event.clear()
         
-        # Coleta itens da fila
-        items: List[TEntity] = []
-        target_count = self._throughput
-        
-        while len(items) < target_count or force_process:
+        try:
+            is_cancelling = self._cancel_token.is_set()
+            is_disposing = self._stop_event.is_set()
+            
+            if self._queue.empty() and (is_cancelling or is_disposing):
+                return True
+            
+            force_request = is_cancelling or is_disposing or is_flushing
+            
+            if self._queue.qsize() < self._throughput and not force_request:
+                return False
+            
+            # Coleta itens da fila
+            items: List[TEntity] = []
+            while (
+                len(items) < self._throughput
+                or force_request
+                or self._allow_above_throughput
+            ):
+                try:
+                    items.append(self._queue.get_nowait())
+                except queue.Empty:
+                    break
+            
+            if not items:
+                return False
+            
             try:
-                item = self._queue.get_nowait()
-                items.append(item)
-            except queue.Empty:
-                break
-        
-        if not items:
+                self._process_batch(items)
+            finally:
+                # Como no .NET (que não reseta o evento após enviar um lote),
+                # a fila é reavaliada sem esperar novo add(): se ainda houver
+                # throughput, o próximo lote é enviado em seguida
+                self._work_available.set()
+            
+            return False
+        finally:
+            # O flush é sinalizado mesmo se o processamento falhar, para que
+            # flush() não fique bloqueado para sempre
             if is_flushing:
                 self._flush_complete.set()
-            return is_cancelling
-        
-        # Verifica se deve processar ou esperar mais itens
-        should_process = (
-            len(items) >= self._throughput or
-            force_process or
-            self._allow_above_throughput
-        )
-        
-        if not should_process:
-            # Devolve itens para a fila
-            for item in items:
-                self._queue.put(item)
-            return False
-        
-        # Processa lote; o flush é sinalizado mesmo se o processamento
-        # falhar, para que flush() não fique bloqueado para sempre
-        try:
-            self._process_batch(items)
-        finally:
-            if is_flushing and self._queue.empty():
-                self._flush_complete.set()
-        
-        return is_cancelling
-
-    def _process_remaining(self) -> None:
-        """Processa itens restantes na fila antes de parar."""
-        items: List[TEntity] = []
-        while True:
-            try:
-                item = self._queue.get_nowait()
-                items.append(item)
-            except queue.Empty:
-                break
-        
-        if items:
-            self._process_batch(items)
 
     def _process_batch(self, items: List[TEntity]) -> None:
         """

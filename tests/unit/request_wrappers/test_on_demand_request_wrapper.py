@@ -604,3 +604,199 @@ class TestOnDemandFlush:
             assert wrapper.queue_size == 0
         finally:
             _dispose_quietly(wrapper)
+
+    def test_flush_returns_when_worker_already_finished(self):
+        """Sem worker ativo (encerrado pelo cancelamento), flush não bloqueia."""
+        cancel_token = threading.Event()
+        service = _RecordingService()
+        wrapper = _create_wrapper(service, cancel_token=cancel_token)
+        try:
+            cancel_token.set()
+            wrapper._worker.join(SYNC_TIMEOUT)
+            assert not wrapper._worker.is_alive()
+
+            # Simula um add() concorrente ao cancelamento, que chegou à fila
+            # depois que o worker a encontrou vazia e terminou
+            wrapper._queue.put(Partner(name="A"))
+            _call_with_timeout(wrapper.flush)
+        finally:
+            _dispose_quietly(wrapper)
+
+
+# =============================================================================
+# Lotes e throughput (.NET OnDemandRequestWrapper.cs:167-240)
+# =============================================================================
+
+
+def _create_stepped_wrapper(
+    service: _RecordingService, **kwargs
+) -> OnDemandRequestWrapper:
+    """
+    Cria um wrapper sem o loop da thread worker.
+
+    O teste executa cada iteração do worker (``_process_internal``) na
+    própria thread, de forma determinística.
+    """
+    with patch.object(OnDemandRequestWrapper, "_process", lambda self: None):
+        wrapper = _create_wrapper(service, **kwargs)
+    wrapper._worker.join(SYNC_TIMEOUT)
+    return wrapper
+
+
+class TestOnDemandBatching:
+    """Envio em lotes conforme throughput, flush, cancelamento e dispose."""
+
+    def test_nothing_is_sent_below_throughput(self):
+        """Abaixo do throughput nada é enviado, mesmo com allow_above_throughput."""
+        service = _RecordingService()
+        wrapper = _create_stepped_wrapper(
+            service, throughput=3, allow_above_throughput=True
+        )
+        try:
+            wrapper.add(Partner(name="A"))
+            wrapper.add(Partner(name="B"))
+
+            assert wrapper._process_internal() is False
+
+            assert service.batches == []
+            assert wrapper.queue_size == 2
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_allow_above_throughput_sends_all_available_entities(self):
+        """Com allow_above_throughput o lote leva todas as entidades da fila."""
+        service = _RecordingService()
+        names = ["A", "B", "C", "D", "E"]
+        wrapper = _create_stepped_wrapper(
+            service, throughput=2, allow_above_throughput=True
+        )
+        try:
+            for name in names:
+                wrapper.add(Partner(name=name))
+
+            assert wrapper._process_internal() is False
+
+            assert service.batches == [names]
+            assert wrapper.queue_size == 0
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_without_allow_above_throughput_batches_have_throughput_size(self):
+        """Sem allow_above_throughput cada lote tem no máximo throughput."""
+        service = _RecordingService()
+        wrapper = _create_stepped_wrapper(
+            service, throughput=2, allow_above_throughput=False
+        )
+        try:
+            for name in ["A", "B", "C", "D", "E"]:
+                wrapper.add(Partner(name=name))
+
+            for _ in range(3):
+                assert wrapper._process_internal() is False
+
+            assert service.batches == [["A", "B"], ["C", "D"]]
+            assert wrapper.queue_size == 1
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_entities_accumulate_until_throughput(self):
+        """Entidades abaixo do throughput aguardam; ao atingi-lo, vão juntas."""
+        service = _RecordingService(block_first_call=True)
+        wrapper = _create_wrapper(
+            service, throughput=3, allow_above_throughput=True
+        )
+        try:
+            # Primeiro lote (forçado pelo flush) segura o worker
+            wrapper.add(Partner(name="A"))
+            flusher = threading.Thread(target=wrapper.flush, daemon=True)
+            flusher.start()
+            assert service.first_call_started.wait(SYNC_TIMEOUT)
+
+            wrapper.add(Partner(name="B"))
+            wrapper.add(Partner(name="C"))
+            service.release.set()
+            flusher.join(SYNC_TIMEOUT)
+            assert not flusher.is_alive()
+
+            # B e C chegaram depois do flush e estão abaixo do throughput
+            assert service.batches == [["A"]]
+            assert wrapper.queue_size == 2
+
+            wrapper.add(Partner(name="D"))
+
+            assert service.wait_for_calls(2)
+            assert service.batches == [["A"], ["B", "C", "D"]]
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_worker_keeps_sending_while_queue_reaches_throughput(self):
+        """Um único sinal processa todos os lotes que atingem o throughput."""
+        service = _RecordingService(block_first_call=True)
+        wrapper = _create_wrapper(
+            service, throughput=2, allow_above_throughput=False
+        )
+        try:
+            wrapper.add(Partner(name="A"))
+            wrapper.add(Partner(name="B"))
+            assert service.first_call_started.wait(SYNC_TIMEOUT)
+
+            # Enquanto o worker envia o primeiro lote, a fila recebe dois lotes
+            for name in ["C", "D", "E", "F"]:
+                wrapper.add(Partner(name=name))
+            service.release.set()
+
+            assert service.wait_for_calls(3), (
+                f"Lotes pendentes não enviados: {service.batches}"
+            )
+            assert service.batches == [["A", "B"], ["C", "D"], ["E", "F"]]
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_cancellation_wakes_idle_worker(self):
+        """O worker ocioso termina ao ser cancelado, sem add() nem dispose()."""
+        cancel_token = threading.Event()
+        wrapper = _create_wrapper(_RecordingService(), cancel_token=cancel_token)
+        try:
+            cancel_token.set()
+
+            wrapper._worker.join(SYNC_TIMEOUT)
+            assert not wrapper._worker.is_alive()
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_cancellation_sends_pending_entities(self):
+        """Ao cancelar, as entidades pendentes são enviadas em um lote."""
+        cancel_token = threading.Event()
+        service = _RecordingService()
+        wrapper = _create_wrapper(
+            service,
+            cancel_token=cancel_token,
+            throughput=10,
+            allow_above_throughput=False,
+        )
+        try:
+            for name in ["A", "B", "C"]:
+                wrapper.add(Partner(name=name))
+            cancel_token.set()
+
+            wrapper._worker.join(SYNC_TIMEOUT)
+            assert not wrapper._worker.is_alive()
+            assert service.batches == [["A", "B", "C"]]
+            assert wrapper.entities_sent_successfully == 3
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_dispose_sends_pending_entities(self):
+        """O dispose envia as entidades pendentes antes de encerrar."""
+        service = _RecordingService()
+        wrapper = _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        wrapper.add(Partner(name="A"))
+        wrapper.add(Partner(name="B"))
+
+        _call_with_timeout(wrapper.dispose)
+
+        assert service.batches == [["A", "B"]]
+        assert wrapper.entities_sent_successfully == 2
+        assert not wrapper._worker.is_alive()

@@ -106,8 +106,11 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         Args:
             service: Nome do serviço a usar (ex: CRUD_SERVICE_SAVE)
             cancel_event: Evento asyncio para sinalizar cancelamento
-            throughput: Número máximo de entidades por lote
-            allow_above_throughput: Se True, processa antes de atingir throughput
+            throughput: Quantidade de entidades na fila que dispara o envio
+                de um lote (abaixo disso só há envio em flush, cancelamento
+                ou dispose)
+            allow_above_throughput: Se True, o lote leva todas as entidades
+                disponíveis na fila; se False, no máximo ``throughput``
             context: Contexto Sankhya (opcional)
             session_token: Token de sessão existente (opcional)
         """
@@ -222,13 +225,17 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         if self._queue.empty():
             return
         
+        # Sem task worker ativa ninguém processaria a fila nem sinalizaria
+        # a conclusão do flush
+        if not self._is_worker_running():
+            await self.start()
+        
         self._flush_complete.clear()
         self._flush_event.set()
         self._work_available.set()
         
         # Aguarda conclusão do flush
         await self._flush_complete.wait()
-        self._flush_event.clear()
         
         logger.debug("Flush concluído")
 
@@ -249,6 +256,11 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         # Sinaliza parada
         self._stop_event.set()
         self._work_available.set()
+        
+        # Como no .NET, o dispose envia as entidades pendentes: sem task
+        # worker ativa, ela é iniciada para drenar a fila
+        if not self._is_worker_running() and not self._queue.empty():
+            await self.start()
         
         # Aguarda task worker
         if self._worker_task and not self._worker_task.done():
@@ -299,104 +311,119 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
     # Worker Task
     # =========================================================================
 
-    async def _process(self) -> None:
-        """Loop principal da task worker."""
-        while not self._should_stop():
-            try:
-                # Aguarda trabalho ou timeout
-                try:
-                    await asyncio.wait_for(
-                        self._work_available.wait(),
-                        timeout=_WAIT_TIMEOUT_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    pass
-                
-                self._work_available.clear()
-                
-                if self._should_stop():
-                    # Processa itens restantes antes de parar
-                    await self._process_remaining()
-                    break
-                
-                if not self._queue.empty():
-                    should_stop = await self._process_internal()
-                    if should_stop:
-                        break
-                
-            except Exception as e:
-                logger.error(f"Erro na worker task: {e}", exc_info=True)
-        
-        # Sinaliza conclusão de qualquer flush pendente
-        self._flush_complete.set()
-        logger.debug("Worker task finalizada")
+    def _is_worker_running(self) -> bool:
+        """Indica se a task worker está ativa."""
+        return self._worker_task is not None and not self._worker_task.done()
 
-    def _should_stop(self) -> bool:
-        """Verifica se deve parar o processamento."""
-        return self._stop_event.is_set() or self._cancel_event.is_set()
+    async def _process(self) -> None:
+        """
+        Loop principal da task worker.
+        
+        Equivalente a ``Process`` do .NET (OnDemandRequestWrapper.cs:144-165):
+        processa até que cancelamento ou dispose encontrem a fila vazia.
+        """
+        try:
+            while True:
+                try:
+                    if await self._process_internal():
+                        break
+                except Exception as e:
+                    logger.error(f"Erro na worker task: {e}", exc_info=True)
+        finally:
+            # Sinaliza conclusão de qualquer flush pendente
+            self._flush_complete.set()
+            logger.debug("Worker task finalizada")
+
+    async def _wait_for_work(self) -> None:
+        """
+        Aguarda sinal de trabalho, cancelamento ou timeout.
+        
+        Equivalente a ``WaitHandle.WaitAny(new[] { _event, _token.WaitHandle },
+        1 min)`` do .NET.
+        """
+        if self._work_available.is_set() or self._cancel_event.is_set():
+            return
+        
+        waiters = [
+            asyncio.ensure_future(self._work_available.wait()),
+            asyncio.ensure_future(self._cancel_event.wait()),
+        ]
+        try:
+            await asyncio.wait(
+                waiters,
+                timeout=_WAIT_TIMEOUT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for waiter in waiters:
+                waiter.cancel()
+            await asyncio.gather(*waiters, return_exceptions=True)
 
     async def _process_internal(self) -> bool:
         """
-        Processa um lote de entidades.
+        Executa uma iteração da task worker.
+        
+        Equivalente a ``ProcessInternal`` do .NET
+        (OnDemandRequestWrapper.cs:167-240): com menos de ``throughput``
+        entidades na fila nada é enviado, exceto em flush, cancelamento ou
+        dispose. Com ``allow_above_throughput`` (ou envio forçado) o lote leva
+        todas as entidades disponíveis; caso contrário, no máximo
+        ``throughput``.
         
         Returns:
             True se deve parar, False para continuar.
         """
+        await self._wait_for_work()
+        
+        # Consome o sinal antes de inspecionar o estado: um add() posterior
+        # sinaliza de novo, então nenhum aviso se perde
+        self._work_available.clear()
+        
         is_flushing = self._flush_event.is_set()
-        is_cancelling = self._cancel_event.is_set()
-        force_process = is_flushing or is_cancelling
+        if is_flushing:
+            self._flush_event.clear()
         
-        # Coleta itens da fila
-        items: List[TEntity] = []
-        target_count = self._throughput
-        
-        while len(items) < target_count or force_process:
+        try:
+            is_cancelling = self._cancel_event.is_set()
+            is_disposing = self._stop_event.is_set()
+            
+            if self._queue.empty() and (is_cancelling or is_disposing):
+                return True
+            
+            force_request = is_cancelling or is_disposing or is_flushing
+            
+            if self._queue.qsize() < self._throughput and not force_request:
+                return False
+            
+            # Coleta itens da fila
+            items: List[TEntity] = []
+            while (
+                len(items) < self._throughput
+                or force_request
+                or self._allow_above_throughput
+            ):
+                try:
+                    items.append(self._queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            
+            if not items:
+                return False
+            
             try:
-                item = self._queue.get_nowait()
-                items.append(item)
-            except asyncio.QueueEmpty:
-                break
-        
-        if not items:
+                await self._process_batch(items)
+            finally:
+                # Como no .NET (que não reseta o evento após enviar um lote),
+                # a fila é reavaliada sem esperar novo add(): se ainda houver
+                # throughput, o próximo lote é enviado em seguida
+                self._work_available.set()
+            
+            return False
+        finally:
+            # O flush é sinalizado mesmo se o processamento falhar, para que
+            # flush() não fique bloqueado para sempre
             if is_flushing:
                 self._flush_complete.set()
-            return is_cancelling
-        
-        # Verifica se deve processar ou esperar mais itens
-        should_process = (
-            len(items) >= self._throughput or
-            force_process or
-            self._allow_above_throughput
-        )
-        
-        if not should_process:
-            # Devolve itens para a fila
-            for item in items:
-                await self._queue.put(item)
-            return False
-        
-        # Processa lote; o flush é sinalizado mesmo se o processamento
-        # falhar, para que flush() não fique bloqueado para sempre
-        try:
-            await self._process_batch(items)
-        finally:
-            if is_flushing and self._queue.empty():
-                self._flush_complete.set()
-        
-        return is_cancelling
-
-    async def _process_remaining(self) -> None:
-        """Processa itens restantes na fila antes de parar."""
-        items: List[TEntity] = []
-        while True:
-            try:
-                item = self._queue.get_nowait()
-                items.append(item)
-            except asyncio.QueueEmpty:
-                break
-        
-        if items:
-            await self._process_batch(items)
 
     async def _process_batch(self, items: List[TEntity]) -> None:
         """

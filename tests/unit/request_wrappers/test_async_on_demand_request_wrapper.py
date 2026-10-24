@@ -392,3 +392,201 @@ class TestAsyncOnDemandFlush:
             assert wrapper.queue_size == 0
         finally:
             await _dispose_quietly(wrapper)
+
+    @pytest.mark.asyncio
+    async def test_flush_without_started_worker_processes_queue(self):
+        """flush() sem start() inicia o worker em vez de bloquear para sempre."""
+        service = _RecordingService()
+        wrapper = await _create_wrapper(
+            service, start=False, throughput=10, allow_above_throughput=False
+        )
+        try:
+            await wrapper.add(Partner(name="A"))
+            await _flush(wrapper)
+
+            assert service.batches == [["A"]]
+            assert wrapper.entities_sent_successfully == 1
+        finally:
+            await _dispose_quietly(wrapper)
+
+
+# =============================================================================
+# Lotes e throughput (.NET OnDemandRequestWrapper.cs:167-240)
+# =============================================================================
+
+
+class TestAsyncOnDemandBatching:
+    """Envio em lotes conforme throughput, flush, cancelamento e dispose."""
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_sent_below_throughput(self):
+        """Abaixo do throughput nada é enviado, mesmo com allow_above_throughput."""
+        service = _RecordingService()
+        # Sem start(): o teste executa a iteração do worker diretamente
+        wrapper = await _create_wrapper(
+            service, start=False, throughput=3, allow_above_throughput=True
+        )
+        await wrapper.add(Partner(name="A"))
+        await wrapper.add(Partner(name="B"))
+
+        assert await wrapper._process_internal() is False
+
+        assert service.batches == []
+        assert wrapper.queue_size == 2
+
+    @pytest.mark.asyncio
+    async def test_allow_above_throughput_sends_all_available_entities(self):
+        """Com allow_above_throughput o lote leva todas as entidades da fila."""
+        service = _RecordingService()
+        names = ["A", "B", "C", "D", "E"]
+        wrapper = await _create_wrapper(
+            service, start=False, throughput=2, allow_above_throughput=True
+        )
+        for name in names:
+            await wrapper.add(Partner(name=name))
+
+        assert await wrapper._process_internal() is False
+
+        assert service.batches == [names]
+        assert wrapper.queue_size == 0
+
+    @pytest.mark.asyncio
+    async def test_without_allow_above_throughput_batches_have_throughput_size(
+        self,
+    ):
+        """Sem allow_above_throughput cada lote tem no máximo throughput."""
+        service = _RecordingService()
+        wrapper = await _create_wrapper(
+            service, start=False, throughput=2, allow_above_throughput=False
+        )
+        for name in ["A", "B", "C", "D", "E"]:
+            await wrapper.add(Partner(name=name))
+
+        for _ in range(3):
+            assert await wrapper._process_internal() is False
+
+        assert service.batches == [["A", "B"], ["C", "D"]]
+        assert wrapper.queue_size == 1
+
+    @pytest.mark.asyncio
+    async def test_entities_accumulate_until_throughput(self):
+        """Entidades abaixo do throughput aguardam; ao atingi-lo, vão juntas."""
+        service = _RecordingService(block_first_call=True)
+        wrapper = await _create_wrapper(
+            service, throughput=3, allow_above_throughput=True
+        )
+        try:
+            # Primeiro lote (forçado pelo flush) segura o worker
+            await wrapper.add(Partner(name="A"))
+            flusher = asyncio.ensure_future(_flush(wrapper))
+            await asyncio.wait_for(service.first_call_started.wait(), SYNC_TIMEOUT)
+
+            await wrapper.add(Partner(name="B"))
+            await wrapper.add(Partner(name="C"))
+            service.release.set()
+            await flusher
+
+            # B e C chegaram depois do flush e estão abaixo do throughput
+            assert service.batches == [["A"]]
+            assert wrapper.queue_size == 2
+
+            await wrapper.add(Partner(name="D"))
+
+            assert await service.wait_for_calls(2)
+            assert service.batches == [["A"], ["B", "C", "D"]]
+        finally:
+            await _dispose_quietly(wrapper)
+
+    @pytest.mark.asyncio
+    async def test_worker_keeps_sending_while_queue_reaches_throughput(self):
+        """Um único sinal processa todos os lotes que atingem o throughput."""
+        service = _RecordingService(block_first_call=True)
+        wrapper = await _create_wrapper(
+            service, throughput=2, allow_above_throughput=False
+        )
+        try:
+            await wrapper.add(Partner(name="A"))
+            await wrapper.add(Partner(name="B"))
+            await asyncio.wait_for(service.first_call_started.wait(), SYNC_TIMEOUT)
+
+            # Enquanto o worker envia o primeiro lote, a fila recebe dois lotes
+            for name in ["C", "D", "E", "F"]:
+                await wrapper.add(Partner(name=name))
+            service.release.set()
+
+            assert await service.wait_for_calls(3), (
+                f"Lotes pendentes não enviados: {service.batches}"
+            )
+            assert service.batches == [["A", "B"], ["C", "D"], ["E", "F"]]
+        finally:
+            await _dispose_quietly(wrapper)
+
+    @pytest.mark.asyncio
+    async def test_cancellation_wakes_idle_worker(self):
+        """O worker ocioso termina ao ser cancelado, sem add() nem dispose()."""
+        cancel_event = asyncio.Event()
+        wrapper = await _create_wrapper(
+            _RecordingService(), cancel_event=cancel_event
+        )
+        try:
+            worker = wrapper._worker_task
+            # Cede o loop uma vez (sem espera real) para o worker ficar ocioso
+            await asyncio.sleep(0)
+            cancel_event.set()
+
+            await asyncio.wait_for(asyncio.shield(worker), SYNC_TIMEOUT)
+            assert worker.done()
+        finally:
+            await _dispose_quietly(wrapper)
+
+    @pytest.mark.asyncio
+    async def test_cancellation_sends_pending_entities(self):
+        """Ao cancelar, as entidades pendentes são enviadas em um lote."""
+        cancel_event = asyncio.Event()
+        service = _RecordingService()
+        wrapper = await _create_wrapper(
+            service,
+            cancel_event=cancel_event,
+            throughput=10,
+            allow_above_throughput=False,
+        )
+        try:
+            for name in ["A", "B", "C"]:
+                await wrapper.add(Partner(name=name))
+            cancel_event.set()
+
+            await asyncio.wait_for(asyncio.shield(wrapper._worker_task), SYNC_TIMEOUT)
+            assert service.batches == [["A", "B", "C"]]
+            assert wrapper.entities_sent_successfully == 3
+        finally:
+            await _dispose_quietly(wrapper)
+
+    @pytest.mark.asyncio
+    async def test_dispose_sends_pending_entities(self):
+        """O dispose envia as entidades pendentes antes de encerrar."""
+        service = _RecordingService()
+        wrapper = await _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        await wrapper.add(Partner(name="A"))
+        await wrapper.add(Partner(name="B"))
+
+        await asyncio.wait_for(wrapper.dispose(), SYNC_TIMEOUT)
+
+        assert service.batches == [["A", "B"]]
+        assert wrapper.entities_sent_successfully == 2
+
+    @pytest.mark.asyncio
+    async def test_dispose_without_started_worker_sends_pending_entities(self):
+        """Sem start(), o dispose ainda envia as entidades pendentes."""
+        service = _RecordingService()
+        wrapper = await _create_wrapper(
+            service, start=False, throughput=10, allow_above_throughput=False
+        )
+        await wrapper.add(Partner(name="A"))
+        await wrapper.add(Partner(name="B"))
+
+        await asyncio.wait_for(wrapper.dispose(), SYNC_TIMEOUT)
+
+        assert service.batches == [["A", "B"]]
+        assert wrapper.entities_sent_successfully == 2

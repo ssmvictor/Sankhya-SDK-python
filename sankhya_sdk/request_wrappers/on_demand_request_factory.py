@@ -83,8 +83,11 @@ class OnDemandRequestFactory:
             service: Nome do serviço a usar
             cancel_token: Evento para sinalizar cancelamento
             context: Contexto Sankhya (cria nova sessão se fornecido)
-            throughput: Número máximo de entidades por lote
-            allow_above_throughput: Se True, processa antes de atingir throughput
+            throughput: Quantidade de entidades na fila que dispara o envio
+                de um lote (abaixo disso só há envio em flush, cancelamento
+                ou dispose)
+            allow_above_throughput: Se True, o lote leva todas as entidades
+                disponíveis na fila; se False, no máximo ``throughput``
             
         Returns:
             UUID identificador da instância criada
