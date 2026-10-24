@@ -340,7 +340,7 @@ class TestSankhyaWrapper:
         mock_response.status_code = 200
         mock_response.content = """<?xml version="1.0" encoding="UTF-8"?>
         <serviceResponse status="0">
-            <statusMessage>Usuario/Senha invalido</statusMessage>
+            <statusMessage>Usuário/Senha inválido</statusMessage>
         </serviceResponse>""".encode("utf-8")
         mock_request.return_value = mock_response
 
@@ -498,6 +498,7 @@ class TestSankhyaWrapperRetryLogic:
 
         result = wrapper._handle_exception_internal(
             exception=ServiceRequestDeadlockException(
+                message="Transaction was deadlocked on lock resources",
                 request=None,
             ),
             service_name=ServiceName.CRUD_FIND,
