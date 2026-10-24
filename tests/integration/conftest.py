@@ -9,7 +9,6 @@ e testar fluxos completos de forma determinística.
 from __future__ import annotations
 
 import base64
-import gc
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -522,32 +521,15 @@ def _isolate_shared_sdk_state() -> Iterator[None]:
     """
     Isola o estado de classe do SDK compartilhado entre os testes.
 
-    ``SankhyaContext`` registra os wrappers de todas as sessões num
-    dicionário de classe, e o ``__del__`` de um contexto não descartado
-    chama ``dispose()``, que finaliza TODAS as sessões registradas, inclusive
-    as de outros contextos ainda em uso. Um contexto vazado por um teste
-    anterior (ex.: falha antes do ``dispose``, preso no traceback guardado
-    pelo pytest) e finalizado pelo coletor cíclico no meio de outro teste
-    derrubava a sessão desse teste ("Wrapper não encontrado para token"),
-    de forma intermitente.
-
-    A coleta automática fica suspensa enquanto o teste executa, de modo que
-    essas finalizações ocorrem apenas entre testes. Ao final, os wrappers
-    estáticos são liberados (para não vazar sessão para o próximo teste) e
-    a geração jovem é coletada: como nada foi coletado durante o teste, ela
-    contém exatamente o lixo cíclico criado por ele, finalizado ali mesmo
-    (uma coleta completa por teste custaria segundos na suíte).
+    ``SimpleCRUDRequestWrapper`` e ``KnowServicesRequestWrapper`` guardam
+    contexto e sessão em atributos de classe; um teste que falha antes do
+    ``dispose()`` deixaria esse estado para o próximo teste.
     """
-    gc_was_enabled = gc.isenabled()
-    gc.disable()
     try:
         yield
     finally:
         SimpleCRUDRequestWrapper.dispose()
         KnowServicesRequestWrapper.dispose()
-        gc.collect(0)
-        if gc_was_enabled:
-            gc.enable()
 
 
 # =============================================================================

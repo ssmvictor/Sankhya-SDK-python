@@ -424,10 +424,11 @@ class TestSharedStateIsolation:
 
     Causa da intermitência de ``test_malformed_xml_response``: um
     SankhyaContext vazado por outro teste, quando finalizado pelo coletor
-    cíclico, executa ``dispose()`` e remove do registro de classe as sessões
-    de todos os contextos, inclusive a sessão dedicada do
+    cíclico, executava ``dispose()`` no ``__del__`` e removia do registro de
+    classe as sessões de todos os contextos, inclusive a sessão dedicada do
     SimpleCRUDRequestWrapper do teste em execução ("Wrapper não encontrado
-    para token").
+    para token"). Como no .NET (``Dispose(false)``), o ``__del__`` agora só
+    marca o contexto como descartado.
     """
 
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
@@ -450,10 +451,9 @@ class TestSharedStateIsolation:
             leaked_context.reference_cycle = leaked_context
             del leaked_context, leaked_wrapper
 
-            # Alocações suficientes para disparar várias coletas automáticas
-            # das gerações jovens, onde está o ciclo recém-criado
-            allocations = [[] for _ in range(20 * gc.get_threshold()[0])]
-            del allocations
+            # Finaliza o contexto vazado no meio do teste, como faria o
+            # coletor cíclico automático
+            gc.collect()
 
             result = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
 
