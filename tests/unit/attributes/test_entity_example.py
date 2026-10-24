@@ -45,6 +45,8 @@ def test_partner_entity_behavior():
     with pytest.raises(ValueError, match="Value too long"):
         partner.document = "123456789012345" # 15 chars, max is 14
         
-    # Test validation - key required
-    with pytest.raises(ValueError, match="cannot be None"):
-        Partner(code=None, name="Test") # type: ignore
+    # Test validation - key may be None (new entities / partial data), as in the
+    # .NET SDK, where null keys are just skipped when the keys are extracted
+    new_partner = Partner(code=None, name="Test")
+    assert new_partner.code is None
+    assert "code" in new_partner._fields_set

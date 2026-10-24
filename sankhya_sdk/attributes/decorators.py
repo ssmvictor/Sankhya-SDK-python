@@ -22,17 +22,27 @@ def entity(name: str) -> Callable[[Type[T]], Type[T]]:
         return cls
     return decorator
 
+def _set_field_attribute(field: FieldInfo, key: str, value: Any) -> None:
+    # Pydantic rebuilds the FieldInfo from `_attributes_set` when the model class
+    # is created, so attributes assigned directly on an existing FieldInfo (e.g.
+    # default, exclude, json_schema_extra) are silently dropped unless they are
+    # also registered there.
+    setattr(field, key, value)
+    attributes_set = getattr(field, "_attributes_set", None)
+    if isinstance(attributes_set, dict):
+        attributes_set[key] = value
+
 def _get_json_schema_extra(field: FieldInfo) -> Dict[str, Any]:
     if field.json_schema_extra is None:
-        field.json_schema_extra = {}
+        _set_field_attribute(field, "json_schema_extra", {})
     if not isinstance(field.json_schema_extra, dict):
         # Handle cases where it might be a callable, though usually it's a dict or None
-        field.json_schema_extra = {}
+        _set_field_attribute(field, "json_schema_extra", {})
     return field.json_schema_extra
 
 def _apply_kwargs_to_field(field: FieldInfo, kwargs: Dict[str, Any]) -> None:
     for key, value in kwargs.items():
-        setattr(field, key, value)
+        _set_field_attribute(field, key, value)
 
 def entity_key(field: Optional[FieldInfo] = None, **kwargs: Any) -> Any:
     if field is None:
@@ -83,7 +93,7 @@ def entity_ignore(field: Optional[FieldInfo] = None, **kwargs: Any) -> Any:
         field = Field(**kwargs)
     else:
         _apply_kwargs_to_field(field, kwargs)
-    field.exclude = True
+    _set_field_attribute(field, "exclude", True)
     extra = _get_json_schema_extra(field)
     extra["is_ignored"] = True
     return field
