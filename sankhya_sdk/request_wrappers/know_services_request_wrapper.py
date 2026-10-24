@@ -263,7 +263,7 @@ class KnowServicesRequestWrapper:
         Example:
             >>> sessions = KnowServicesRequestWrapper.get_sessions()
             >>> for session in sessions:
-            ...     print(f"Usuário: {session.user_name}, IP: {session.ip_address}")
+            ...     print(f"Usuário: {session.user_name}, Host: {session.host}")
         """
         cls._ensure_initialized()
         logger.info("Obtendo lista de sessões ativas")
@@ -323,7 +323,8 @@ class KnowServicesRequestWrapper:
         Args:
             title: Título do aviso
             description: Descrição detalhada do aviso
-            tip: Dica opcional para o usuário
+            tip: Dica opcional para o usuário (``<Dica>``, enviada apenas
+                quando não vazia, como no .NET)
             level: Nível de severidade do aviso
             recipients: Lista de destinatários (None = todos)
             
@@ -342,14 +343,18 @@ class KnowServicesRequestWrapper:
             f"para {recipient_count} destinatário(s)"
         )
         
+        # .NET (KnowServicesRequestWrapper.cs:54-74): <aviso importancia>
+        # com titulo/descricao; <Dica> só quando não vazia e destinatários
+        # só quando informados
         warning = SystemWarning(
             title=title,
             content=description,
-            type=tip,
-            priority=level.internal_value if hasattr(level, "internal_value") else str(level.value),
+            priority=level,
             recipients=recipients or [],
         )
-        
+        if tip is not None and tip.strip():
+            warning.tip = tip
+
         request = ServiceRequest(
             service=ServiceName.WARNING_SEND,
             request_body=RequestBody(system_warning=warning),
@@ -1276,12 +1281,9 @@ class KnowServicesRequestWrapper:
         
         path_objects = [Path(value=p) for p in paths]
         
-        # Adicionar evento de confirmação
-        confirm_event = ClientEvent(
-            type="confirmation",
-            code="deleteFiles",
-            data={"confirmed": "true"},
-        )
+        # Evento de confirmação, como no .NET (KnowServicesRequestWrapper.cs:641-655):
+        # <clientEvent>br.com.sankhya.actionbutton.clientconfirm</clientEvent>
+        confirm_event = ClientEvent(text="br.com.sankhya.actionbutton.clientconfirm")
         
         request = ServiceRequest(
             service=ServiceName.FILE_DELETE,
