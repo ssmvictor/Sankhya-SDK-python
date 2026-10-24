@@ -7,8 +7,8 @@ from sankhya_sdk.auth.oauth_client import OAuthClient
 def mock_oauth_client():
     client = MagicMock(spec=OAuthClient)
     client.token_manager = MagicMock()
-    # Setup token manager to return a token primarily
-    client.token_manager.get_token.return_value = "valid_token"
+    # SankhyaSession obtains the token via get_valid_token() (auto-refresh)
+    client.get_valid_token.return_value = "valid_token"
     return client
 
 @pytest.fixture
@@ -29,6 +29,7 @@ def test_session_injects_header(sankhya_session, mock_oauth_client):
     headers = call_kwargs["headers"]
     
     assert headers["Authorization"] == "Bearer valid_token"
+    mock_oauth_client.get_valid_token.assert_called_once()
     # Content-Type is set on session.headers, not in request kwargs
     mock_http.headers.update.assert_called()
 
