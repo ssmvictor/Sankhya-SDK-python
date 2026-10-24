@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-import time
 from typing import (
     TYPE_CHECKING,
     Generic,
@@ -33,8 +32,8 @@ from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
 from sankhya_sdk.exceptions import (
     SankhyaException,
-    ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
+    ServiceRequestTimeoutException,
 )
 from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensions
 from sankhya_sdk.models.base import EntityBase
@@ -66,7 +65,6 @@ TEntity = TypeVar("TEntity", bound=EntityBase)
 # Constantes
 _WAIT_TIMEOUT_SECONDS = 60.0
 _MAX_RETRY_COUNT = 3
-_RETRY_DELAY_BASE_MS = 100
 
 
 class OnDemandRequestWrapper(Generic[TEntity]):
@@ -426,14 +424,13 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             self._invoke_service(request)
             return True, None
             
-        except (ServiceRequestCompetitionException, ServiceRequestDeadlockException) as e:
+        except (ServiceRequestTimeoutException, ServiceRequestDeadlockException) as e:
+            # .NET (OnDemandRequestWrapper.cs:259-280): timeout e deadlock são
+            # tentados novamente uma única vez, de imediato
             if retry:
                 logger.warning(f"Retry falhou: {e}")
                 return False, e
             
-            # Aguarda e tenta novamente
-            delay_ms = _RETRY_DELAY_BASE_MS * (1 + (self._request_count % 10))
-            time.sleep(delay_ms / 1000.0)
             return self._process_request(request, retry=True)
             
         except SankhyaException as e:

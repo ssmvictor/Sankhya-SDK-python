@@ -8,14 +8,25 @@ Testes básicos de inicialização e propriedades, evitando bloqueios de threads
 import asyncio
 import threading
 import time
-from typing import Optional
+from typing import Callable, List, Optional, Sequence
+from unittest.mock import MagicMock, patch
 import pytest
 
 from pydantic import Field
 
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
+from sankhya_sdk.exceptions import (
+    ServiceRequestCompetitionException,
+    ServiceRequestDeadlockException,
+    ServiceRequestTimeoutException,
+)
 from sankhya_sdk.models.base import EntityBase
+from sankhya_sdk.models.transport.partner import Partner
+from sankhya_sdk.request_wrappers import on_demand_request_wrapper as wrapper_module
+from sankhya_sdk.request_wrappers.on_demand_request_wrapper import (
+    OnDemandRequestWrapper,
+)
 
 
 # =============================================================================
@@ -227,3 +238,211 @@ class TestInterfaceProtocols:
         assert hasattr(OnDemandRequestFactory, "flush_all")
         assert hasattr(OnDemandRequestFactory, "finalize_by_key")
         assert hasattr(OnDemandRequestFactory, "finalize_all")
+
+
+# =============================================================================
+# Infraestrutura para testes do worker
+# =============================================================================
+
+# Limite de espera pela thread worker. Só é atingido quando o comportamento
+# esperado não ocorre: a sincronização dos testes é feita por eventos.
+SYNC_TIMEOUT = 10.0
+
+
+def _names(request) -> List[str]:
+    """Retorna os nomes das entidades (NOMEPARC) enviadas em uma requisição."""
+    return [
+        row.local_fields["NOMEPARC"]
+        for row in request.request_body.data_set.data_rows
+    ]
+
+
+class _RecordingService:
+    """
+    Serviço simulado que registra cada lote recebido pelo worker.
+
+    ``outcomes`` define, em ordem, a exceção lançada por cada chamada
+    (``None`` = sucesso). Com ``block_first_call`` a primeira chamada fica
+    bloqueada até ``release`` ser sinalizado, segurando o worker em um
+    ponto conhecido.
+    """
+
+    def __init__(
+        self,
+        outcomes: Sequence[Optional[BaseException]] = (),
+        block_first_call: bool = False,
+    ) -> None:
+        self._cond = threading.Condition()
+        self._outcomes = list(outcomes)
+        self._block_first_call = block_first_call
+        self.batches: List[List[str]] = []
+        self.first_call_started = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, request) -> MagicMock:
+        with self._cond:
+            self.batches.append(_names(request))
+            index = len(self.batches)
+            outcome = self._outcomes.pop(0) if self._outcomes else None
+            self._cond.notify_all()
+        if index == 1 and self._block_first_call:
+            self.first_call_started.set()
+            self.release.wait(SYNC_TIMEOUT)
+        if outcome is not None:
+            raise outcome
+        return MagicMock()
+
+    def wait_for_calls(self, count: int) -> bool:
+        """Aguarda o worker fazer ``count`` chamadas (False se não fizer)."""
+        with self._cond:
+            return self._cond.wait_for(
+                lambda: len(self.batches) >= count, SYNC_TIMEOUT
+            )
+
+
+def _create_wrapper(
+    service: _RecordingService,
+    cancel_token: Optional[threading.Event] = None,
+    **kwargs,
+) -> OnDemandRequestWrapper:
+    """Cria um wrapper de salvamento cujo contexto delega ao serviço simulado."""
+    context = MagicMock()
+    context.service_invoker.side_effect = service
+    return OnDemandRequestWrapper(
+        service=ServiceName.CRUD_SERVICE_SAVE,
+        cancel_token=cancel_token or threading.Event(),
+        context=context,
+        **kwargs,
+    )
+
+
+def _call_with_timeout(func: Callable[[], object]) -> None:
+    """Executa ``func`` em thread daemon e falha se ela não terminar."""
+    errors: List[BaseException] = []
+
+    def target() -> None:
+        try:
+            func()
+        except BaseException as exc:  # repassado ao teste
+            errors.append(exc)
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    thread.join(SYNC_TIMEOUT)
+    assert not thread.is_alive(), (
+        f"{getattr(func, '__qualname__', func)} não terminou em {SYNC_TIMEOUT}s"
+    )
+    if errors:
+        raise errors[0]
+
+
+def _dispose_quietly(wrapper: OnDemandRequestWrapper) -> None:
+    """Libera o wrapper na limpeza do teste sem mascarar a falha original."""
+    thread = threading.Thread(target=wrapper.dispose, daemon=True)
+    thread.start()
+    thread.join(SYNC_TIMEOUT)
+
+
+@pytest.fixture
+def failure_events():
+    """Captura os OnDemandRequestFailureEvent publicados durante o teste."""
+    events: List[OnDemandRequestFailureEvent] = []
+    lock = threading.Lock()
+
+    def handler(event: OnDemandRequestFailureEvent) -> None:
+        with lock:
+            events.append(event)
+
+    EventBus.subscribe(OnDemandRequestFailureEvent, handler)
+    try:
+        yield events
+    finally:
+        EventBus.unsubscribe(OnDemandRequestFailureEvent, handler)
+
+
+# =============================================================================
+# Retry (.NET OnDemandRequestWrapper.cs:242-289)
+# =============================================================================
+
+
+class TestOnDemandRetry:
+    """Timeout e deadlock são repetidos uma única vez, de imediato."""
+
+    def test_timeout_is_retried_once(self, failure_events):
+        """Timeout reenvia o mesmo lote uma vez, sem fallback individual."""
+        service = _RecordingService(
+            outcomes=[ServiceRequestTimeoutException(ServiceName.CRUD_SERVICE_SAVE)]
+        )
+        wrapper = _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        try:
+            wrapper.add(Partner(name="A"))
+            wrapper.add(Partner(name="B"))
+            _call_with_timeout(wrapper.flush)
+
+            assert service.batches == [["A", "B"], ["A", "B"]]
+            assert wrapper.request_count == 2
+            assert wrapper.entities_sent_successfully == 2
+            assert failure_events == []
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_deadlock_is_retried_once_without_delay(self, failure_events):
+        """Deadlock reenvia o lote uma vez, imediatamente (sem sleep)."""
+        service = _RecordingService(
+            outcomes=[ServiceRequestDeadlockException("deadlock")]
+        )
+        with patch.object(wrapper_module, "time", wraps=time, create=True) as clock:
+            wrapper = _create_wrapper(
+                service, throughput=10, allow_above_throughput=False
+            )
+            try:
+                wrapper.add(Partner(name="A"))
+                wrapper.add(Partner(name="B"))
+                _call_with_timeout(wrapper.flush)
+            finally:
+                _dispose_quietly(wrapper)
+
+        assert service.batches == [["A", "B"], ["A", "B"]]
+        clock.sleep.assert_not_called()
+        assert wrapper.entities_sent_successfully == 2
+        assert failure_events == []
+
+    def test_competition_is_not_retried(self, failure_events):
+        """Concorrência não é repetida: o lote cai no envio individual."""
+        service = _RecordingService(outcomes=[ServiceRequestCompetitionException()])
+        wrapper = _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        try:
+            wrapper.add(Partner(name="A"))
+            wrapper.add(Partner(name="B"))
+            _call_with_timeout(wrapper.flush)
+
+            assert service.batches == [["A", "B"], ["A"], ["B"]]
+            assert wrapper.entities_sent_successfully == 2
+            assert failure_events == []
+        finally:
+            _dispose_quietly(wrapper)
+
+    def test_second_timeout_falls_back_to_individual_requests(self, failure_events):
+        """Se a nova tentativa também falha, cada entidade é reenviada sozinha."""
+        timeout = ServiceRequestTimeoutException(ServiceName.CRUD_SERVICE_SAVE)
+        service = _RecordingService(outcomes=[timeout, timeout, timeout, timeout])
+        wrapper = _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        partner = Partner(name="A")
+        try:
+            wrapper.add(partner)
+            _call_with_timeout(wrapper.flush)
+
+            # Lote (2 tentativas) + envio individual (2 tentativas)
+            assert service.batches == [["A"], ["A"], ["A"], ["A"]]
+            assert wrapper.entities_sent_successfully == 0
+            assert len(failure_events) == 1
+            assert failure_events[0].entity is partner
+            assert failure_events[0].exception is timeout
+        finally:
+            _dispose_quietly(wrapper)
