@@ -7,7 +7,7 @@ Src/Sankhya/Service/Session.cs e RequestBody.cs).
 
 from lxml import etree
 
-from sankhya_sdk.models.service.metadata_types import Key, Pager
+from sankhya_sdk.models.service.metadata_types import Key, Pager, Session
 from sankhya_sdk.models.service.response_body import ResponseBody
 
 
@@ -121,3 +121,55 @@ class TestKey:
         body = ResponseBody.from_xml(element)
 
         assert body.key.value == "FILE_KEY_RETURNED"
+
+
+class TestSession:
+    """Testes para a classe Session (.NET: Service/Session.cs)."""
+
+    def test_to_xml_uses_dotnet_tag_and_id_attribute(self):
+        """Testa que a sessão é serializada como <SESSION ID="..."/>."""
+        elem = Session(jsession_id="SESSION_TO_KILL").to_xml()
+
+        assert elem.tag == "SESSION"
+        assert elem.get("ID") == "SESSION_TO_KILL"
+        assert "jsessionid" not in elem.attrib
+        assert etree.tostring(elem) == b'<SESSION ID="SESSION_TO_KILL"/>'
+
+    def test_to_xml_uses_dotnet_user_attributes(self):
+        """Testa que user_id/user_name usam USERID/USERNAME como no .NET."""
+        elem = Session(jsession_id="S1", user_id=7, user_name="admin").to_xml()
+
+        assert elem.get("USERID") == "7"
+        assert elem.get("USERNAME") == "admin"
+        assert "userId" not in elem.attrib
+        assert "userName" not in elem.attrib
+
+    def test_from_xml_reads_dotnet_attributes(self):
+        """Testa a desserialização do formato .NET."""
+        element = etree.fromstring('<SESSION ID="S1" USERID="7" USERNAME="admin"/>')
+
+        session = Session.from_xml(element)
+
+        assert session.jsession_id == "S1"
+        assert session.user_id == 7
+        assert session.user_name == "admin"
+
+    def test_from_xml_accepts_legacy_attributes(self):
+        """Testa que o formato legado do SDK Python continua sendo lido."""
+        element = etree.fromstring(
+            '<session jsessionid="S1" userId="7" userName="admin"/>'
+        )
+
+        session = Session.from_xml(element)
+
+        assert session.jsession_id == "S1"
+        assert session.user_id == 7
+        assert session.user_name == "admin"
+
+    def test_round_trip(self):
+        """Testa que to_xml/from_xml preservam os valores."""
+        original = Session(jsession_id="S1", user_id=7, user_name="admin")
+
+        restored = Session.from_xml(original.to_xml())
+
+        assert restored == original

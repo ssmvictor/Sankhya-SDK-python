@@ -242,6 +242,10 @@ class Session(BaseModel):
     Informações de sessão do usuário.
     
     Contém dados de autenticação e contexto do usuário logado.
+
+    Serializada como no .NET (``RequestBody.Session`` em
+    ``[XmlElement("SESSION")]``, ``Session.Id`` em ``[XmlAttribute("ID")]``),
+    por exemplo ``<SESSION ID="..."/>`` em ``SessionManagerSP.killSession``.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -257,15 +261,15 @@ class Session(BaseModel):
 
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
-        elem = etree.Element("session")
+        elem = etree.Element("SESSION")
         if self.jsession_id:
-            elem.set("jsessionid", self.jsession_id)
+            elem.set("ID", self.jsession_id)
         if self.user_id is not None:
-            elem.set("userId", str(self.user_id))
+            elem.set("USERID", str(self.user_id))
         if self.user_code:
             elem.set("userCode", self.user_code)
         if self.user_name:
-            elem.set("userName", self.user_name)
+            elem.set("USERNAME", self.user_name)
         if self.company_id is not None:
             elem.set("companyId", str(self.company_id))
         if self.company_name:
@@ -278,11 +282,13 @@ class Session(BaseModel):
 
     @classmethod
     def from_xml(cls, element: Element) -> "Session":
-        """Deserializa de elemento XML."""
+        """Deserializa de elemento XML (formato .NET ou legado)."""
         user_id = None
         company_id = None
-        
-        user_id_str = get_element_attr(element, "userId")
+
+        user_id_str = get_element_attr(element, "USERID") or get_element_attr(
+            element, "userId"
+        )
         if user_id_str:
             try:
                 user_id = int(user_id_str)
@@ -297,10 +303,12 @@ class Session(BaseModel):
                 pass
         
         return cls(
-            jsession_id=get_element_attr(element, "jsessionid"),
+            jsession_id=get_element_attr(element, "ID")
+            or get_element_attr(element, "jsessionid"),
             user_id=user_id,
             user_code=get_element_attr(element, "userCode"),
-            user_name=get_element_attr(element, "userName"),
+            user_name=get_element_attr(element, "USERNAME")
+            or get_element_attr(element, "userName"),
             company_id=company_id,
             company_name=get_element_attr(element, "companyName"),
             call_id=get_element_attr(element, "callId"),
