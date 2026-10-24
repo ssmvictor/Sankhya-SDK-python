@@ -390,7 +390,13 @@ class TestPagedRequestWrapper:
         assert wrapper._pager_id == "test-pager-id"
         assert wrapper._total_pages == 3
         assert wrapper._items.qsize() == 150
-        assert wrapper._items.get_nowait().dictionary == {"code": 0, "name": "Entity 0"}
+        # Valores do XML permanecem como texto bruto (ParseDynamic no .NET);
+        # a conversão tipada acontece em convert_to_type
+        first = wrapper._items.get_nowait()
+        assert first.dictionary == {"code": "0", "name": "Entity 0"}
+        typed = first.convert_to_type(MockEntity)
+        assert typed.code == 0
+        assert typed.name == "Entity 0"
 
     @patch("sankhya_sdk.core.context.SankhyaContext")
     def test_load_page_sends_pager_id_on_next_page(
@@ -507,9 +513,12 @@ class TestPagedRequestWrapper:
         )
         
         entities = wrapper._extract_entities_from_response(response)
-        
+
         assert len(entities) == 2
-        assert entities[0].dictionary["code"] == 1
+        # Texto bruto do XML; convert_to_type produz o valor tipado
+        assert entities[0].dictionary["code"] == "1"
+        assert entities[0].convert_to_type(MockEntity).code == 1
+        assert entities[1].convert_to_type(MockEntity).name == "Entity 2"
     
     def test_extract_entities_empty_response(self, mock_token, service_request):
         """Testa extração de entidades com resposta vazia."""
