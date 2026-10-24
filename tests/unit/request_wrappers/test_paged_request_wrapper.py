@@ -15,7 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.enums.service_name import ServiceName
+from sankhya_sdk.exceptions import (
+    PagedRequestException as SdkPagedRequestException,
+    SankhyaException,
+    ServiceRequestGeneralException,
+)
 from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.models.service.entity_types import DataSet
 from sankhya_sdk.models.service.request_body import RequestBody
@@ -797,6 +803,93 @@ class TestPagedRequestException:
         
         assert exc.page == 3
         assert exc.inner_exception is inner
+
+    def test_exception_belongs_to_sdk_hierarchy(self):
+        """
+        Deriva da PagedRequestException do SDK (GoodPractices/PagedRequestException.cs).
+
+        Assim ``except sankhya_sdk.exceptions.PagedRequestException`` e
+        ``except SankhyaException`` capturam os erros do wrapper.
+        """
+        inner = ServiceRequestGeneralException("Falha no serviço")
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        exc = PagedRequestException(
+            "Erro na página 2",
+            page=2,
+            inner_exception=inner,
+            request=request,
+        )
+
+        assert isinstance(exc, SdkPagedRequestException)
+        assert isinstance(exc, ServiceRequestGeneralException)
+        assert isinstance(exc, SankhyaException)
+        assert str(exc) == "Erro na página 2"
+        assert exc.page == 2
+        assert exc.inner_exception is inner
+        assert exc.__cause__ is inner
+        assert exc.request is request
+
+
+class TestPagedRequestErrorPropagation:
+    """Erros de carga propagados pelos generators (hierarquia do SDK)."""
+
+    @staticmethod
+    def _request() -> ServiceRequest:
+        return ServiceRequest(
+            service=ServiceName.CRUD_SERVICE_FIND,
+            request_body=RequestBody(data_set=DataSet(root_entity="Parceiro")),
+        )
+
+    def test_get_paged_results_raises_sdk_paged_request_exception(self):
+        """Falha na carga chega ao consumidor como PagedRequestException do SDK."""
+        error = ServiceRequestGeneralException("Erro na query")
+        request = self._request()
+        on_page_error = MagicMock()
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", side_effect=error
+        ):
+            with pytest.raises(SdkPagedRequestException) as exc_info:
+                list(
+                    PagedRequestWrapper.get_paged_results(
+                        request,
+                        MockEntity,
+                        uuid.uuid4(),
+                        timeout=timedelta(seconds=30),
+                        on_page_error=on_page_error,
+                    )
+                )
+
+        assert isinstance(exc_info.value, SankhyaException)
+        assert exc_info.value.request is request
+        assert exc_info.value.inner_exception.inner_exception is error
+        on_page_error.assert_called_once()
+        assert on_page_error.call_args[0][0].exception is error
+
+    @pytest.mark.asyncio
+    async def test_get_paged_results_async_raises_sdk_paged_request_exception(self):
+        """Versão assíncrona também propaga PagedRequestException do SDK."""
+        error = ServiceRequestGeneralException("Erro na query")
+        request = self._request()
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            side_effect=error,
+        ):
+            with pytest.raises(SdkPagedRequestException) as exc_info:
+                async for _ in PagedRequestWrapper.get_paged_results_async(
+                    request,
+                    MockEntity,
+                    uuid.uuid4(),
+                    timeout=timedelta(seconds=30),
+                ):
+                    pass
+
+        assert isinstance(exc_info.value, SankhyaException)
+        assert exc_info.value.request is request
 
 
 # =============================================================================

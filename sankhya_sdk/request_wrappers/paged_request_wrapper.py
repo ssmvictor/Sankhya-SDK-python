@@ -37,6 +37,10 @@ if TYPE_CHECKING:
     from sankhya_sdk.core.context import SankhyaContext
 
 from sankhya_sdk.enums.service_name import ServiceName
+from sankhya_sdk.exceptions import (
+    PagedRequestException as _SdkPagedRequestException,
+    ServiceRequestGeneralException,
+)
 from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerialization, Metadata
 from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.models.service.service_request import ServiceRequest
@@ -58,16 +62,30 @@ ProcessDataCallback = Callable[[List[T]], None]
 ProcessDataCallbackAsync = Callable[[List[T]], Awaitable[None]]
 
 
-class PagedRequestException(Exception):
-    """Exceção específica para erros de requisição paginada."""
+class PagedRequestException(_SdkPagedRequestException):
+    """
+    Exceção específica para erros de requisição paginada.
+    
+    Faz parte da hierarquia de exceções do SDK: deriva de
+    ``sankhya_sdk.exceptions.PagedRequestException`` (porta de
+    ``GoodPractices/PagedRequestException.cs`` no .NET), portanto também é
+    ``ServiceRequestGeneralException`` e ``SankhyaException``. Mantém a
+    mensagem informada (``str(exc) == message``), a página e a exceção
+    interna, que também é a causa (``__cause__``).
+    """
     
     def __init__(
         self,
         message: str,
         page: int = 0,
         inner_exception: Optional[Exception] = None,
+        request: Optional[ServiceRequest] = None,
     ):
-        super().__init__(message)
+        # Usa o construtor da base geral para manter a mensagem informada
+        # (o construtor do .NET fixa a mensagem padrão de requisição paginada)
+        ServiceRequestGeneralException.__init__(
+            self, message, request, None, inner_exception
+        )
         self.page = page
         self.inner_exception = inner_exception
 
@@ -393,6 +411,7 @@ class PagedRequestWrapper:
                 f"Erro ao carregar página {page}: {e}",
                 page=page,
                 inner_exception=e,
+                request=self._request,
             )
             self._dispatch_page_error(page, e)
             return (False, 0, None)
@@ -417,6 +436,7 @@ class PagedRequestWrapper:
                         self._load_error = PagedRequestException(
                             f"Falha ao carregar página {current_page}",
                             page=current_page,
+                            request=self._request,
                         )
                     break
                 
@@ -680,6 +700,7 @@ class PagedRequestWrapper:
                             raise PagedRequestException(
                                 f"Erro durante carregamento: {wrapper._load_error}",
                                 inner_exception=wrapper._load_error,
+                                request=wrapper._request,
                             )
                         # Processa último lote se houver
                         if process_data and batch:
@@ -693,6 +714,7 @@ class PagedRequestWrapper:
                             raise PagedRequestException(
                                 f"Erro durante carregamento: {wrapper._load_error}",
                                 inner_exception=wrapper._load_error,
+                                request=wrapper._request,
                             )
                         break
                         
@@ -711,6 +733,7 @@ class PagedRequestWrapper:
                 raise PagedRequestException(
                     f"Erro durante carregamento: {wrapper._load_error}",
                     inner_exception=wrapper._load_error,
+                    request=wrapper._request,
                 )
         
         logger.info(f"Paginação completa: {items_yielded} itens retornados")
@@ -778,6 +801,7 @@ class PagedRequestWrapper:
                 f"Erro ao carregar página {page} (async): {e}",
                 page=page,
                 inner_exception=e,
+                request=self._request,
             )
             self._dispatch_page_error(page, e)
             return (False, 0, None, [])
@@ -808,6 +832,7 @@ class PagedRequestWrapper:
                         self._load_error = PagedRequestException(
                             f"Falha ao carregar página {current_page} (async)",
                             page=current_page,
+                            request=self._request,
                         )
                     break
                 
@@ -950,6 +975,7 @@ class PagedRequestWrapper:
                             raise PagedRequestException(
                                 f"Erro durante carregamento: {wrapper._load_error}",
                                 inner_exception=wrapper._load_error,
+                                request=wrapper._request,
                             )
                         # Processa último lote
                         if process_data and batch:
@@ -986,6 +1012,7 @@ class PagedRequestWrapper:
                             raise PagedRequestException(
                                 f"Erro durante carregamento: {wrapper._load_error}",
                                 inner_exception=wrapper._load_error,
+                                request=wrapper._request,
                             )
                         # Processa último lote se houver
                         if process_data and batch:
@@ -1013,6 +1040,7 @@ class PagedRequestWrapper:
                 raise PagedRequestException(
                     f"Erro durante carregamento: {wrapper._load_error}",
                     inner_exception=wrapper._load_error,
+                    request=wrapper._request,
                 )
         
         logger.info(f"Paginação async completa: {items_yielded} itens")
