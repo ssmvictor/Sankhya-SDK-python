@@ -276,6 +276,54 @@ class PagedRequestWrapper:
                 logger.warning(f"Erro em callback on_page_processed: {e}")
     
     # =========================================================================
+    # Private Methods - Pagination State
+    # =========================================================================
+
+    def _apply_pager_id_to_request(self) -> None:
+        """
+        Envia o pagerID recebido na página anterior para a próxima requisição.
+
+        Equivale a ``_request.RequestBody.DataSet.PagerId`` no .NET. Só é
+        atribuído quando o data_set da requisição suporta o campo
+        ``pager_id``; modelos pydantic sem esse campo rejeitariam a
+        atribuição e fariam a carga da página falhar.
+        """
+        if not self._pager_id:
+            return
+
+        data_set = self._request.request_body.data_set
+        if hasattr(data_set, "pager_id"):
+            data_set.pager_id = self._pager_id
+        else:
+            logger.debug(
+                "data_set da requisição não suporta pager_id; "
+                "pagerID não será enviado"
+            )
+
+    def _update_pagination_from_entities(self, response: ServiceResponse) -> None:
+        """
+        Atualiza pager_id e total_pages a partir do elemento <entities>.
+
+        No protocolo Sankhya (e no PagedRequestWrapper.LoadPage do .NET) a
+        paginação é informada pelos atributos ``pagerID`` e ``totalPages``
+        de ``CrudServiceProviderEntities``. ``totalPages <= 0`` indica total
+        desconhecido (mesma regra do .NET) e não é armazenado.
+
+        Args:
+            response: Resposta do serviço
+        """
+        provider_entities = response.response_body.crud_service_provider_entities
+        if not provider_entities:
+            return
+
+        if provider_entities.pager_id:
+            self._pager_id = provider_entities.pager_id
+
+        total_pages = provider_entities.total_pages
+        if isinstance(total_pages, int) and total_pages > 0:
+            self._total_pages = total_pages
+
+    # =========================================================================
     # Private Methods - Page Loading (Sync)
     # =========================================================================
     
@@ -296,8 +344,7 @@ class PagedRequestWrapper:
             self._request.request_body.data_set.page_number = page
             
             # Adiciona pager_id se disponível
-            if self._pager_id:
-                self._request.request_body.data_set.pager_id = self._pager_id
+            self._apply_pager_id_to_request()
         
         try:
             # Invoca serviço
@@ -311,6 +358,7 @@ class PagedRequestWrapper:
             
             # Atualiza pager_id e total_pages se disponíveis
             if response.response_body:
+                self._update_pagination_from_entities(response)
                 pager = response.response_body.pager
                 if pager:
                     if pager.pager_id:
@@ -687,8 +735,7 @@ class PagedRequestWrapper:
         if self._request.request_body and self._request.request_body.data_set:
             self._request.request_body.data_set.page_number = page
             
-            if self._pager_id:
-                self._request.request_body.data_set.pager_id = self._pager_id
+            self._apply_pager_id_to_request()
         
         try:
             # Invoca serviço de forma assíncrona
@@ -702,6 +749,7 @@ class PagedRequestWrapper:
             
             # Atualiza paginação
             if response.response_body:
+                self._update_pagination_from_entities(response)
                 pager = response.response_body.pager
                 if pager:
                     if pager.pager_id:

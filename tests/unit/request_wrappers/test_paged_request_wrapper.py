@@ -15,7 +15,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.models.base import EntityBase
+from sankhya_sdk.models.service.entity_types import DataSet
+from sankhya_sdk.models.service.request_body import RequestBody
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
 from sankhya_sdk.request_wrappers.paged_request_wrapper import (
@@ -35,6 +38,43 @@ class MockEntity(EntityBase):
     
     code: Optional[int] = None
     name: Optional[str] = None
+
+
+class DataSetWithPagerId(DataSet):
+    """DataSet com o campo pager_id (equivalente ao DataSet.PagerId do .NET)."""
+
+    pager_id: Optional[str] = None
+
+
+def _provider_entities_response(
+    rows: List[Dict[str, Any]],
+    pager_id: Optional[str] = None,
+    total_pages: Optional[int] = None,
+) -> ServiceResponse:
+    """
+    Monta um ServiceResponse real a partir do XML de CRUDServiceProvider.
+
+    No protocolo Sankhya a paginação vem nos atributos ``pagerID`` e
+    ``totalPages`` do elemento ``<entities>`` (CrudServiceProviderEntities).
+    """
+    attrs = f' total="{len(rows)}"'
+    if total_pages is not None:
+        attrs += f' totalPages="{total_pages}"'
+    if pager_id is not None:
+        attrs += f' pagerID="{pager_id}"'
+
+    entities_xml = "".join(
+        "<entity>"
+        + "".join(f"<{key}>{value}</{key}>" for key, value in row.items())
+        + "</entity>"
+        for row in rows
+    )
+
+    return ServiceResponse.from_xml_string(
+        '<serviceResponse serviceName="CRUDServiceProvider.loadRecords" status="1">'
+        f"<responseBody><entities{attrs}>{entities_xml}</entities></responseBody>"
+        "</serviceResponse>"
+    )
 
 
 # =============================================================================
@@ -212,18 +252,24 @@ class TestPagedRequestWrapper:
         return MagicMock(spec=ServiceRequest)
     
     @pytest.fixture
+    def service_request(self):
+        """
+        Cria requisição real de CRUDServiceProvider.loadRecords.
+
+        MagicMock(spec=ServiceRequest) não expõe campos de instância do
+        pydantic v2 (ex.: request_body), por isso os testes que percorrem
+        a requisição usam o modelo real.
+        """
+        return ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+    @pytest.fixture
     def mock_response(self):
-        """Cria resposta mock com dados paginados."""
-        response = MagicMock(spec=ServiceResponse)
-        response.response_body = MagicMock()
-        response.response_body.entities = [
-            {"code": i, "name": f"Entity {i}"} for i in range(150)
-        ]
-        response.response_body.pager = MagicMock()
-        response.response_body.pager.pager_id = "test-pager-id"
-        response.response_body.pager.total_pages = 3
-        response.response_body.pager.total_records = 450
-        return response
+        """Cria resposta real com dados paginados (página de 150 itens)."""
+        return _provider_entities_response(
+            [{"code": i, "name": f"Entity {i}"} for i in range(150)],
+            pager_id="test-pager-id",
+            total_pages=3,
+        )
     
     def test_wrapper_initialization(self, mock_token, mock_request):
         """Testa inicialização do wrapper."""
@@ -344,6 +390,82 @@ class TestPagedRequestWrapper:
         assert wrapper._pager_id == "test-pager-id"
         assert wrapper._total_pages == 3
         assert wrapper._items.qsize() == 150
+        assert wrapper._items.get_nowait().dictionary == {"code": 0, "name": "Entity 0"}
+
+    @patch("sankhya_sdk.core.context.SankhyaContext")
+    def test_load_page_sends_pager_id_on_next_page(
+        self, mock_context, mock_token, mock_response
+    ):
+        """O pagerID da página anterior é enviado no dataSet da próxima (.NET)."""
+        mock_context.service_invoker_with_token.return_value = mock_response
+
+        request = ServiceRequest(
+            service=ServiceName.CRUD_SERVICE_FIND,
+            request_body=RequestBody(data_set=DataSetWithPagerId()),
+        )
+        wrapper = PagedRequestWrapper(
+            request=request,
+            entity_type=MockEntity,
+            token=mock_token,
+        )
+
+        assert wrapper._load_page(1)[0] is True
+        assert request.request_body.data_set.pager_id is None
+
+        assert wrapper._load_page(2)[0] is True
+        assert request.request_body.data_set.page_number == 2
+        assert request.request_body.data_set.pager_id == "test-pager-id"
+
+    @patch("sankhya_sdk.core.context.SankhyaContext")
+    def test_load_page_data_set_without_pager_id_field(
+        self, mock_context, mock_token, mock_response
+    ):
+        """DataSet sem campo pager_id não faz a carga da próxima página falhar."""
+        mock_context.service_invoker_with_token.return_value = mock_response
+
+        request = ServiceRequest(
+            service=ServiceName.CRUD_SERVICE_FIND,
+            request_body=RequestBody(data_set=DataSet()),
+        )
+        wrapper = PagedRequestWrapper(
+            request=request,
+            entity_type=MockEntity,
+            token=mock_token,
+        )
+
+        assert wrapper._load_page(1)[0] is True
+        success, quantity, _ = wrapper._load_page(2)
+
+        assert success is True
+        assert quantity == 150
+        assert wrapper._load_error is None
+        assert request.request_body.data_set.page_number == 2
+
+    @patch("sankhya_sdk.core.context.SankhyaContext")
+    def test_load_page_ignores_non_positive_total_pages(
+        self, mock_context, mock_token, service_request
+    ):
+        """totalPages <= 0 indica total desconhecido (como no .NET)."""
+        mock_context.service_invoker_with_token.return_value = (
+            _provider_entities_response(
+                [{"code": 1, "name": "Entity 1"}],
+                pager_id="pager-1",
+                total_pages=0,
+            )
+        )
+        wrapper = PagedRequestWrapper(
+            request=service_request,
+            entity_type=MockEntity,
+            token=mock_token,
+        )
+
+        success, quantity, total_pages = wrapper._load_page(1)
+
+        assert success is True
+        assert quantity == 1
+        assert total_pages is None
+        assert wrapper._total_pages is None
+        assert wrapper._pager_id == "pager-1"
     
     @patch("sankhya_sdk.core.context.SankhyaContext")
     def test_load_page_error(self, mock_context, mock_token, mock_request):
@@ -369,59 +491,35 @@ class TestPagedRequestWrapper:
         assert quantity == 0
         error_callback.assert_called_once()
     
-    def test_extract_entities_from_response_entities(self, mock_token, mock_request):
+    def test_extract_entities_from_response_entities(self, mock_token, service_request):
         """Testa extração de entidades do campo entities."""
         wrapper = PagedRequestWrapper(
-            request=mock_request,
+            request=service_request,
             entity_type=MockEntity,
             token=mock_token,
         )
         
-        response = MagicMock()
-        response.response_body = MagicMock()
-        response.response_body.entities = [
-            {"code": 1, "name": "Entity 1"},
-            {"code": 2, "name": "Entity 2"},
-        ]
-        response.response_body.data_set = None
-        response.response_body.result = None
+        response = _provider_entities_response(
+            [
+                {"code": 1, "name": "Entity 1"},
+                {"code": 2, "name": "Entity 2"},
+            ]
+        )
         
         entities = wrapper._extract_entities_from_response(response)
         
         assert len(entities) == 2
         assert entities[0].dictionary["code"] == 1
     
-    def test_extract_entities_from_response_data_set(self, mock_token, mock_request):
-        """Testa extração de entidades do campo data_set."""
-        wrapper = PagedRequestWrapper(
-            request=mock_request,
-            entity_type=MockEntity,
-            token=mock_token,
-        )
-        
-        response = MagicMock()
-        response.response_body = MagicMock()
-        response.response_body.entities = None
-        response.response_body.data_set = MagicMock()
-        response.response_body.data_set.rows = [
-            {"code": 1, "name": "Entity 1"},
-        ]
-        response.response_body.result = None
-        
-        entities = wrapper._extract_entities_from_response(response)
-        
-        assert len(entities) == 1
-    
-    def test_extract_entities_empty_response(self, mock_token, mock_request):
+    def test_extract_entities_empty_response(self, mock_token, service_request):
         """Testa extração de entidades com resposta vazia."""
         wrapper = PagedRequestWrapper(
-            request=mock_request,
+            request=service_request,
             entity_type=MockEntity,
             token=mock_token,
         )
         
-        response = MagicMock()
-        response.response_body = None
+        response = ServiceResponse(response_body=None)
         
         entities = wrapper._extract_entities_from_response(response)
         
