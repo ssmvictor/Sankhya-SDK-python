@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sankhya_sdk.core.context import SankhyaContext
+from sankhya_sdk.enums.fiscal_person_type import FiscalPersonType
+from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_request_type import ServiceRequestType
 from sankhya_sdk.exceptions import (
     ServiceRequestTooManyResultsException,
@@ -17,6 +20,8 @@ from sankhya_sdk.exceptions import (
 )
 from sankhya_sdk.helpers.filter_expression import LiteralCriteria
 from sankhya_sdk.models.base import EntityBase
+from sankhya_sdk.models.service.service_response import ServiceResponse
+from sankhya_sdk.models.transport.partner import Partner
 from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
     SimpleCRUDRequestWrapper,
 )
@@ -29,10 +34,66 @@ from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
 
 class MockEntity(EntityBase):
     """Entidade mock para testes."""
-    
+
     code: int = 0
     name: str = ""
     active: str = "S"
+
+
+# =============================================================================
+# Respostas reais (XML do protocolo Sankhya)
+# =============================================================================
+
+
+# Resposta de CRUDServiceProvider com <metadata> e chaves posicionais f0..fN
+PARTNER_METADATA_ENTITIES_XML = (
+    '<entities total="1" totalPages="1">'
+    "<metadata><fields>"
+    '<field name="CODPARC"/><field name="NOMEPARC"/><field name="CGC_CPF"/>'
+    '<field name="CEP"/><field name="ATIVO"/><field name="CLIENTE"/>'
+    '<field name="TIPPESSOA"/>'
+    "</fields></metadata>"
+    "<entity><f0>123</f0><f1>Cliente</f1><f2>01234567890</f2>"
+    "<f3>01001000</f3><f4>S</f4><f5>N</f5><f6>F</f6></entity>"
+    "</entities>"
+)
+
+
+def _service_response(
+    body_xml: str,
+    service: str = "CRUDServiceProvider.loadRecords",
+) -> ServiceResponse:
+    """Desserializa uma resposta Sankhya real a partir do XML do corpo."""
+    return ServiceResponse.from_xml_string(
+        f'<serviceResponse serviceName="{service}" status="1" '
+        'pendingPrinting="false" transactionId="TX-1">'
+        f"<responseBody>{body_xml}</responseBody>"
+        "</serviceResponse>"
+    )
+
+
+def _partner_entities_xml(*codes: int) -> str:
+    """Gera <entities> com chaves nomeadas para os códigos informados."""
+    rows = "".join(
+        f"<entity><CODPARC>{code}</CODPARC>"
+        f"<NOMEPARC>Parceiro {code}</NOMEPARC></entity>"
+        for code in codes
+    )
+    return f'<entities total="{len(codes)}">{rows}</entities>'
+
+
+def _assert_typed_partner(partner: Partner) -> None:
+    """Valida a conversão tipada de PARTNER_METADATA_ENTITIES_XML."""
+    assert isinstance(partner, Partner)
+    assert partner.code == 123
+    assert partner.name == "Cliente"
+    # Zeros à esquerda preservados (valores chegam como texto bruto)
+    assert partner.document == "01234567890"
+    assert partner.zip_code == "01001000"
+    # S/N convertidos para bool e TIPPESSOA para enum por convert_to_type
+    assert partner.is_active is True
+    assert partner.is_client is False
+    assert partner.fiscal_type is FiscalPersonType.INDIVIDUAL
 
 
 # =============================================================================
@@ -460,20 +521,68 @@ class TestResponseProcessing:
     """Testes de processamento de resposta."""
     
     def test_extract_entities_from_entities_field(self, mock_context):
-        """Extrai entidades do campo entities."""
+        """
+        Extrai entidades de uma ServiceResponse real (ServiceResponse.Entities).
+
+        No .NET o SimpleCrudRequestWrapper lê ``response.Entities``
+        (CrudServiceEntities ou CrudServiceProviderEntities); os valores
+        permanecem como texto bruto (zeros à esquerda preservados).
+        """
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
-        response = MagicMock()
-        response.response_body = MagicMock()
-        response.response_body.entities = [
-            {"code": 1, "name": "Test"}
-        ]
-        response.response_body.data_set = None
-        
+
+        response = _service_response(
+            '<entities total="1"><entity>'
+            "<CODPARC>123</CODPARC><NOMEPARC>Cliente</NOMEPARC>"
+            "<CGC_CPF>01234567890</CGC_CPF>"
+            "</entity></entities>"
+        )
+
         entities = SimpleCRUDRequestWrapper._extract_entities_from_response(response)
-        
+
         assert len(entities) == 1
-    
+        assert entities[0].dictionary == {
+            "CODPARC": "123",
+            "NOMEPARC": "Cliente",
+            "CGC_CPF": "01234567890",
+        }
+
+    def test_extract_entities_renamed_by_response_metadata(self, mock_context):
+        """Entidades f0..fN chegam com os nomes do <metadata> da resposta."""
+        SimpleCRUDRequestWrapper.initialize(mock_context)
+
+        response = _service_response(PARTNER_METADATA_ENTITIES_XML)
+
+        entities = SimpleCRUDRequestWrapper._extract_entities_from_response(response)
+
+        assert [entity.dictionary for entity in entities] == [
+            {
+                "CODPARC": "123",
+                "NOMEPARC": "Cliente",
+                "CGC_CPF": "01234567890",
+                "CEP": "01001000",
+                "ATIVO": "S",
+                "CLIENTE": "N",
+                "TIPPESSOA": "F",
+            }
+        ]
+
+    def test_extract_entities_from_crud_find_entidades(self, mock_context):
+        """Entidades de crud.find (<entidades>/<entidade>) também são extraídas."""
+        SimpleCRUDRequestWrapper.initialize(mock_context)
+
+        response = _service_response(
+            '<entidades nome="Parceiro"><entidade>'
+            "<CODPARC>7</CODPARC><NOMEPARC>Parceiro 7</NOMEPARC>"
+            "</entidade></entidades>",
+            service="crud.find",
+        )
+
+        entities = SimpleCRUDRequestWrapper._extract_entities_from_response(response)
+
+        assert [entity.dictionary for entity in entities] == [
+            {"CODPARC": "7", "NOMEPARC": "Parceiro 7"}
+        ]
+
     def test_extract_entities_from_empty_response(self, mock_context):
         """Retorna lista vazia para resposta sem body."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
@@ -482,8 +591,209 @@ class TestResponseProcessing:
         response.response_body = None
         
         entities = SimpleCRUDRequestWrapper._extract_entities_from_response(response)
-        
+
         assert entities == []
+
+
+# =============================================================================
+# End-to-end com ServiceResponse desserializada (SimpleCrudRequestWrapper.cs)
+# =============================================================================
+
+
+class TestParsedServiceResponse:
+    """
+    Operações públicas com respostas reais desserializadas do XML.
+
+    Apenas o transporte (``SankhyaContext.service_invoker_with_token`` /
+    ``service_invoker_async_with_token``) é simulado; a montagem da
+    requisição, a extração das entidades e a conversão tipada são reais.
+    """
+
+    @pytest.fixture
+    def session_token(self, mock_context):
+        """Inicializa o wrapper e retorna o token da sessão dedicada."""
+        SimpleCRUDRequestWrapper.initialize(mock_context)
+        return mock_context.acquire_new_session.return_value
+
+    def test_try_find_converts_parsed_entity(self, session_token):
+        """try_find converte a entidade da resposta (metadata + f0..fN)."""
+        response = _service_response(PARTNER_METADATA_ENTITIES_XML)
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            result = SimpleCRUDRequestWrapper.try_find(Partner(code=123))
+
+        _assert_typed_partner(result)
+        request, token = invoker.call_args[0]
+        assert request.service == ServiceName.CRUD_SERVICE_FIND
+        assert token == session_token
+
+    def test_try_find_returns_none_for_empty_entities(self, session_token):
+        """Sem entidades na resposta, try_find retorna None (.NET)."""
+        response = _service_response('<entities total="0"/>')
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ):
+            assert SimpleCRUDRequestWrapper.try_find(Partner(code=1)) is None
+
+    def test_find_raises_for_empty_entities(self, session_token):
+        """Sem entidades na resposta, find lança ServiceRequestUnexpectedResultException."""
+        response = _service_response('<entities total="0"/>')
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ):
+            with pytest.raises(ServiceRequestUnexpectedResultException):
+                SimpleCRUDRequestWrapper.find(Partner(code=1))
+
+    def test_find_converts_named_key_entity(self, session_token):
+        """find converte a entidade com chaves nomeadas."""
+        response = _service_response(_partner_entities_xml(42))
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ):
+            result = SimpleCRUDRequestWrapper.find(Partner(code=42))
+
+        assert isinstance(result, Partner)
+        assert result.code == 42
+        assert result.name == "Parceiro 42"
+
+    def test_find_all_converts_all_parsed_entities(self, session_token):
+        """find_all converte todas as entidades da resposta."""
+        response = _service_response(_partner_entities_xml(1, 2, 3))
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ):
+            results = SimpleCRUDRequestWrapper.find_all(Partner())
+
+        assert [partner.code for partner in results] == [1, 2, 3]
+        assert [partner.name for partner in results] == [
+            "Parceiro 1",
+            "Parceiro 2",
+            "Parceiro 3",
+        ]
+
+    def test_try_find_with_criteria_converts_parsed_entity(self, session_token):
+        """try_find_with_criteria converte a entidade da resposta."""
+        response = _service_response(PARTNER_METADATA_ENTITIES_XML)
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            result = SimpleCRUDRequestWrapper.try_find_with_criteria(
+                Partner, LiteralCriteria.equals("CODPARC", 123)
+            )
+
+        _assert_typed_partner(result)
+        assert invoker.call_args[0][0].service == ServiceName.CRUD_SERVICE_FIND
+
+    def test_update_converts_saved_entity(self, session_token):
+        """update (saveRecord) converte a entidade devolvida pelo servidor."""
+        response = _service_response(
+            PARTNER_METADATA_ENTITIES_XML,
+            service="CRUDServiceProvider.saveRecord",
+        )
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            result = SimpleCRUDRequestWrapper.update(
+                Partner(code=123, name="Cliente")
+            )
+
+        _assert_typed_partner(result)
+        assert invoker.call_args[0][0].service == ServiceName.CRUD_SERVICE_SAVE
+
+    def test_remove_sends_remove_request(self, session_token):
+        """remove invoca CRUDServiceProvider.removeRecord na sessão dedicada."""
+        response = _service_response("", service="CRUDServiceProvider.removeRecord")
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            assert SimpleCRUDRequestWrapper.remove(Partner(code=123)) is None
+
+        request, token = invoker.call_args[0]
+        assert request.service == ServiceName.CRUD_SERVICE_REMOVE
+        assert token == session_token
+
+    @pytest.mark.asyncio
+    async def test_try_find_async_converts_parsed_entity(self, session_token):
+        """try_find_async converte a entidade da resposta."""
+        response = _service_response(PARTNER_METADATA_ENTITIES_XML)
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=response,
+        ) as invoker:
+            result = await SimpleCRUDRequestWrapper.try_find_async(Partner(code=123))
+
+        _assert_typed_partner(result)
+        request, token = invoker.call_args[0]
+        assert request.service == ServiceName.CRUD_SERVICE_FIND
+        assert token == session_token
+
+    @pytest.mark.asyncio
+    async def test_find_async_converts_parsed_entity(self, session_token):
+        """find_async converte a entidade da resposta."""
+        response = _service_response(_partner_entities_xml(5))
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=response,
+        ):
+            result = await SimpleCRUDRequestWrapper.find_async(Partner(code=5))
+
+        assert result.code == 5
+        assert result.name == "Parceiro 5"
+
+    @pytest.mark.asyncio
+    async def test_find_async_with_criteria_converts_parsed_entity(
+        self, session_token
+    ):
+        """find_async_with_criteria converte a entidade da resposta."""
+        response = _service_response(PARTNER_METADATA_ENTITIES_XML)
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=response,
+        ):
+            result = await SimpleCRUDRequestWrapper.find_async_with_criteria(
+                Partner, LiteralCriteria.equals("CODPARC", 123)
+            )
+
+        _assert_typed_partner(result)
+
+    @pytest.mark.asyncio
+    async def test_update_async_converts_saved_entity(self, session_token):
+        """update_async converte a entidade devolvida pelo servidor."""
+        response = _service_response(
+            PARTNER_METADATA_ENTITIES_XML,
+            service="CRUDServiceProvider.saveRecord",
+        )
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=response,
+        ) as invoker:
+            result = await SimpleCRUDRequestWrapper.update_async(
+                Partner(code=123, name="Cliente")
+            )
+
+        _assert_typed_partner(result)
+        assert invoker.call_args[0][0].service == ServiceName.CRUD_SERVICE_SAVE
 
 
 # =============================================================================

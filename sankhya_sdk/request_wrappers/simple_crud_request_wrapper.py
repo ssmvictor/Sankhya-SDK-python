@@ -35,6 +35,7 @@ from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerial
 from sankhya_sdk.helpers.filter_expression import ILiteralCriteria
 from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensions
 from sankhya_sdk.models.base import EntityBase
+from sankhya_sdk.models.service.entity_types import EntityDynamic
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
 
@@ -827,41 +828,37 @@ class SimpleCRUDRequestWrapper:
         """
         Extrai entidades dinâmicas da resposta do serviço.
         
+        Equivale a ``ServiceResponse.Entities`` (.NET, ServiceResponse.cs),
+        usado pelo ``SimpleCrudRequestWrapper``: as entidades vêm de
+        ``CrudServiceEntities`` (crud.find) ou de
+        ``CrudServiceProviderEntities`` (CRUDServiceProvider), já com os
+        nomes reais dos campos quando a resposta traz ``<metadata>``. Os
+        valores permanecem como texto bruto; a conversão de tipos é feita
+        por ``EntityDynamicSerialization.convert_to_type``.
+        
         Args:
             response: Resposta do serviço
             
         Returns:
             Lista de EntityDynamicSerialization
         """
-        result = []
+        result: List[EntityDynamicSerialization] = []
         
-        if response.response_body is None:
+        if response is None or response.response_body is None:
             return result
         
-        body = response.response_body
-        
-        # Tenta extrair de entities (CRUD.find)
-        if hasattr(body, "entities") and body.entities:
-            for entity_data in body.entities:
-                if isinstance(entity_data, dict):
-                    result.append(EntityDynamicSerialization(entity_data))
-                elif hasattr(entity_data, "fields") and entity_data.fields:
-                    # Converte Entity para dict
-                    data = {}
-                    for field in entity_data.fields:
-                        if hasattr(field, "name") and hasattr(field, "value"):
-                            data[field.name] = field.value
-                    result.append(EntityDynamicSerialization(data))
-        
-        # Tenta extrair de data_set (CRUDServiceProvider.find)
-        if hasattr(body, "data_set") and body.data_set:
-            ds = body.data_set
-            if hasattr(ds, "data_rows") and ds.data_rows:
-                for row in ds.data_rows:
-                    if isinstance(row, dict):
-                        result.append(EntityDynamicSerialization(row))
-                    elif hasattr(row, "local_fields"):
-                        result.append(EntityDynamicSerialization(row.local_fields))
+        for entity_data in response.entities:
+            if isinstance(entity_data, EntityDynamicSerialization):
+                result.append(entity_data)
+            elif isinstance(entity_data, dict):
+                result.append(EntityDynamicSerialization(dict(entity_data)))
+            elif isinstance(entity_data, EntityDynamic):
+                result.append(EntityDynamicSerialization(dict(entity_data.fields)))
+            else:
+                logger.warning(
+                    f"Entidade de tipo inesperado ignorada na resposta: "
+                    f"{type(entity_data).__name__}"
+                )
         
         return result
     
