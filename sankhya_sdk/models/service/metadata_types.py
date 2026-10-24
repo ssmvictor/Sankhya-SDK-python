@@ -201,11 +201,15 @@ class Key(BaseModel):
     Chave de entidade.
     
     Representa a chave primária ou única de um registro.
+
+    O atributo ``valor`` de ``<chave>`` (``Key.Value`` no .NET) é exposto em
+    ``value``; é a chave retornada por ``FileOpen`` (``OpenFile``).
     """
 
     model_config = ConfigDict(frozen=False)
 
     name: Optional[str] = None
+    value: Optional[str] = None
     values: Dict[str, Any] = PydanticField(default_factory=dict)
 
     def to_xml(self) -> Element:
@@ -213,6 +217,8 @@ class Key(BaseModel):
         elem = etree.Element("chave")
         if self.name:
             elem.set("nome", self.name)
+        if self.value is not None:
+            elem.set("valor", self.value)
         for key, value in self.values.items():
             create_xml_element(key, value, parent=elem)
         return elem
@@ -223,9 +229,10 @@ class Key(BaseModel):
         values: Dict[str, Any] = {}
         for child in element:
             values[child.tag] = get_element_text(child)
-        
+
         return cls(
             name=get_element_attr(element, "nome"),
+            value=get_element_attr(element, "valor"),
             values=values,
         )
 

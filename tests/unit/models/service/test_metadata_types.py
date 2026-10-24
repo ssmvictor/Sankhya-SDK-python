@@ -7,7 +7,7 @@ Src/Sankhya/Service/Session.cs e RequestBody.cs).
 
 from lxml import etree
 
-from sankhya_sdk.models.service.metadata_types import Pager
+from sankhya_sdk.models.service.metadata_types import Key, Pager
 from sankhya_sdk.models.service.response_body import ResponseBody
 
 
@@ -61,3 +61,63 @@ class TestPager:
 
         assert body.pager.total_pages == 5
         assert body.pager.total_records == 42
+
+
+class TestKey:
+    """Testes para a classe Key (.NET: Service/Key.cs)."""
+
+    def test_from_xml_reads_valor_attribute(self):
+        """Testa que o atributo "valor" de <chave> é lido em value."""
+        element = etree.fromstring('<chave valor="FILE_KEY_123"/>')
+
+        key = Key.from_xml(element)
+
+        assert key.value == "FILE_KEY_123"
+
+    def test_from_xml_without_valor_returns_none(self):
+        """Testa que value é None quando o atributo "valor" não existe."""
+        key = Key.from_xml(etree.fromstring("<chave/>"))
+
+        assert key.value is None
+
+    def test_from_xml_still_parses_child_values(self):
+        """Testa que os elementos filhos continuam sendo lidos em values (pk)."""
+        element = etree.fromstring("<pk><NUNOTA>123</NUNOTA></pk>")
+
+        key = Key.from_xml(element)
+
+        assert key.values == {"NUNOTA": "123"}
+        assert key.value is None
+
+    def test_to_xml_writes_valor_attribute(self):
+        """Testa que value é serializado no atributo "valor" de <chave>."""
+        elem = Key(value="ABC").to_xml()
+
+        assert elem.tag == "chave"
+        assert elem.get("valor") == "ABC"
+
+    def test_to_xml_omits_valor_when_not_set(self):
+        """Testa que o atributo "valor" é omitido quando value é None."""
+        elem = Key().to_xml()
+
+        assert "valor" not in elem.attrib
+
+    def test_round_trip(self):
+        """Testa que to_xml/from_xml preservam value, name e values."""
+        original = Key(name="k", value="V1", values={"NUNOTA": "1"})
+
+        restored = Key.from_xml(original.to_xml())
+
+        assert restored.value == "V1"
+        assert restored.name == "k"
+        assert restored.values == {"NUNOTA": "1"}
+
+    def test_response_body_exposes_key_value(self):
+        """Testa ResponseBody.Key.Value (.NET KnowServicesRequestWrapper.OpenFile)."""
+        element = etree.fromstring(
+            '<responseBody><chave valor="FILE_KEY_RETURNED"/></responseBody>'
+        )
+
+        body = ResponseBody.from_xml(element)
+
+        assert body.key.value == "FILE_KEY_RETURNED"
