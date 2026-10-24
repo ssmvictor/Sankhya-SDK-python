@@ -3,6 +3,9 @@
 Testes de integração end-to-end para workflows completos.
 
 Testa fluxos completos de criação, busca, atualização e deleção.
+
+Criação usa ``SimpleCRUDRequestWrapper.update``, que invoca
+``CRUDServiceProvider.saveRecord`` (Create/Update), como no SDK .NET.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.exceptions import SankhyaException
 from sankhya_sdk.models.transport.partner import Partner
@@ -21,6 +25,7 @@ from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
 )
 
 from .conftest import (
+    create_authentication_responses,
     create_error_response,
     create_login_response,
     create_logout_response,
@@ -39,7 +44,7 @@ class TestPartnerWorkflow:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
         
-        login_resp = create_mock_response(200, create_login_response())
+        auth_resps = create_authentication_responses()
         
         # 1. Criar partner
         create_resp = create_mock_response(
@@ -80,7 +85,7 @@ class TestPartnerWorkflow:
         logout_resp = create_mock_response(200, create_logout_response())
         
         mock_session.request.side_effect = [
-            login_resp,
+            *auth_resps,
             create_resp,
             find_resp,
             update_resp,
@@ -92,13 +97,14 @@ class TestPartnerWorkflow:
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
+        context = SankhyaContext(wrapper)
         
-        SimpleCRUDRequestWrapper.initialize(wrapper)
+        SimpleCRUDRequestWrapper.initialize(context)
         
         try:
             # 1. Criar
             new_partner = Partner(name="Novo Parceiro", email_address="email@test.com")
-            created = SimpleCRUDRequestWrapper.create(new_partner)
+            created = SimpleCRUDRequestWrapper.update(new_partner)
             assert created.code == 1001
             assert created.name == "Novo Parceiro"
             
@@ -129,7 +135,7 @@ class TestPartnerWorkflow:
             
         finally:
             SimpleCRUDRequestWrapper.dispose()
-            wrapper.dispose()
+            context.dispose()
 
 
 @pytest.mark.integration
@@ -142,7 +148,7 @@ class TestProductWorkflow:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
         
-        login_resp = create_mock_response(200, create_login_response())
+        auth_resps = create_authentication_responses()
         
         # 1. Criar produto
         create_resp = create_mock_response(
@@ -173,7 +179,7 @@ class TestProductWorkflow:
         logout_resp = create_mock_response(200, create_logout_response())
         
         mock_session.request.side_effect = [
-            login_resp,
+            *auth_resps,
             create_resp,
             find_resp,
             update_resp,
@@ -183,13 +189,14 @@ class TestProductWorkflow:
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
+        context = SankhyaContext(wrapper)
         
-        SimpleCRUDRequestWrapper.initialize(wrapper)
+        SimpleCRUDRequestWrapper.initialize(context)
         
         try:
             # 1. Criar
             new_product = Product(name="Produto Teste", code_volume="UN")
-            created = SimpleCRUDRequestWrapper.create(new_product)
+            created = SimpleCRUDRequestWrapper.update(new_product)
             assert created.code == 500
             
             # 2. Buscar
@@ -207,7 +214,7 @@ class TestProductWorkflow:
             
         finally:
             SimpleCRUDRequestWrapper.dispose()
-            wrapper.dispose()
+            context.dispose()
 
 
 @pytest.mark.integration
@@ -220,7 +227,7 @@ class TestBulkImport:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
         
-        login_resp = create_mock_response(200, create_login_response())
+        auth_resps = create_authentication_responses()
         
         # Respostas para 10 criações
         create_resps = [
@@ -234,18 +241,19 @@ class TestBulkImport:
         
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp] + create_resps + [logout_resp]
+        mock_session.request.side_effect = auth_resps + create_resps + [logout_resp]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
+        context = SankhyaContext(wrapper)
         
-        SimpleCRUDRequestWrapper.initialize(wrapper)
+        SimpleCRUDRequestWrapper.initialize(context)
         
         try:
             imported = []
             for i in range(1, 11):
                 partner = Partner(name=f"Parceiro Importado {i}")
-                result = SimpleCRUDRequestWrapper.create(partner)
+                result = SimpleCRUDRequestWrapper.update(partner)
                 imported.append(result)
             
             assert len(imported) == 10
@@ -255,7 +263,7 @@ class TestBulkImport:
                 
         finally:
             SimpleCRUDRequestWrapper.dispose()
-            wrapper.dispose()
+            context.dispose()
 
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_bulk_product_update(self, mock_session_class):
@@ -263,7 +271,7 @@ class TestBulkImport:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
         
-        login_resp = create_mock_response(200, create_login_response())
+        auth_resps = create_authentication_responses()
         
         # Respostas para 5 atualizações
         update_resps = [
@@ -277,12 +285,13 @@ class TestBulkImport:
         
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp] + update_resps + [logout_resp]
+        mock_session.request.side_effect = auth_resps + update_resps + [logout_resp]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
+        context = SankhyaContext(wrapper)
         
-        SimpleCRUDRequestWrapper.initialize(wrapper)
+        SimpleCRUDRequestWrapper.initialize(context)
         
         try:
             updated = []
@@ -297,7 +306,7 @@ class TestBulkImport:
                 
         finally:
             SimpleCRUDRequestWrapper.dispose()
-            wrapper.dispose()
+            context.dispose()
 
 
 @pytest.mark.integration
@@ -307,12 +316,10 @@ class TestComplexQueries:
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_complex_query_multiple_entities(self, mock_session_class):
         """Query que retorna múltiplas entidades relacionadas."""
-        from sankhya_sdk.criteria.literal_criteria import LiteralCriteria
-        
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
         
-        login_resp = create_mock_response(200, create_login_response())
+        auth_resps = create_authentication_responses()
         
         # Buscar parceiros com cidade específica
         find_resp = create_mock_response(
@@ -325,16 +332,17 @@ class TestComplexQueries:
         
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, find_resp, logout_resp]
+        mock_session.request.side_effect = [*auth_resps, find_resp, logout_resp]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
+        context = SankhyaContext(wrapper)
         
-        SimpleCRUDRequestWrapper.initialize(wrapper)
+        SimpleCRUDRequestWrapper.initialize(context)
         
         try:
-            criteria = LiteralCriteria.equals("CODCID", 100)
-            results = SimpleCRUDRequestWrapper.find_all_with_criteria(Partner, criteria)
+            # Critério CODCID = 100 a partir dos campos preenchidos da entidade
+            results = SimpleCRUDRequestWrapper.find_all(Partner(code_city=100))
             
             assert len(results) == 3
             for p in results:
@@ -342,7 +350,7 @@ class TestComplexQueries:
                 
         finally:
             SimpleCRUDRequestWrapper.dispose()
-            wrapper.dispose()
+            context.dispose()
 
 
 @pytest.mark.integration
@@ -355,7 +363,7 @@ class TestTransactionRollback:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
         
-        login_resp = create_mock_response(200, create_login_response())
+        auth_resps = create_authentication_responses()
         
         # Primeira criação OK
         create1_resp = create_mock_response(
@@ -372,26 +380,27 @@ class TestTransactionRollback:
         logout_resp = create_mock_response(200, create_logout_response())
         
         mock_session.request.side_effect = [
-            login_resp, create1_resp, create2_error, logout_resp
+            *auth_resps, create1_resp, create2_error, logout_resp
         ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
+        context = SankhyaContext(wrapper)
         
-        SimpleCRUDRequestWrapper.initialize(wrapper)
+        SimpleCRUDRequestWrapper.initialize(context)
         
         try:
             # Primeira criação deve funcionar
-            p1 = SimpleCRUDRequestWrapper.create(Partner(name="Parceiro 1"))
+            p1 = SimpleCRUDRequestWrapper.update(Partner(name="Parceiro 1"))
             assert p1.code == 1
             
             # Segunda criação deve falhar
             with pytest.raises(SankhyaException):
-                SimpleCRUDRequestWrapper.create(Partner(name="Parceiro 2"))
+                SimpleCRUDRequestWrapper.update(Partner(name="Parceiro 2"))
                 
         finally:
             SimpleCRUDRequestWrapper.dispose()
-            wrapper.dispose()
+            context.dispose()
 
 
 @pytest.mark.integration
@@ -404,7 +413,7 @@ class TestNeighborhoodWorkflow:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
         
-        login_resp = create_mock_response(200, create_login_response())
+        auth_resps = create_authentication_responses()
         
         create_resp = create_mock_response(
             200, create_success_response([
@@ -421,18 +430,19 @@ class TestNeighborhoodWorkflow:
         logout_resp = create_mock_response(200, create_logout_response())
         
         mock_session.request.side_effect = [
-            login_resp, create_resp, find_resp, logout_resp
+            *auth_resps, create_resp, find_resp, logout_resp
         ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
+        context = SankhyaContext(wrapper)
         
-        SimpleCRUDRequestWrapper.initialize(wrapper)
+        SimpleCRUDRequestWrapper.initialize(context)
         
         try:
             # Criar
             neighborhood = Neighborhood(name="Centro")
-            created = SimpleCRUDRequestWrapper.create(neighborhood)
+            created = SimpleCRUDRequestWrapper.update(neighborhood)
             assert created.code == 100
             
             # Buscar
@@ -442,7 +452,7 @@ class TestNeighborhoodWorkflow:
             
         finally:
             SimpleCRUDRequestWrapper.dispose()
-            wrapper.dispose()
+            context.dispose()
 
 
 @pytest.mark.integration
@@ -455,7 +465,7 @@ class TestMixedEntityOperations:
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session
         
-        login_resp = create_mock_response(200, create_login_response())
+        auth_resps = create_authentication_responses()
         
         partner_resp = create_mock_response(
             200, create_success_response([
@@ -472,25 +482,26 @@ class TestMixedEntityOperations:
         logout_resp = create_mock_response(200, create_logout_response())
         
         mock_session.request.side_effect = [
-            login_resp, partner_resp, product_resp, logout_resp
+            *auth_resps, partner_resp, product_resp, logout_resp
         ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
+        context = SankhyaContext(wrapper)
         
-        SimpleCRUDRequestWrapper.initialize(wrapper)
+        SimpleCRUDRequestWrapper.initialize(context)
         
         try:
             # Criar parceiro
-            partner = SimpleCRUDRequestWrapper.create(Partner(name="Fornecedor"))
+            partner = SimpleCRUDRequestWrapper.update(Partner(name="Fornecedor"))
             assert partner.code == 1
             
             # Criar produto
-            product = SimpleCRUDRequestWrapper.create(
+            product = SimpleCRUDRequestWrapper.update(
                 Product(name="Produto do Fornecedor", code_volume="UN")
             )
             assert product.code == 1
             
         finally:
             SimpleCRUDRequestWrapper.dispose()
-            wrapper.dispose()
+            context.dispose()

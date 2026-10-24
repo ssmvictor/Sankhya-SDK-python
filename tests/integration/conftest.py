@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Type, TypeVar
 from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
+from xml.sax.saxutils import escape as xml_escape
 
 import pytest
 
@@ -61,6 +62,77 @@ def create_mock_response(
     return mock_response
 
 
+def create_user_agent_response(sankhya_version: str = "4.0.0") -> Mock:
+    """
+    Cria mock da resposta HTTP do registro de user agent (DWR).
+
+    ``SankhyaWrapper.authenticate`` faz uma segunda requisição HTTP logo
+    após o login (``/mge/dwr/exec/DWRController.execute.dwr``) para
+    registrar o user agent e obter a versão do Sankhya. Testes que
+    enfileiram respostas em ``requests.Session.request`` precisam
+    reservar uma resposta para essa chamada.
+
+    Args:
+        sankhya_version: Versão do Sankhya informada no HTML
+
+    Returns:
+        Mock configurado como resposta HTML do DWR
+    """
+    html = f'<html><script>var SYSVERSION = "{sankhya_version}";</script></html>'
+    mock_response = Mock()
+    mock_response.ok = True
+    mock_response.status_code = 200
+    mock_response.text = html
+    mock_response.content = html.encode("utf-8")
+    mock_response.headers = {"Content-Type": "text/html"}
+    return mock_response
+
+
+def create_authentication_responses(
+    session_id: str = "MOCK_SESSION_ID_12345",
+    user_code: int = 1,
+) -> List[Mock]:
+    """
+    Cria as respostas HTTP consumidas por ``SankhyaWrapper.authenticate``.
+
+    A autenticação faz duas requisições: o login (``MobileLoginSP.login``)
+    e o registro de user agent via DWR.
+
+    Args:
+        session_id: ID da sessão retornado no login
+        user_code: Código do usuário retornado no login
+
+    Returns:
+        Lista [resposta do login, resposta do registro de user agent]
+    """
+    return [
+        create_mock_response(200, create_login_response(session_id, user_code)),
+        create_user_agent_response(),
+    ]
+
+
+def _create_entity_xml(entity: Dict[str, Any]) -> str:
+    """
+    Gera o XML de uma entidade no formato do protocolo Sankhya.
+
+    Cada campo é um elemento filho com o nome do campo, por exemplo
+    ``<entity><CODPARC>1</CODPARC></entity>`` (formato lido por
+    ``ServiceResponse`` e por ``ReadDynamic`` no SDK .NET). Os valores
+    são escapados para XML.
+
+    Args:
+        entity: Dicionário com campos da entidade
+
+    Returns:
+        XML da entidade
+    """
+    fields = "".join(
+        f"<{k}>{xml_escape(str(v))}</{k}>"
+        for k, v in entity.items()
+    )
+    return f"<entity>{fields}</entity>"
+
+
 def create_success_response(
     entities: Optional[List[Dict[str, Any]]] = None,
     total_records: Optional[int] = None,
@@ -78,13 +150,7 @@ def create_success_response(
     entities_xml = ""
     
     if entities:
-        entity_strs = []
-        for entity in entities:
-            fields = "".join(
-                f'<field name="{k}">{v}</field>'
-                for k, v in entity.items()
-            )
-            entity_strs.append(f"<entity>{fields}</entity>")
+        entity_strs = [_create_entity_xml(entity) for entity in entities]
         entities_xml = f"<entities>{' '.join(entity_strs)}</entities>"
     
     total_attr = f' totalRecords="{total_records}"' if total_records else ""
@@ -227,13 +293,7 @@ def create_paged_response(
     Returns:
         XML serializado como bytes
     """
-    entity_strs = []
-    for entity in entities:
-        fields = "".join(
-            f'<field name="{k}">{v}</field>'
-            for k, v in entity.items()
-        )
-        entity_strs.append(f"<entity>{fields}</entity>")
+    entity_strs = [_create_entity_xml(entity) for entity in entities]
     
     entities_xml = "".join(entity_strs)
     
