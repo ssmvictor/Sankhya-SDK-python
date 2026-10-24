@@ -301,22 +301,14 @@ class PagedRequestWrapper:
         """
         Envia o pagerID recebido na página anterior para a próxima requisição.
 
-        Equivale a ``_request.RequestBody.DataSet.PagerId`` no .NET. Só é
-        atribuído quando o data_set da requisição suporta o campo
-        ``pager_id``; modelos pydantic sem esse campo rejeitariam a
-        atribuição e fariam a carga da página falhar.
+        Equivale a ``_request.RequestBody.DataSet.PagerId`` no .NET
+        (PagedRequestWrapper.cs, LoadPage): o valor vai em
+        ``DataSet.pager_id``, serializado como atributo ``pagerID``.
         """
         if not self._pager_id:
             return
 
-        data_set = self._request.request_body.data_set
-        if hasattr(data_set, "pager_id"):
-            data_set.pager_id = self._pager_id
-        else:
-            logger.debug(
-                "data_set da requisição não suporta pager_id; "
-                "pagerID não será enviado"
-            )
+        self._request.request_body.data_set.pager_id = self._pager_id
 
     def _update_pagination_from_entities(self, response: ServiceResponse) -> None:
         """

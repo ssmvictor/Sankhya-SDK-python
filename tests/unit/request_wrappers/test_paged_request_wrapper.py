@@ -429,6 +429,37 @@ class TestPagedRequestWrapper:
         assert request.request_body.data_set.pager_id == "test-pager-id"
 
     @patch("sankhya_sdk.core.context.SankhyaContext")
+    def test_load_page_serializes_pager_id_in_data_set(
+        self, mock_context, mock_token, mock_response
+    ):
+        """
+        DataSet.pager_id da página seguinte é serializado como pagerID (.NET).
+
+        Usa o modelo DataSet real (sem subclasses), como o .NET atribui
+        ``_request.RequestBody.DataSet.PagerId`` antes da próxima página.
+        """
+        mock_context.service_invoker_with_token.return_value = mock_response
+
+        request = ServiceRequest(
+            service=ServiceName.CRUD_SERVICE_FIND,
+            request_body=RequestBody(data_set=DataSet(root_entity="Parceiro")),
+        )
+        wrapper = PagedRequestWrapper(
+            request=request,
+            entity_type=MockEntity,
+            token=mock_token,
+        )
+
+        assert wrapper._load_page(1)[0] is True
+        assert wrapper._load_page(2)[0] is True
+
+        data_set_xml = request.request_body.data_set.to_xml()
+        assert data_set_xml.get("pagerID") == "test-pager-id"
+        assert data_set_xml.get("pageNumber") == "2"
+        sent_request = mock_context.service_invoker_with_token.call_args[0][0]
+        assert sent_request is request
+
+    @patch("sankhya_sdk.core.context.SankhyaContext")
     def test_load_page_data_set_without_pager_id_field(
         self, mock_context, mock_token, mock_response
     ):
