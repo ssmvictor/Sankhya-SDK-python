@@ -56,6 +56,7 @@ from .metadata_types import (
 from .entity_types import (
     Entity,
     DataSet,
+    DataSetRow,
     EntityDynamic,
     CrudServiceEntities,
     CrudServiceProviderEntities,
@@ -156,6 +157,7 @@ __all__ = [
     # Entidades
     "Entity",
     "DataSet",
+    "DataSetRow",
     "EntityDynamic",
     "CrudServiceEntities",
     "CrudServiceProviderEntities",

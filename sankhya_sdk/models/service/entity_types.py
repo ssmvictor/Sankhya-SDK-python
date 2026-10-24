@@ -33,6 +33,110 @@ from .basic_types import (
     FieldValue,
 )
 from .constants import SankhyaConstants
+from .metadata_types import Metadata
+
+
+def _dynamic_to_xml(tag: str, values: Dict[str, Any]) -> Element:
+    """
+    Serializa um dicionário dinâmico como elemento com um filho por chave.
+
+    Equivale a ``DynamicSerialization.WriteXml`` (CrispyWaffle), usado pelo
+    .NET em ``DataRow.LocalFields``/``DataRow.Keys`` e ``Entity.Ids``:
+    ``<tag><CHAVE>valor</CHAVE>...</tag>``.
+
+    Args:
+        tag: Nome do elemento agrupador
+        values: Valores por nome de campo
+
+    Returns:
+        Elemento XML
+    """
+    elem = etree.Element(tag)
+    for key, value in values.items():
+        child = etree.SubElement(elem, key)
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            child.text = serialize_bool(value)
+        else:
+            child.text = str(value)
+    return elem
+
+
+def _dynamic_from_xml(element: Element) -> Dict[str, Any]:
+    """
+    Lê um elemento dinâmico (``<tag><CHAVE>valor</CHAVE>...</tag>``).
+
+    Os valores são mantidos como texto bruto, como em
+    ``DynamicSerialization.ReadXml`` (.NET).
+
+    Args:
+        element: Elemento XML agrupador
+
+    Returns:
+        Dicionário com os valores por nome de campo
+    """
+    return {child.tag: child.text for child in element}
+
+
+def _fieldset_to_xml(fieldset: Field) -> Element:
+    """
+    Serializa o ``fieldset`` de uma entidade (``<fieldset list="..."/>``).
+
+    No .NET (``Entity.Fieldset``, ``[XmlElement("fieldset")]``) apenas o
+    atributo ``list`` é definido por ``ServiceRequestExtensions``; o nome
+    vazio não é serializado.
+
+    Args:
+        fieldset: Campo com a lista de campos
+
+    Returns:
+        Elemento XML ``fieldset``
+    """
+    elem = fieldset.to_xml()
+    elem.tag = "fieldset"
+    if not fieldset.name:
+        elem.attrib.pop("name", None)
+    return elem
+
+
+class DataSetRow(BaseModel):
+    """
+    Linha de dados (``<dataRow>``) de um DataSet do CRUDServiceProvider.
+
+    Porta de ``Sankhya-SDK-dotnet/Src/Sankhya/Service/DataRow.cs``: contém os
+    campos locais (``<localFields>``) e as chaves (``<key>``) do registro a
+    salvar. Não confundir com ``basic_types.DataRow`` (``<row>``).
+    """
+
+    model_config = ConfigDict(frozen=False)
+
+    local_fields: Optional[Dict[str, Any]] = None
+    keys: Optional[Dict[str, Any]] = None
+
+    def to_xml(self) -> Element:
+        """Serializa para elemento XML."""
+        elem = etree.Element("dataRow")
+        # Mesma ordem de declaração do .NET: LocalFields e depois Keys
+        if self.local_fields is not None:
+            elem.append(_dynamic_to_xml("localFields", self.local_fields))
+        if self.keys is not None:
+            elem.append(_dynamic_to_xml("key", self.keys))
+        return elem
+
+    @classmethod
+    def from_xml(cls, element: Element) -> "DataSetRow":
+        """Deserializa de elemento XML."""
+        local_fields_elem = element.find("localFields")
+        keys_elem = element.find("key")
+        return cls(
+            local_fields=(
+                _dynamic_from_xml(local_fields_elem)
+                if local_fields_elem is not None
+                else None
+            ),
+            keys=_dynamic_from_xml(keys_elem) if keys_elem is not None else None,
+        )
 
 
 class Entity(BaseModel):
@@ -41,31 +145,60 @@ class Entity(BaseModel):
     
     Define a estrutura de uma entidade para operações CRUD,
     incluindo campos, critérios e configurações de busca.
+
+    Os campos seguem ``Sankhya-SDK-dotnet/Src/Sankhya/Service/Entity.cs``
+    (``include_presentation_fields`` -> ``getPresentations``,
+    ``rows_limit`` -> ``rowsLimit``, ``data_set_id`` -> ``datasetid``,
+    ``campos`` -> ``<campo>``, ``fieldset`` -> ``<fieldset>``,
+    ``criteria`` -> ``<criterio>``, ``references_fetch`` ->
+    ``<referenceFetch>`` e ``ids`` -> ``<id>``).
     """
 
     model_config = ConfigDict(frozen=False)
 
     name: str = ""
     root_entity: Optional[str] = None
+    include_presentation_fields: Optional[bool] = None
+    rows_limit: Optional[int] = None
     path: Optional[str] = None
+    data_set_id: Optional[str] = None
     fields: List[Field] = PydanticField(default_factory=list)
     field_values: List[FieldValue] = PydanticField(default_factory=list)
+    campos: List[FieldValue] = PydanticField(default_factory=list)
+    fieldset: Optional[Field] = None
     criteria: List[Criteria] = PydanticField(default_factory=list)
     literal_criteria: Optional[LiteralCriteria] = None
     literal_criteria_sql: Optional[LiteralCriteriaSql] = None
     reference_fetch: Optional[ReferenceFetch] = None
+    references_fetch: Optional[List[ReferenceFetch]] = None
+    ids: List[Dict[str, Any]] = PydanticField(default_factory=list)
     order_by_expression: Optional[str] = None
     include_deleted: bool = False
 
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("entity")
-        elem.set("name", self.name)
+        # Como no .NET (ShouldSerializeName), o nome só é serializado quando
+        # definido: entidades de dataSet e de remoção não possuem nome.
+        if self.name or "name" in self.model_fields_set:
+            elem.set("name", self.name)
         
         if self.root_entity:
             elem.set("rootEntity", self.root_entity)
+        if self.include_presentation_fields is not None:
+            elem.set(
+                "getPresentations",
+                serialize_bool(
+                    self.include_presentation_fields,
+                    SankhyaConstants.BOOL_FORMAT_TRUE_FALSE,
+                ),
+            )
+        if self.rows_limit is not None:
+            elem.set("rowsLimit", str(self.rows_limit))
         if self.path is not None:
             elem.set("path", self.path)
+        if self.data_set_id is not None:
+            elem.set("datasetid", self.data_set_id)
         if self.include_deleted:
             elem.set("includeDeleted", serialize_bool(self.include_deleted, SankhyaConstants.BOOL_FORMAT_S_N))
         if self.order_by_expression:
@@ -83,11 +216,18 @@ class Entity(BaseModel):
             if fv.value is not None:
                 fv_elem.text = fv.value
         
-        # Criteria
-        if self.criteria:
-            criteria_elem = etree.SubElement(elem, "criteria")
-            for crit in self.criteria:
-                criteria_elem.append(crit.to_xml())
+        # Campos (crud.save / crud.remove): <campo nome="...">valor</campo>
+        for campo in self.campos:
+            elem.append(campo.to_xml())
+
+        # Fieldset (CRUDServiceProvider): <fieldset list="..."/>
+        if self.fieldset is not None:
+            elem.append(_fieldset_to_xml(self.fieldset))
+
+        # Criteria: elementos <criterio> diretos, sem agrupador
+        # (.NET: [XmlElement(ElementName = "criterio")] em um array)
+        for crit in self.criteria:
+            elem.append(crit.to_xml())
         
         # Literal criteria
         if self.literal_criteria:
@@ -97,8 +237,17 @@ class Entity(BaseModel):
             elem.append(self.literal_criteria_sql.to_xml())
         
         # Reference fetch
-        if self.reference_fetch:
+        references = list(self.references_fetch or [])
+        if self.reference_fetch and not any(
+            ref is self.reference_fetch for ref in references
+        ):
             elem.append(self.reference_fetch.to_xml())
+        for ref in references:
+            elem.append(ref.to_xml())
+
+        # Ids (CRUDServiceProvider.removeRecord): <id><CHAVE>valor</CHAVE></id>
+        for entity_id in self.ids:
+            elem.append(_dynamic_to_xml("id", entity_id))
         
         return elem
 
@@ -107,16 +256,30 @@ class Entity(BaseModel):
         """Deserializa de elemento XML."""
         fields: List[Field] = []
         field_values: List[FieldValue] = []
+        campos: List[FieldValue] = []
+        fieldset: Optional[Field] = None
         criteria: List[Criteria] = []
         literal_criteria: Optional[LiteralCriteria] = None
         literal_criteria_sql: Optional[LiteralCriteriaSql] = None
-        reference_fetch: Optional[ReferenceFetch] = None
+        references_fetch: List[ReferenceFetch] = []
+        ids: List[Dict[str, Any]] = []
         
         fields_elem = element.find("fields")
         if fields_elem is not None:
             for child in fields_elem:
                 fields.append(Field.from_xml(child))
         
+        for campo_elem in element.findall("campo"):
+            campos.append(FieldValue.from_xml(campo_elem))
+
+        fieldset_elem = element.find("fieldset")
+        if fieldset_elem is not None:
+            fieldset = Field.from_xml(fieldset_elem)
+
+        for criterio_elem in element.findall("criterio"):
+            criteria.append(Criteria.from_xml(criterio_elem))
+
+        # Formato legado: <criteria><criterio/></criteria>
         criteria_elem = element.find("criteria")
         if criteria_elem is not None:
             for child in criteria_elem:
@@ -130,14 +293,17 @@ class Entity(BaseModel):
         if lit_crit_sql_elem is not None:
             literal_criteria_sql = LiteralCriteriaSql.from_xml(lit_crit_sql_elem)
         
-        ref_fetch_elem = element.find("referenceFetch")
-        if ref_fetch_elem is not None:
-            reference_fetch = ReferenceFetch.from_xml(ref_fetch_elem)
+        for ref_fetch_elem in element.findall("referenceFetch"):
+            references_fetch.append(ReferenceFetch.from_xml(ref_fetch_elem))
+
+        for id_elem in element.findall("id"):
+            ids.append(_dynamic_from_xml(id_elem))
         
         # Parse field values from direct child elements
         known_elements = {
             "fields", "criteria", "literalCriteria", 
-            "criterioLiteral", "referenceFetch"
+            "criterioLiteral", "referenceFetch",
+            "campo", "fieldset", "criterio", "id",
         }
         for child in element:
             if child.tag not in known_elements:
@@ -146,16 +312,38 @@ class Entity(BaseModel):
                     value=get_element_text(child) or None,
                 ))
         
+        include_presentation_fields_attr = get_element_attr(element, "getPresentations")
+        name_attr = get_element_attr(element, "name")
+
+        kwargs: Dict[str, Any] = {}
+        if name_attr is not None:
+            kwargs["name"] = name_attr
+
         return cls(
-            name=get_element_attr(element, "name", ""),
+            **kwargs,
             root_entity=get_element_attr(element, "rootEntity"),
+            include_presentation_fields=(
+                deserialize_bool(include_presentation_fields_attr)
+                if include_presentation_fields_attr is not None
+                else None
+            ),
+            rows_limit=deserialize_optional_int(
+                get_element_attr(element, "rowsLimit")
+            ),
             path=get_element_attr(element, "path"),
+            data_set_id=get_element_attr(element, "datasetid"),
             fields=fields,
             field_values=field_values,
+            campos=campos,
+            fieldset=fieldset,
             criteria=criteria,
             literal_criteria=literal_criteria,
             literal_criteria_sql=literal_criteria_sql,
-            reference_fetch=reference_fetch,
+            # O primeiro referenceFetch também fica em reference_fetch
+            # (campo legado); a serialização não o duplica.
+            reference_fetch=references_fetch[0] if references_fetch else None,
+            references_fetch=references_fetch or None,
+            ids=ids,
             order_by_expression=get_element_attr(element, "orderByExpression"),
             include_deleted=deserialize_bool(
                 get_element_attr(element, "includeDeleted", "")
@@ -168,18 +356,31 @@ class DataSet(BaseModel):
     Conjunto de dados para consultas paginadas.
     
     Encapsula a entidade de consulta com configurações de paginação.
+
+    Os campos seguem ``Sankhya-SDK-dotnet/Src/Sankhya/Service/DataSet.cs``
+    (``include_presentation_fields`` -> ``includePresentationFields``,
+    ``parallel_loader`` -> ``parallelLoader``, ``page_number`` ->
+    ``pageNumber``, ``pager_id`` -> ``pagerID``, ``data_set_id`` ->
+    ``datasetid``, ``data_rows`` -> ``<dataRow>``, ``literal_criteria`` ->
+    ``<criteria>`` e ``entities`` -> ``<entity>``). ``entity`` é mantido
+    por compatibilidade e é serializado como um ``<entity>`` adicional.
     """
 
     model_config = ConfigDict(frozen=False)
 
     root_entity: Optional[str] = None
     include_presentation: bool = False
+    include_presentation_fields: Optional[bool] = None
     parallel_loader: bool = False
     database_fetch_size: Optional[int] = None
     rows_limit: Optional[int] = None
     page_number: Optional[int] = None
+    pager_id: Optional[str] = None
+    data_set_id: Optional[str] = None
     data_source: Optional[str] = None
     entity: Optional[Entity] = None
+    entities: List[Entity] = PydanticField(default_factory=list)
+    data_rows: List[DataSetRow] = PydanticField(default_factory=list)
     rows: List[DataRow] = PydanticField(default_factory=list)
     literal_criteria: Optional[LiteralCriteria] = None
 
@@ -191,44 +392,79 @@ class DataSet(BaseModel):
             elem.set("rootEntity", self.root_entity)
         if self.include_presentation:
             elem.set("includePresentation", serialize_bool(self.include_presentation, SankhyaConstants.BOOL_FORMAT_S_N))
-        if self.parallel_loader:
-            elem.set("parallelLoader", serialize_bool(self.parallel_loader, SankhyaConstants.BOOL_FORMAT_S_N))
+        if self.include_presentation_fields is not None:
+            # .NET: IncludePresentationFieldsInternal => ToString("S", "N")
+            elem.set(
+                "includePresentationFields",
+                serialize_bool(
+                    self.include_presentation_fields,
+                    SankhyaConstants.BOOL_FORMAT_S_N,
+                ),
+            )
+        if self.parallel_loader or "parallel_loader" in self.model_fields_set:
+            # .NET: ParallelLoaderInternal => ToString("true", "false")
+            elem.set(
+                "parallelLoader",
+                serialize_bool(
+                    self.parallel_loader, SankhyaConstants.BOOL_FORMAT_TRUE_FALSE
+                ),
+            )
         if self.database_fetch_size is not None:
             elem.set("databaseFetchSize", str(self.database_fetch_size))
         if self.rows_limit is not None:
             elem.set("rowsLimit", str(self.rows_limit))
         if self.page_number is not None:
             elem.set("pageNumber", str(self.page_number))
+        if self.pager_id is not None:
+            elem.set(SankhyaConstants.PAGER_ID, self.pager_id)
+        if self.data_set_id is not None:
+            elem.set("datasetid", self.data_set_id)
         if self.data_source:
             elem.set("dataSource", self.data_source)
         
-        if self.entity:
+        # Mesma ordem de declaração do .NET: dataRow, criteria, entity
+        for data_row in self.data_rows:
+            elem.append(data_row.to_xml())
+
+        if self.literal_criteria:
+            # .NET: [XmlElement("criteria")] public LiteralCriteria LiteralCriteria
+            criteria_elem = self.literal_criteria.to_xml()
+            criteria_elem.tag = "criteria"
+            elem.append(criteria_elem)
+
+        if self.entity and not any(e is self.entity for e in self.entities):
             elem.append(self.entity.to_xml())
+
+        for entity in self.entities:
+            elem.append(entity.to_xml())
         
         if self.rows:
             for row in self.rows:
                 elem.append(row.to_xml())
-        
-        if self.literal_criteria:
-            elem.append(self.literal_criteria.to_xml())
         
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "DataSet":
         """Deserializa de elemento XML."""
-        entity: Optional[Entity] = None
+        entities: List[Entity] = []
+        data_rows: List[DataSetRow] = []
         rows: List[DataRow] = []
         literal_criteria: Optional[LiteralCriteria] = None
         
-        entity_elem = element.find("entity")
-        if entity_elem is not None:
-            entity = Entity.from_xml(entity_elem)
+        for entity_elem in element.findall("entity"):
+            entities.append(Entity.from_xml(entity_elem))
+
+        for data_row_elem in element.findall("dataRow"):
+            data_rows.append(DataSetRow.from_xml(data_row_elem))
         
         for row_elem in element.findall("row"):
             rows.append(DataRow.from_xml(row_elem))
         
-        lit_crit_elem = element.find("literalCriteria")
+        # Formato .NET (<criteria>) e formato legado (<literalCriteria>)
+        lit_crit_elem = element.find("criteria")
+        if lit_crit_elem is None:
+            lit_crit_elem = element.find("literalCriteria")
         if lit_crit_elem is not None:
             literal_criteria = LiteralCriteria.from_xml(lit_crit_elem)
         
@@ -241,20 +477,37 @@ class DataSet(BaseModel):
         page_number = deserialize_optional_int(
             get_element_attr(element, "pageNumber")
         )
+        include_presentation_fields_attr = get_element_attr(
+            element, "includePresentationFields"
+        )
+        parallel_loader_attr = get_element_attr(element, "parallelLoader")
+
+        kwargs: Dict[str, Any] = {}
+        if parallel_loader_attr is not None:
+            kwargs["parallel_loader"] = deserialize_bool(parallel_loader_attr)
         
         return cls(
+            **kwargs,
             root_entity=get_element_attr(element, "rootEntity"),
             include_presentation=deserialize_bool(
                 get_element_attr(element, "includePresentation", "")
             ),
-            parallel_loader=deserialize_bool(
-                get_element_attr(element, "parallelLoader", "")
+            include_presentation_fields=(
+                deserialize_bool(include_presentation_fields_attr)
+                if include_presentation_fields_attr is not None
+                else None
             ),
             database_fetch_size=db_fetch_size,
             rows_limit=rows_limit,
             page_number=page_number,
+            pager_id=get_element_attr(element, SankhyaConstants.PAGER_ID),
+            data_set_id=get_element_attr(element, "datasetid"),
             data_source=get_element_attr(element, "dataSource"),
-            entity=entity,
+            # A primeira entidade também fica em entity (campo legado);
+            # a serialização não a duplica.
+            entity=entities[0] if entities else None,
+            entities=entities,
+            data_rows=data_rows,
             rows=rows,
             literal_criteria=literal_criteria,
         )
