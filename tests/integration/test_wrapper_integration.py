@@ -21,6 +21,23 @@ from sankhya_sdk.models.service.service_response import ServiceResponse
 SKIP_INTEGRATION = os.getenv("SANKHYA_SKIP_INTEGRATION", "true").lower() == "true"
 
 
+def _dwr_response() -> Mock:
+    """
+    Mock HTTP response for the DWR user agent registration.
+
+    SankhyaWrapper.authenticate() issues two HTTP requests: the login
+    (MobileLoginSP.login) followed by a POST to
+    /mge/dwr/exec/DWRController.execute.dwr. Mocked response sequences
+    must include this response right after the login one, otherwise the
+    DWR call consumes the response meant for the next operation.
+    """
+    response = Mock()
+    response.ok = True
+    response.status_code = 200
+    response.text = ""
+    return response
+
+
 @pytest.mark.skipif(SKIP_INTEGRATION, reason="Integration tests disabled")
 class TestWrapperIntegration:
     """Integration tests requiring a real Sankhya server."""
@@ -98,8 +115,10 @@ class TestWrapperIntegrationMocked:
         <serviceResponse status="1"></serviceResponse>"""
 
         # Configure session to return different responses
+        # (authenticate() performs login + DWR user agent registration)
         mock_session.request.side_effect = [
             login_response,
+            _dwr_response(),
             crud_response,
             logout_response,
         ]
@@ -182,7 +201,13 @@ class TestWrapperIntegrationMocked:
             "Content-Disposition": 'attachment; filename="document.pdf"',
         }
 
-        mock_session.request.side_effect = [login_response, file_response]
+        # authenticate() performs login + DWR user agent registration
+        # (POST /mge/dwr/exec/DWRController.execute.dwr) before get_file
+        mock_session.request.side_effect = [
+            login_response,
+            _dwr_response(),
+            file_response,
+        ]
 
         wrapper = SankhyaWrapper(
             host="http://mock.example.com",

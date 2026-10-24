@@ -12,13 +12,19 @@ from typing import List
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+import requests
 
+from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.wrapper import SankhyaWrapper
+from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import (
     ServiceRequestFileNotFoundException,
     SankhyaException,
 )
-from sankhya_sdk.value_objects.service_file import ServiceFile
+# SankhyaWrapper.get_file/get_image retornam o ServiceFile de core.types
+# (atributo ``filename``), não o de value_objects (atributo ``file_name``).
+from sankhya_sdk.core.types import ServiceFile
+from sankhya_sdk.models.service.event_types import SystemWarningRecipient
 from sankhya_sdk.request_wrappers.know_services_request_wrapper import (
     KnowServicesRequestWrapper,
 )
@@ -32,6 +38,50 @@ from .conftest import (
     create_sessions_response,
     create_success_response,
 )
+
+
+def create_dwr_response() -> Mock:
+    """
+    Cria mock da resposta do registro de user agent via DWR.
+
+    ``SankhyaWrapper.authenticate()`` faz duas requisições HTTP: o login
+    (MobileLoginSP.login) e, em seguida, o POST de registro de user agent
+    em /mge/dwr/exec/DWRController.execute.dwr. Toda sequência de respostas
+    mockadas precisa, portanto, ter esta resposta logo após a de login;
+    caso contrário a chamada DWR consome a resposta da operação testada.
+
+    Returns:
+        Mock configurado como resposta HTTP do DWR
+    """
+    response = create_mock_response(200, b"")
+    response.text = ""
+    return response
+
+
+def _find_service_call(mock_session: MagicMock, service: ServiceName) -> dict:
+    """
+    Retorna os kwargs da requisição HTTP enviada para o serviço informado.
+
+    Args:
+        mock_session: Mock de requests.Session usado pelo wrapper
+        service: Serviço esperado
+
+    Returns:
+        kwargs da chamada ``request`` ou dicionário vazio se não houve chamada
+    """
+    marker = f"serviceName={service.internal_value}"
+    for call in mock_session.request.call_args_list:
+        if marker in str(call.kwargs.get("url", "")):
+            return call.kwargs
+    return {}
+
+
+def _request_urls(mock_session: MagicMock) -> List[str]:
+    """Retorna as URLs de todas as requisições HTTP feitas na sessão mockada."""
+    return [
+        str(call.kwargs.get("url", ""))
+        for call in mock_session.request.call_args_list
+    ]
 
 
 @pytest.mark.integration
@@ -53,21 +103,25 @@ class TestKnowServicesSession:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, sessions_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), sessions_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
         
-        KnowServicesRequestWrapper.initialize(wrapper)
+        ctx = SankhyaContext(wrapper=wrapper)
+        KnowServicesRequestWrapper.initialize(ctx)
         
         try:
             sessions = KnowServicesRequestWrapper.get_sessions()
             
             # Deve retornar lista de sessões
             assert isinstance(sessions, list)
+            assert _find_service_call(mock_session, ServiceName.SESSION_GET_ALL)
         finally:
             KnowServicesRequestWrapper.dispose()
-            wrapper.dispose()
+            ctx.dispose()
 
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_kill_session(self, mock_session_class):
@@ -81,22 +135,28 @@ class TestKnowServicesSession:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, kill_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), kill_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
         
-        KnowServicesRequestWrapper.initialize(wrapper)
+        ctx = SankhyaContext(wrapper=wrapper)
+        KnowServicesRequestWrapper.initialize(ctx)
         
         try:
             # Encerrar sessão de outro usuário
             KnowServicesRequestWrapper.kill_session("SESSION_TO_KILL")
             
-            # Não deve ter lançado exceção
-            assert True
+            # Não deve ter lançado exceção e a requisição deve ter sido
+            # enviada ao serviço de encerramento com o ID da sessão alvo
+            kill_call = _find_service_call(mock_session, ServiceName.SESSION_KILL)
+            assert kill_call
+            assert b"SESSION_TO_KILL" in kill_call["data"]
         finally:
             KnowServicesRequestWrapper.dispose()
-            wrapper.dispose()
+            ctx.dispose()
 
 
 @pytest.mark.integration
@@ -117,7 +177,9 @@ class TestKnowServicesFiles:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, file_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), file_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
@@ -129,6 +191,11 @@ class TestKnowServicesFiles:
             assert file.data == b"PDF_CONTENT_HERE"
             assert file.content_type == "application/pdf"
             assert file.filename == "document.pdf"
+            # Mesmo endpoint do .NET: mge/visualizadorArquivos.mge?chaveArquivo=<key>
+            assert any(
+                "/mge/visualizadorArquivos.mge?chaveArquivo=FILE_KEY_123" in url
+                for url in _request_urls(mock_session)
+            )
         finally:
             wrapper.dispose()
 
@@ -141,15 +208,23 @@ class TestKnowServicesFiles:
         login_resp = create_mock_response(200, create_login_response())
         error_resp = create_mock_response(404, b"File not found")
         error_resp.ok = False
+        # Como um requests.Response real, raise_for_status() lança HTTPError em 4xx
+        error_resp.raise_for_status.side_effect = requests.HTTPError(
+            "404 Client Error: Not Found", response=error_resp
+        )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, error_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), error_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
         
         try:
-            with pytest.raises(Exception):  # Pode ser vários tipos de exceção
+            # O erro HTTP 404 deve ser propagado (e não, por exemplo, um
+            # StopIteration de mock esgotado)
+            with pytest.raises(requests.HTTPError):
                 wrapper.get_file("INVALID_KEY")
         finally:
             wrapper.dispose()
@@ -171,7 +246,9 @@ class TestKnowServicesFiles:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, file_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), file_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
@@ -203,7 +280,9 @@ class TestKnowServicesFiles:
         
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp] + file_resps + [logout_resp]
+        mock_session.request.side_effect = (
+            [login_resp, create_dwr_response()] + file_resps + [logout_resp]
+        )
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
@@ -230,8 +309,11 @@ class TestKnowServicesFiles:
             for t in threads:
                 t.join(timeout=5)
             
-            # Pelo menos alguns devem ter sucesso
-            assert len(results) > 0 or len(errors) == 0
+            # Todos os downloads devem ter sucesso, cada um com um arquivo
+            assert errors == []
+            assert sorted(f.data for f in results) == [
+                f"FILE_{i}_CONTENT".encode() for i in range(3)
+            ]
         finally:
             wrapper.dispose()
 
@@ -257,7 +339,9 @@ class TestKnowServicesImages:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, image_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), image_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
@@ -265,8 +349,14 @@ class TestKnowServicesImages:
         try:
             image = wrapper.get_image("Produto", {"CODPROD": 1})
             
-            if image:
-                assert image.data.startswith(b"\x89PNG")
+            # Servidor respondeu 200 com imagem: não pode retornar None
+            assert image is not None
+            assert image.data.startswith(b"\x89PNG")
+            # Mesmo endpoint do .NET: mge/{entity}@IMAGEM@{key}={value}.dbimage
+            assert any(
+                url.endswith("/mge/Produto@IMAGEM@CODPROD=1.dbimage")
+                for url in _request_urls(mock_session)
+            )
         finally:
             wrapper.dispose()
 
@@ -287,7 +377,9 @@ class TestKnowServicesImages:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, image_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), image_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
@@ -295,8 +387,9 @@ class TestKnowServicesImages:
         try:
             image = wrapper.get_image("Parceiro", {"CODPARC": 123})
             
-            if image:
-                assert image.content_type == "image/jpeg"
+            # Servidor respondeu 200 com imagem: não pode retornar None
+            assert image is not None
+            assert image.content_type == "image/jpeg"
         finally:
             wrapper.dispose()
 
@@ -314,18 +407,17 @@ class TestKnowServicesImages:
         
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, not_found_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), not_found_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
         
         try:
-            # Pode retornar None ou lançar exceção
-            try:
-                image = wrapper.get_image("Parceiro", {"CODPARC": 99999})
-                # Se retornar, deve ser None
-            except Exception:
-                pass  # Exceção esperada
+            # HTTP 404 retorna None (mesmo comportamento do GetImage do .NET)
+            image = wrapper.get_image("Parceiro", {"CODPARC": 99999})
+            assert image is None
         finally:
             wrapper.dispose()
 
@@ -346,22 +438,32 @@ class TestKnowServicesMessaging:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, send_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), send_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
         
-        KnowServicesRequestWrapper.initialize(wrapper)
+        ctx = SankhyaContext(wrapper=wrapper)
+        KnowServicesRequestWrapper.initialize(ctx)
         
         try:
             KnowServicesRequestWrapper.send_warning(
                 title="Teste",
-                message="Mensagem de teste",
-                recipient_codes=[1, 2],
+                description="Mensagem de teste",
+                recipients=[
+                    SystemWarningRecipient(user_id=1),
+                    SystemWarningRecipient(user_id=2),
+                ],
             )
+            
+            send_call = _find_service_call(mock_session, ServiceName.WARNING_SEND)
+            assert send_call
+            assert b"Mensagem de teste" in send_call["data"]
         finally:
             KnowServicesRequestWrapper.dispose()
-            wrapper.dispose()
+            ctx.dispose()
 
 
 @pytest.mark.integration
@@ -385,21 +487,27 @@ class TestKnowServicesFileOperations:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, open_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), open_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
         
-        KnowServicesRequestWrapper.initialize(wrapper)
+        ctx = SankhyaContext(wrapper=wrapper)
+        KnowServicesRequestWrapper.initialize(ctx)
         
         try:
             key = KnowServicesRequestWrapper.open_file("/path/to/file.pdf")
             
-            # Deve retornar uma chave (string)
+            # Deve retornar a chave do atributo "valor" de <chave>
+            # (.NET: response.ResponseBody.Key.Value)
             assert isinstance(key, str)
+            assert key == "FILE_KEY_RETURNED"
+            assert _find_service_call(mock_session, ServiceName.FILE_OPEN)
         finally:
             KnowServicesRequestWrapper.dispose()
-            wrapper.dispose()
+            ctx.dispose()
 
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
     def test_delete_files(self, mock_session_class):
@@ -413,18 +521,26 @@ class TestKnowServicesFileOperations:
         )
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, delete_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), delete_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
         
-        KnowServicesRequestWrapper.initialize(wrapper)
+        ctx = SankhyaContext(wrapper=wrapper)
+        KnowServicesRequestWrapper.initialize(ctx)
         
         try:
             KnowServicesRequestWrapper.delete_files(["/path/to/file1.pdf", "/path/to/file2.pdf"])
+            
+            delete_call = _find_service_call(mock_session, ServiceName.FILE_DELETE)
+            assert delete_call
+            assert b"/path/to/file1.pdf" in delete_call["data"]
+            assert b"/path/to/file2.pdf" in delete_call["data"]
         finally:
             KnowServicesRequestWrapper.dispose()
-            wrapper.dispose()
+            ctx.dispose()
 
 
 @pytest.mark.integration
@@ -441,14 +557,28 @@ class TestKnowServicesContextManager:
         sessions_resp = create_mock_response(200, create_sessions_response([]))
         logout_resp = create_mock_response(200, create_logout_response())
         
-        mock_session.request.side_effect = [login_resp, sessions_resp, logout_resp]
+        mock_session.request.side_effect = [
+            login_resp, create_dwr_response(), sessions_resp, logout_resp
+        ]
         
         wrapper = SankhyaWrapper(host="http://test.local", port=8180)
         wrapper.authenticate("user", "pass")
         
-        with KnowServicesRequestWrapper() as ks:
-            KnowServicesRequestWrapper.initialize(wrapper)
-            sessions = KnowServicesRequestWrapper.get_sessions()
-            assert isinstance(sessions, list)
+        ctx = SankhyaContext(wrapper=wrapper)
         
-        wrapper.dispose()
+        try:
+            # __enter__ só cria uma sessão própria (via SankhyaSettings) se o
+            # wrapper ainda não foi inicializado; para usar o contexto existente
+            # é preciso inicializar antes de entrar no bloco.
+            KnowServicesRequestWrapper.initialize(ctx)
+            
+            with KnowServicesRequestWrapper() as ks:
+                sessions = KnowServicesRequestWrapper.get_sessions()
+                assert isinstance(sessions, list)
+            
+            # __exit__ deve liberar o wrapper
+            assert KnowServicesRequestWrapper._initialized is False
+            assert _find_service_call(mock_session, ServiceName.SESSION_GET_ALL)
+        finally:
+            KnowServicesRequestWrapper.dispose()
+            ctx.dispose()
