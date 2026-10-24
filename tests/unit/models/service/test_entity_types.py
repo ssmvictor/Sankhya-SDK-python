@@ -5,6 +5,7 @@ Os formatos XML esperados seguem os contratos de serialização do SDK .NET
 (Sankhya-SDK-dotnet/Src/Sankhya/Service/DataSet.cs, Entity.cs e DataRow.cs).
 """
 
+import pytest
 from lxml import etree
 
 from sankhya_sdk.enums.service_name import ServiceName
@@ -14,7 +15,14 @@ from sankhya_sdk.models.service.basic_types import (
     FieldValue,
     LiteralCriteria,
 )
-from sankhya_sdk.models.service.entity_types import DataSet, DataSetRow, Entity
+from sankhya_sdk.models.service.entity_types import (
+    CrudServiceEntities,
+    CrudServiceProviderEntities,
+    DataSet,
+    DataSetRow,
+    Entity,
+    EntityDynamic,
+)
 from sankhya_sdk.models.service.service_request import ServiceRequest
 
 
@@ -326,3 +334,79 @@ class TestEntityCrudFields:
         assert parsed.rows_limit == 3
         assert parsed.fieldset is not None and parsed.fieldset.list == "*"
         assert parsed.field_values == []
+
+
+class TestEntityDynamicRawValues:
+    """EntityDynamic.from_xml mantém o texto bruto (.NET ParseDynamic)."""
+
+    def test_numeric_looking_values_are_not_converted(self):
+        element = etree.fromstring(
+            "<entity><CGC_CPF>01234567890</CGC_CPF><CEP>01310100</CEP>"
+            "<CODPARC>10</CODPARC><VLR>2.5</VLR><FLAG>false</FLAG></entity>"
+        )
+
+        entity = EntityDynamic.from_xml(element)
+
+        assert entity.fields == {
+            "CGC_CPF": "01234567890",
+            "CEP": "01310100",
+            "CODPARC": "10",
+            "VLR": "2.5",
+            "FLAG": "false",
+        }
+
+    def test_text_is_not_trimmed_and_empty_is_none(self):
+        element = etree.fromstring(
+            "<entity><COMPLEMENTO> SALA 1 </COMPLEMENTO><OBS/><VAZIO></VAZIO></entity>"
+        )
+
+        entity = EntityDynamic.from_xml(element)
+
+        assert entity.fields == {"COMPLEMENTO": " SALA 1 ", "OBS": None, "VAZIO": None}
+
+    def test_pt_br_entities_keep_raw_values(self):
+        element = etree.fromstring(
+            "<entidades><entidade><CODPARC>007</CODPARC></entidade></entidades>"
+        )
+
+        entities = CrudServiceEntities.from_xml(element)
+
+        assert entities.entities[0].fields == {"CODPARC": "007"}
+
+
+class TestCrudServiceProviderEntitiesMetadata:
+    """CrudServiceProviderEntities.metadata (.NET CRUDServiceProviderEntities.cs)."""
+
+    def test_from_xml_renames_positional_keys(self):
+        element = etree.fromstring(
+            '<entities total="1"><metadata><fields><field name="CODPARC"/>'
+            '<field name="Cidade_NOMECID"/></fields></metadata>'
+            "<entity><f0>1</f0><f1>SAO PAULO</f1></entity></entities>"
+        )
+
+        parsed = CrudServiceProviderEntities.from_xml(element)
+
+        assert parsed.entities[0].fields == {"CODPARC": "1", "Cidade_NOMECID": "SAO PAULO"}
+        assert [f.name for f in parsed.metadata.fields] == ["CODPARC", "Cidade_NOMECID"]
+
+    def test_to_xml_writes_metadata_before_entities(self):
+        element = etree.fromstring(
+            '<entities total="1"><metadata><fields><field name="CODPARC"/></fields>'
+            "</metadata><entity><f0>1</f0></entity></entities>"
+        )
+
+        xml = CrudServiceProviderEntities.from_xml(element).to_xml()
+
+        assert [child.tag for child in xml] == ["metadata", "entity"]
+        assert xml.find("metadata/fields/field").get("name") == "CODPARC"
+        # Como o WriteXml do .NET, as entidades são escritas com os nomes reais
+        assert xml.findtext("entity/CODPARC") == "1"
+
+    def test_missing_positional_key_raises(self):
+        element = etree.fromstring(
+            '<entities total="1"><metadata><fields><field name="CODPARC"/></fields>'
+            "</metadata><entity><CODPARC>1</CODPARC></entity></entities>"
+        )
+
+        with pytest.raises(ValueError):
+            CrudServiceProviderEntities.from_xml(element)

@@ -97,7 +97,8 @@ class TestServiceResponseEntities:
         
         assert len(resp.entities) == 2
         assert resp.first_entity is not None
-        assert resp.first_entity.get("CODPARC") == 1
+        # Valores mantidos como texto, como ParseDynamic no .NET
+        assert resp.first_entity.get("CODPARC") == "1"
 
     def test_entities_en(self):
         """Testa acesso a entidades em inglês."""
@@ -116,7 +117,7 @@ class TestServiceResponseEntities:
         resp = ServiceResponse.from_xml_string(xml_str)
         
         assert len(resp.entities) == 1
-        assert resp.first_entity.get("CODPROD") == 123
+        assert resp.first_entity.get("CODPROD") == "123"
 
     def test_empty_entities(self):
         """Testa resposta sem entidades."""
@@ -147,7 +148,7 @@ class TestServiceResponseEntities:
         """
         resp = ServiceResponse.from_xml_string(xml_str)
         
-        assert resp.get_entity_field("CODPARC") == 1
+        assert resp.get_entity_field("CODPARC") == "1"
         assert resp.get_entity_field("NOMEPARC") == "Cliente"
         assert resp.get_entity_field("INEXISTENTE", "default") == "default"
 
@@ -170,7 +171,202 @@ class TestServiceResponseEntities:
         resp = ServiceResponse.from_xml_string(xml_str)
         
         codes = resp.get_all_entity_fields("CODPARC")
-        assert codes == [1, 2]
+        assert codes == ["1", "2"]
+
+    def test_entity_values_are_raw_strings(self):
+        """
+        Valores não são convertidos para int/float/bool.
+
+        .NET (ServiceResponse.ParseDynamic): ds.SetMember(elementName,
+        node.ReadElementContentAsString()). CPF/CNPJ/CEP mantêm os zeros à
+        esquerda.
+        """
+        xml_str = """
+        <serviceResponse serviceName="CRUDServiceProvider.loadRecords" status="1">
+            <responseBody>
+                <entities total="1">
+                    <entity>
+                        <CODPARC>0042</CODPARC>
+                        <CGC_CPF>01234567890</CGC_CPF>
+                        <CEP>01310100</CEP>
+                        <VLRDESC>1.50</VLRDESC>
+                        <ATIVO>true</ATIVO>
+                        <OBS/>
+                    </entity>
+                </entities>
+            </responseBody>
+        </serviceResponse>
+        """
+        resp = ServiceResponse.from_xml_string(xml_str)
+
+        assert resp.first_entity.fields == {
+            "CODPARC": "0042",
+            "CGC_CPF": "01234567890",
+            "CEP": "01310100",
+            "VLRDESC": "1.50",
+            "ATIVO": "true",
+            "OBS": None,
+        }
+
+    def test_rmd_element_is_ignored(self):
+        """O elemento _rmd é ignorado (ParseDynamic, SankhyaConstants.Rmd)."""
+        xml_str = """
+        <serviceResponse serviceName="CRUDServiceProvider.loadRecords" status="1">
+            <responseBody>
+                <entities total="1">
+                    <entity>
+                        <CODPARC>1</CODPARC>
+                        <_rmd><x>1</x></_rmd>
+                    </entity>
+                </entities>
+            </responseBody>
+        </serviceResponse>
+        """
+        resp = ServiceResponse.from_xml_string(xml_str)
+
+        assert resp.first_entity.fields == {"CODPARC": "1"}
+
+
+class TestServiceResponseMetadata:
+    """
+    Renomeação f0..fN pelo metadata (.NET ProcessCrudServiceProviderEntities,
+    entity.ChangeKeys(metadata)).
+    """
+
+    XML_WITH_METADATA = """
+    <serviceResponse serviceName="CRUDServiceProvider.loadRecords" status="1">
+        <responseBody>
+            <entities total="2" totalPages="1" pagerID="P1">
+                <metadata>
+                    <fields>
+                        <field name="CODPARC"/>
+                        <field name="NOMEPARC"/>
+                        <field name="CGC_CPF"/>
+                    </fields>
+                </metadata>
+                <entity><f0>1</f0><f1>Cliente A</f1><f2>01234567890</f2></entity>
+                <entity><f0>2</f0><f1>Cliente B</f1><f2/></entity>
+            </entities>
+        </responseBody>
+    </serviceResponse>
+    """
+
+    def test_entities_receive_field_names(self):
+        resp = ServiceResponse.from_xml_string(self.XML_WITH_METADATA)
+
+        assert [e.fields for e in resp.entities] == [
+            {"CODPARC": "1", "NOMEPARC": "Cliente A", "CGC_CPF": "01234567890"},
+            {"CODPARC": "2", "NOMEPARC": "Cliente B", "CGC_CPF": None},
+        ]
+        assert resp.get_all_entity_fields("NOMEPARC") == ["Cliente A", "Cliente B"]
+        provider = resp.response_body.crud_service_provider_entities
+        assert [f.name for f in provider.metadata.fields] == [
+            "CODPARC",
+            "NOMEPARC",
+            "CGC_CPF",
+        ]
+        assert provider.pager_id == "P1"
+
+    def test_entities_without_metadata_keep_names(self):
+        xml_str = """
+        <serviceResponse serviceName="CRUDServiceProvider.loadRecords" status="1">
+            <responseBody>
+                <entities total="1">
+                    <entity><CODPARC>1</CODPARC><f0>x</f0></entity>
+                </entities>
+            </responseBody>
+        </serviceResponse>
+        """
+        resp = ServiceResponse.from_xml_string(xml_str)
+
+        assert resp.first_entity.fields == {"CODPARC": "1", "f0": "x"}
+        assert resp.response_body.crud_service_provider_entities.metadata is None
+
+    def test_metadata_key_count_mismatch_raises(self):
+        """ChangeKeys (.NET) lança exceção quando as contagens diferem."""
+        xml_str = """
+        <serviceResponse serviceName="CRUDServiceProvider.loadRecords" status="1">
+            <responseBody>
+                <entities total="1">
+                    <metadata><fields><field name="CODPARC"/><field name="NOMEPARC"/></fields></metadata>
+                    <entity><f0>1</f0></entity>
+                </entities>
+            </responseBody>
+        </serviceResponse>
+        """
+        with pytest.raises(ValueError):
+            ServiceResponse.from_xml_string(xml_str)
+
+    def test_partner_from_metadata_response(self):
+        """Ponta a ponta: entidade posicional convertida em Partner."""
+        from sankhya_sdk.helpers.entity_dynamic_serialization import (
+            EntityDynamicSerialization,
+        )
+        from sankhya_sdk.models.transport.partner import Partner
+
+        resp = ServiceResponse.from_xml_string(self.XML_WITH_METADATA)
+
+        partners = [
+            EntityDynamicSerialization(e.fields).convert_to_type(Partner)
+            for e in resp.entities
+        ]
+
+        assert [p.code for p in partners] == [1, 2]
+        assert [p.name for p in partners] == ["Cliente A", "Cliente B"]
+        assert partners[0].document == "01234567890"
+        assert partners[1].document is None
+
+
+class TestServiceResponseTypedConversion:
+    """
+    Ponta a ponta: <entity> do XML -> EntityDynamic -> Partner.
+
+    Os valores ficam como texto em EntityDynamic e são convertidos para o
+    tipo de cada campo por EntityDynamicSerialization.convert_to_type.
+    """
+
+    def test_partner_from_parsed_entity(self):
+        from sankhya_sdk.enums.fiscal_person_type import FiscalPersonType
+        from sankhya_sdk.helpers.entity_dynamic_serialization import (
+            EntityDynamicSerialization,
+        )
+        from sankhya_sdk.models.transport.partner import Partner
+
+        xml_str = """
+        <serviceResponse serviceName="CRUDServiceProvider.loadRecords" status="1">
+            <responseBody>
+                <entities total="1">
+                    <entity>
+                        <CODPARC>42</CODPARC>
+                        <NOMEPARC>Cliente</NOMEPARC>
+                        <TIPPESSOA>F</TIPPESSOA>
+                        <CGC_CPF>01234567890</CGC_CPF>
+                        <CEP>01310100</CEP>
+                        <ATIVO>S</ATIVO>
+                        <CLIENTE>N</CLIENTE>
+                        <CODCID>7</CODCID>
+                        <DTCAD>25/12/2024 10:11:12</DTCAD>
+                    </entity>
+                </entities>
+            </responseBody>
+        </serviceResponse>
+        """
+        resp = ServiceResponse.from_xml_string(xml_str)
+
+        partner = EntityDynamicSerialization(
+            resp.first_entity.fields
+        ).convert_to_type(Partner)
+
+        assert partner.code == 42
+        assert partner.name == "Cliente"
+        assert partner.document == "01234567890"
+        assert partner.zip_code == "01310100"
+        assert partner.is_active is True
+        assert partner.is_client is False
+        assert partner.code_city == 7
+        assert partner.fiscal_type is FiscalPersonType.INDIVIDUAL
+        assert partner.date_created.year == 2024
+        assert partner.date_created.day == 25
 
 
 class TestServiceResponseSerialization:

@@ -554,32 +554,65 @@ class EntityDynamic(BaseModel):
 
     @classmethod
     def from_xml(cls, element: Element) -> "EntityDynamic":
-        """Deserializa de elemento XML."""
+        """
+        Deserializa de elemento XML.
+
+        Como ``ParseDynamic`` (.NET, ServiceResponse.cs), os valores são
+        mantidos como texto bruto: não há conversão para int/float/bool, o
+        que preservaria mal valores como CPF/CNPJ/CEP com zeros à esquerda.
+        Elementos vazios viram None e o elemento ``_rmd`` é ignorado. A
+        conversão de tipos é feita por
+        ``EntityDynamicSerialization.convert_to_type``.
+        """
         fields: Dict[str, Any] = {}
         metadata: Dict[str, Any] = dict(element.attrib)
         
         for child in element:
-            text = get_element_text(child)
-            if text:
-                # Tenta converter para tipos primitivos
-                if text.lower() in ("true", "false"):
-                    fields[child.tag] = text.lower() == "true"
-                else:
-                    try:
-                        fields[child.tag] = int(text)
-                    except ValueError:
-                        try:
-                            fields[child.tag] = float(text)
-                        except ValueError:
-                            fields[child.tag] = text
-            else:
-                fields[child.tag] = None
+            # Ignora comentários/instruções de processamento
+            if not isinstance(child.tag, str):
+                continue
+            if child.tag == SankhyaConstants.RMD:
+                continue
+            fields[child.tag] = child.text
         
         return cls(
             name=element.tag,
             fields=fields,
             metadata=metadata,
         )
+
+
+def _change_keys(fields: Dict[str, Any], metadata: Metadata) -> Dict[str, Any]:
+    """
+    Renomeia as chaves posicionais (f0..fN) com os nomes do metadata.
+
+    Porta de ``EntityDynamicSerialization.ChangeKeys`` (.NET), aplicada às
+    entidades em ``ProcessCrudServiceProviderEntities`` (ServiceResponse.cs).
+
+    Args:
+        fields: Valores da entidade com chaves posicionais
+        metadata: Metadados com os nomes dos campos, na ordem das chaves
+
+    Returns:
+        Novo dicionário com os nomes reais dos campos
+
+    Raises:
+        ValueError: Se a quantidade de campos for diferente da quantidade de
+            chaves ou se alguma chave fN não existir (no .NET, ChangeKeys
+            lança InvalidOperationException/KeyNotFoundException)
+    """
+    if len(metadata.fields) != len(fields):
+        raise ValueError(
+            "The key count in metadata is different than the key count in the dictionary"
+        )
+
+    renamed: Dict[str, Any] = {}
+    for index, field in enumerate(metadata.fields):
+        old_key = f"f{index}"
+        if old_key not in fields:
+            raise ValueError(f"Key not found in dictionary: {old_key}")
+        renamed[field.name] = fields[old_key]
+    return renamed
 
 
 class CrudServiceEntities(BaseModel):
@@ -643,6 +676,11 @@ class CrudServiceProviderEntities(BaseModel):
     Container para entidades CRUD (em inglês).
     
     Usado em respostas de serviços de CRUD com nomenclatura EN.
+
+    Quando a resposta traz ``<metadata>``, as entidades chegam com chaves
+    posicionais (``<f0>``, ``<f1>``...) e são renomeadas com os nomes dos
+    campos do metadata, como em ``ProcessCrudServiceProviderEntities``
+    (.NET): ``entities`` sempre expõe os nomes reais dos campos.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -651,6 +689,7 @@ class CrudServiceProviderEntities(BaseModel):
     total: Optional[int] = None
     total_pages: Optional[int] = None
     pager_id: Optional[str] = None
+    metadata: Optional[Metadata] = None
 
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
@@ -663,6 +702,9 @@ class CrudServiceProviderEntities(BaseModel):
         if self.pager_id:
             elem.set(SankhyaConstants.PAGER_ID, self.pager_id)
         
+        if self.metadata is not None:
+            elem.append(self.metadata.to_xml())
+
         for entity in self.entities:
             entity_elem = entity.to_xml()
             entity_elem.tag = SankhyaConstants.ENTITY_EN
@@ -672,12 +714,26 @@ class CrudServiceProviderEntities(BaseModel):
 
     @classmethod
     def from_xml(cls, element: Element) -> "CrudServiceProviderEntities":
-        """Deserializa de elemento XML."""
+        """
+        Deserializa de elemento XML.
+
+        Raises:
+            ValueError: Se o ``<metadata>`` não corresponder às chaves
+                posicionais de uma entidade (como ``ChangeKeys`` no .NET)
+        """
         entities: List[EntityDynamic] = []
+        metadata: Optional[Metadata] = None
+
+        metadata_elem = element.find(SankhyaConstants.METADATA)
+        if metadata_elem is not None:
+            metadata = Metadata.from_xml(metadata_elem)
         
         # Procura por elementos 'entity'
         for child in element.findall(SankhyaConstants.ENTITY_EN):
-            entities.append(EntityDynamic.from_xml(child))
+            entity = EntityDynamic.from_xml(child)
+            if metadata is not None:
+                entity.fields = _change_keys(entity.fields, metadata)
+            entities.append(entity)
         
         total = deserialize_optional_int(
             get_element_attr(element, SankhyaConstants.TOTAL)
@@ -691,4 +747,5 @@ class CrudServiceProviderEntities(BaseModel):
             total=total,
             total_pages=total_pages,
             pager_id=get_element_attr(element, SankhyaConstants.PAGER_ID),
+            metadata=metadata,
         )
