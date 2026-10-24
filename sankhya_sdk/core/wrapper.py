@@ -37,6 +37,7 @@ from sankhya_sdk.exceptions import (
     ServiceRequestUnavailableException,
 )
 from sankhya_sdk.helpers.status_message_helper import StatusMessageHelper
+from sankhya_sdk.models.service.constants import SankhyaConstants
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
 from sankhya_sdk.request_helpers import RequestRetryData, RequestRetryDelay
@@ -865,17 +866,27 @@ class SankhyaWrapper(LowLevelSankhyaWrapper):
             ServiceFile com os dados processados
 
         Raises:
-            RuntimeError: Se a resposta é HTML de erro
+            ServiceRequestFileNotFoundException: Se a resposta é HTML de erro
+                (chave de arquivo inválida ou arquivo inexistente no servidor)
         """
         content_type = response.headers.get("Content-Type", "application/octet-stream")
         content = response.content
 
         # Verifica se é HTML de erro
         if "text/html" in content_type:
-            html_text = content.decode("utf-8", errors="ignore")
-            if "erro" in html_text.lower() or "error" in html_text.lower():
+            html_text = content.decode("utf-8", errors="ignore").lower()
+            # O .NET (ProcessFileResponse) lê a página como ISO-8859-1 e procura
+            # SankhyaConstants.FileNotFoundOnServer
+            legacy_text = content.decode("iso-8859-1").lower()
+            not_found_message = SankhyaConstants.FILE_NOT_FOUND_ON_SERVER.lower()
+            if (
+                not_found_message in html_text
+                or not_found_message in legacy_text
+                or "erro" in html_text
+                or "error" in html_text
+            ):
                 from sankhya_sdk.exceptions import ServiceRequestFileNotFoundException
-                raise ServiceRequestFileNotFoundException(request=None)
+                raise ServiceRequestFileNotFoundException(file_path=key)
 
         # Extrai filename do Content-Disposition
         filename = None

@@ -25,6 +25,7 @@ from sankhya_sdk.exceptions import (
     ServiceRequestCanceledQueryException,
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
+    ServiceRequestFileNotFoundException,
     ServiceRequestInaccessibleException,
     ServiceRequestInvalidAuthorizationException,
     ServiceRequestPropertyValueException,
@@ -783,6 +784,65 @@ class TestSankhyaWrapperFileOperations:
         assert file.content_type == "application/pdf"
         assert file.file_extension == "pdf"
         assert file.filename == "test.pdf"
+
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_get_file_not_found_on_server_raises_file_not_found(self, mock_request):
+        """
+        Página HTML com SankhyaConstants.FileNotFoundOnServer (lida como
+        ISO-8859-1, como no .NET ProcessFileResponse) gera
+        ServiceRequestFileNotFoundException para a chave, e não TypeError.
+        """
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.content = (
+            "<html><body>O arquivo solicitado não existe no servidor</body></html>"
+        ).encode("iso-8859-1")
+        mock_response.headers = {"Content-Type": "text/html;charset=ISO-8859-1"}
+        mock_request.return_value = mock_response
+
+        wrapper = SankhyaWrapper(host="http://example.com", port=8180)
+
+        with pytest.raises(ServiceRequestFileNotFoundException) as exc_info:
+            wrapper.get_file("CHAVE_INVALIDA")
+
+        assert str(exc_info.value) == (
+            "Unable to load the file from path CHAVE_INVALIDA. File or directory not found."
+        )
+
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_get_file_html_error_page_raises_file_not_found(self, mock_request):
+        """Página HTML de erro gera ServiceRequestFileNotFoundException, e não TypeError."""
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.content = b"<html><body>Erro ao abrir o arquivo</body></html>"
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_request.return_value = mock_response
+
+        wrapper = SankhyaWrapper(host="http://example.com", port=8180)
+
+        with pytest.raises(ServiceRequestFileNotFoundException) as exc_info:
+            wrapper.get_file("ABC123")
+
+        assert "ABC123" in str(exc_info.value)
+
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_get_file_html_without_error_is_returned(self, mock_request):
+        """Um arquivo HTML válido é devolvido normalmente."""
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.content = b"<html><body>Relatorio</body></html>"
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_request.return_value = mock_response
+
+        wrapper = SankhyaWrapper(host="http://example.com", port=8180)
+
+        file = wrapper.get_file("ABC123")
+
+        assert file.data == b"<html><body>Relatorio</body></html>"
+        assert file.content_type == "text/html"
 
     @patch.object(SankhyaWrapper, "_make_request")
     def test_get_image_success(self, mock_request):
