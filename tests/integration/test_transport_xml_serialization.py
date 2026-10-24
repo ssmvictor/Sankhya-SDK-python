@@ -4,7 +4,6 @@ Testes de integração para serialização XML de entidades de transporte.
 Testa round-trip completo e compatibilidade com XMLs do SDK .NET.
 """
 
-import pytest
 from lxml import etree
 
 from sankhya_sdk.models.transport.address import Address

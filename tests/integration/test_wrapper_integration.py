@@ -14,7 +14,6 @@ from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.models.service.service_request import ServiceRequest
-from sankhya_sdk.models.service.service_response import ServiceResponse
 
 
 # Skip integration tests if no real server is configured
@@ -145,7 +144,6 @@ class TestWrapperIntegrationMocked:
     def test_retry_on_timeout(self, mock_session_class):
         """Test automatic retry on timeout error."""
         import requests
-        from sankhya_sdk.request_helpers import RequestRetryDelay
 
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session

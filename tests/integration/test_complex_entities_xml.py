@@ -4,8 +4,6 @@ Testes de integração XML para entidades complexas.
 Testa serialização/deserialização round-trip e compatibilidade.
 """
 
-import pytest
-from datetime import datetime
 from decimal import Decimal
 from lxml import etree
 

@@ -7,19 +7,14 @@ Testa login, logout, gerenciamento de sessão, retry e renovação de sessão.
 
 from __future__ import annotations
 
-import time
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
 from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.wrapper import SankhyaWrapper
-from sankhya_sdk.exceptions import (
-    ServiceRequestInvalidAuthorizationException,
-    ServiceRequestExpiredAuthenticationException,
-    SankhyaException,
-)
+from sankhya_sdk.exceptions import SankhyaException
 
 from .conftest import (
     create_error_response,
