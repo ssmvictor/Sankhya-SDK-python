@@ -178,7 +178,14 @@ class QueryCriteria(BaseModel):
         elif self.value_type == ParameterType.DATETIME:
             return f"{self.field} {self.operator} '{safe_value}'"
         elif self.value_type == ParameterType.INTEGER:
-            return f"{self.field} {self.operator} {self.value}"
+            # Valida o inteiro para nao inserir texto arbitrario sem aspas no SQL
+            try:
+                int_value = int(str(self.value).strip())
+            except ValueError:
+                raise ValueError(
+                    f"Valor '{self.value}' do campo {self.field} não é um inteiro válido"
+                ) from None
+            return f"{self.field} {self.operator} {int_value}"
         else:
             # Tenta inferir tipo
             if self.value.isdigit():

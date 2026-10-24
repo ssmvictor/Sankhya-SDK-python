@@ -4,6 +4,8 @@ Testes unitários para QueryCriteria e QueryBuilder.
 Garante que os tipos de valor usam apenas membros existentes de ParameterType.
 """
 
+import pytest
+
 from sankhya_sdk.enums.parameter_type import ParameterType
 from sankhya_sdk.models.service.query_types import QueryBuilder, QueryCriteria
 
@@ -28,6 +30,21 @@ class TestQueryCriteria:
         crit = QueryCriteria(field="CODPARC", operator=">", value="10", value_type=ParameterType.INTEGER)
 
         assert crit.to_sql() == "CODPARC > 10"
+
+    def test_to_sql_integer_rejects_non_integer_value(self):
+        """Testa que um valor INTEGER nao numerico nao e inserido cru no SQL."""
+        crit = QueryCriteria(
+            field="CODPARC", value="1 OR 1=1", value_type=ParameterType.INTEGER
+        )
+
+        with pytest.raises(ValueError):
+            crit.to_sql()
+
+    def test_to_sql_integer_normalizes_value(self):
+        """Testa que espacos e sinal sao normalizados no valor INTEGER."""
+        crit = QueryCriteria(field="CODPARC", value=" -12 ", value_type=ParameterType.INTEGER)
+
+        assert crit.to_sql() == "CODPARC = -12"
 
     def test_to_sql_without_type_infers(self):
         """Testa a inferência de tipo quando value_type não é informado."""
