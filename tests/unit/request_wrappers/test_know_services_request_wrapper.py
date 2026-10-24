@@ -12,6 +12,7 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
+from lxml import etree
 
 from sankhya_sdk.core.types import ServiceFile
 from sankhya_sdk.enums.billing_type import BillingType
@@ -1142,23 +1143,29 @@ class TestFinancial:
 class TestFileOperations:
     """Tests for file operations."""
 
-    def test_open_file(self, mock_context, mock_response):
-        """Test open_file returns file key."""
-        mock_key = MagicMock()
-        mock_key.value = "ABC123KEY"
-        mock_response.response_body.key = mock_key
-        
+    def test_open_file(self, mock_context):
+        """Test open_file returns the valor attribute of <chave> (.NET Key.Value)."""
+        # .NET KnowServicesRequestWrapper.cs:631-639: response.ResponseBody.Key.Value,
+        # Key.cs [XmlAttribute("valor")]
+        response = _service_response(
+            "RepositorioArquivoSP.abreArquivo", '<chave valor="ABC123KEY"/>'
+        )
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
-            return_value=mock_response,
+            return_value=response,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             key = KnowServicesRequestWrapper.open_file("/path/to/file.pdf")
-            
+
             assert key == "ABC123KEY"
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.FILE_OPEN
+            # .NET: RequestBody.Config = new() { Path = path } -> <config path="..."/>
+            config = etree.fromstring(_sent_request_xml()).find("requestBody/config")
+            assert config is not None
+            assert config.get("path") == "/path/to/file.pdf"
 
     def test_delete_files(self, mock_context, mock_response):
         """Test delete_files sends correct request."""
