@@ -364,3 +364,31 @@ class TestAsyncOnDemandRequestBuilding:
             assert isinstance(failure_events[0].exception, ValueError)
         finally:
             await _dispose_quietly(wrapper)
+
+
+# =============================================================================
+# Flush
+# =============================================================================
+
+
+class TestAsyncOnDemandFlush:
+    """flush() não pode bloquear para sempre."""
+
+    @pytest.mark.asyncio
+    async def test_flush_returns_when_batch_processing_raises(self):
+        """Erro inesperado no processamento do lote ainda conclui o flush."""
+        service = _RecordingService()
+        wrapper = await _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        try:
+            with patch.object(
+                wrapper, "_process_batch", side_effect=RuntimeError("falha")
+            ) as process_batch:
+                await wrapper.add(Partner(name="A"))
+                await _flush(wrapper)
+
+            process_batch.assert_called_once()
+            assert wrapper.queue_size == 0
+        finally:
+            await _dispose_quietly(wrapper)

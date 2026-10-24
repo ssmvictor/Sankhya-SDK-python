@@ -375,12 +375,13 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
                 await self._queue.put(item)
             return False
         
-        # Processa lote
-        await self._process_batch(items)
-        
-        # Sinaliza conclusão de flush se necessário
-        if is_flushing and self._queue.empty():
-            self._flush_complete.set()
+        # Processa lote; o flush é sinalizado mesmo se o processamento
+        # falhar, para que flush() não fique bloqueado para sempre
+        try:
+            await self._process_batch(items)
+        finally:
+            if is_flushing and self._queue.empty():
+                self._flush_complete.set()
         
         return is_cancelling
 

@@ -577,3 +577,30 @@ class TestOnDemandRequestBuilding:
             assert isinstance(failure_events[0].exception, ValueError)
         finally:
             _dispose_quietly(wrapper)
+
+
+# =============================================================================
+# Flush
+# =============================================================================
+
+
+class TestOnDemandFlush:
+    """flush() não pode bloquear para sempre."""
+
+    def test_flush_returns_when_batch_processing_raises(self):
+        """Erro inesperado no processamento do lote ainda conclui o flush."""
+        service = _RecordingService()
+        wrapper = _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        try:
+            with patch.object(
+                wrapper, "_process_batch", side_effect=RuntimeError("falha")
+            ) as process_batch:
+                wrapper.add(Partner(name="A"))
+                _call_with_timeout(wrapper.flush)
+
+            process_batch.assert_called_once()
+            assert wrapper.queue_size == 0
+        finally:
+            _dispose_quietly(wrapper)
