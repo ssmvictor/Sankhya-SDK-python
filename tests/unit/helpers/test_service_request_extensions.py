@@ -482,6 +482,49 @@ class TestFieldValueFormat:
         local_fields = request.request_body.data_set.data_rows[0].local_fields
         assert local_fields == {"TIPPESSOA": "J", "ATIVO": "N"}
 
+    def test_generic_service_entity_values_use_str(self):
+        """
+        GenericServiceEntity._serialize_value tem outra assinatura (escreve
+        XML); o valor é convertido com str(), como o possibleValue.ToString()
+        do .NET (ServiceRequestExtensions.cs:210).
+        """
+        from typing import Optional
+
+        from sankhya_sdk.attributes.decorators import (
+            entity,
+            entity_element,
+            entity_key,
+        )
+        from sankhya_sdk.helpers.generic_service_entity import (
+            GenericServiceEntity,
+        )
+
+        @entity("Parceiro")
+        class _GenericPartner(GenericServiceEntity):
+            code: Optional[int] = entity_key(
+                entity_element("CODPARC", default=None)
+            )
+            name: Optional[str] = entity_element("NOMEPARC", default=None)
+
+        find_request = ServiceRequest(service=ServiceName.CRUD_FIND)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            find_request, _GenericPartner(code=1)
+        )
+
+        criteria = find_request.request_body.entity.criteria
+        assert [(c.name, c.value) for c in criteria] == [("CODPARC", "1")]
+
+        save_request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            save_request, _GenericPartner(code=1, name="Cliente")
+        )
+
+        data_row = save_request.request_body.data_set.data_rows[0]
+        assert data_row.keys == {"CODPARC": "1"}
+        assert data_row.local_fields == {"NOMEPARC": "Cliente"}
+
 
 class TestIgnoreInlineReference:
     """EntityElement(..., IgnoreInlineReference = true) do .NET."""

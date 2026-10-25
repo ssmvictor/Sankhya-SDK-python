@@ -1020,7 +1020,10 @@ def _format_field_value(entity: Any, field_name: str, value: Any) -> str:
     No .NET, as propriedades serializadas de booleanos e enums são as
     ``*Internal`` (ex.: ``IsActiveInternal`` -> "S"/"N",
     ``FiscalTypeInternal`` -> valor interno). Para entidades de transporte
-    usa-se o mesmo conversor de ``TransportEntityBase.to_xml``.
+    usa-se o mesmo conversor de ``TransportEntityBase.to_xml``. As demais
+    entidades (ex.: ``GenericServiceEntity``, cujo ``_serialize_value`` tem
+    outra assinatura e escreve XML) usam ``str(value)``, como o
+    ``possibleValue.ToString()`` do .NET (ServiceRequestExtensions.cs:210).
 
     Args:
         entity: Entidade de origem
@@ -1030,9 +1033,10 @@ def _format_field_value(entity: Any, field_name: str, value: Any) -> str:
     Returns:
         Valor como texto
     """
-    serialize = getattr(entity, "_serialize_value", None)
-    if callable(serialize):
-        serialized = serialize(value, field_name)
+    from sankhya_sdk.models.transport.base import TransportEntityBase
+
+    if isinstance(entity, TransportEntityBase):
+        serialized = entity._serialize_value(value, field_name)
         if serialized is not None:
             return serialized
     return str(value)
