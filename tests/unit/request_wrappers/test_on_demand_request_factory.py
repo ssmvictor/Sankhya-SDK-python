@@ -445,3 +445,55 @@ class TestAsyncOnDemandRequestFactorySession:
 
         context.detach_on_demand_request_wrapper.assert_called_once_with(token)
         assert await AsyncOnDemandRequestFactory.get_instance_count() == 0
+
+
+# =============================================================================
+# Flush pela factory na thread worker
+# =============================================================================
+
+
+class TestOnDemandRequestFactoryFlushFromWorker:
+    """flush_all() em um handler de falha (thread worker) não trava."""
+
+    def setup_method(self):
+        """Limpa o factory antes de cada teste."""
+        OnDemandRequestFactory.clear()
+
+    def teardown_method(self):
+        """Limpa o factory após cada teste."""
+        OnDemandRequestFactory.finalize_all()
+        OnDemandRequestFactory.clear()
+
+    def test_flush_all_from_failure_handler_returns(self):
+        """O handler que chama flush_all() retorna e o flush externo também."""
+        from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
+        from sankhya_sdk.models.transport.partner import Partner
+
+        wait_timeout = 10.0
+        key = OnDemandRequestFactory.create_instance(
+            entity_type=Partner,
+            service=ServiceName.CRUD_SERVICE_SAVE,
+            cancel_token=threading.Event(),
+        )
+        wrapper = OnDemandRequestFactory.get_instance_by_key(key)
+        original = Partner(name="A")
+        handler_flush_returned = threading.Event()
+
+        def handler(event: OnDemandRequestFailureEvent) -> None:
+            # Sem contexto todo envio falha; só a falha de "A" reenfileira
+            if event.entity is original:
+                wrapper.add(Partner(name="A2"))
+                OnDemandRequestFactory.flush_all()
+                handler_flush_returned.set()
+
+        EventBus.subscribe(OnDemandRequestFailureEvent, handler)
+        try:
+            wrapper.add(original)
+            flusher = threading.Thread(target=wrapper.flush, daemon=True)
+            flusher.start()
+            flusher.join(wait_timeout)
+
+            assert not flusher.is_alive(), "flush() externo travou"
+            assert handler_flush_returned.is_set()
+        finally:
+            EventBus.unsubscribe(OnDemandRequestFailureEvent, handler)

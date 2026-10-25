@@ -227,6 +227,9 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         entidades processadas alcança o total adicionado até a chamada. Cada
         chamada aguarda o seu próprio alvo: o fim do flush de outra thread
         não a libera antes da hora.
+        
+        Na thread worker (ex.: em um handler de OnDemandRequestFailureEvent)
+        o flush é apenas solicitado, sem aguardar.
         """
         if self._disposed:
             return
@@ -238,6 +241,14 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         
         self._flush_event.set()
         self._work_available.set()
+        
+        # Chamado na própria thread worker (ex.: handler de
+        # OnDemandRequestFailureEvent): só ela processa a fila, então
+        # aguardar aqui travaria o wrapper para sempre. O pedido fica
+        # registrado e o worker o atende na próxima iteração; no .NET esse
+        # Flush também não bloqueia (OnDemandRequestWrapper.cs:127-141).
+        if threading.current_thread() is self._worker:
+            return
         
         # Aguarda conclusão do flush. Worker já encerrado (ex.: após
         # cancelamento) não processaria mais nada: ele marca o término antes

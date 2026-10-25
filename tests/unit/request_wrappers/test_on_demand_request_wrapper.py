@@ -1016,3 +1016,63 @@ class TestOnDemandSession:
         _call_with_timeout(wrapper.dispose)
 
         context.detach_on_demand_request_wrapper.assert_not_called()
+
+
+# =============================================================================
+# Flush na thread worker (handlers de OnDemandRequestFailureEvent)
+# =============================================================================
+
+
+class TestOnDemandFlushFromWorker:
+    """flush() chamado na thread worker não pode travar o wrapper."""
+
+    def test_flush_from_failure_handler_does_not_deadlock(self):
+        """Handler que reenfileira e chama flush() não trava nem vaza a sessão."""
+        context = MagicMock()
+        token = uuid4()
+        failure = ServiceRequestCompetitionException()
+        # Lote [A] e envio individual de A falham; o reenvio de A2 passa
+        service = _RecordingService(outcomes=[failure, failure])
+        original = Partner(name="A")
+        corrected = Partner(name="A2")
+        handler_flush_returned = threading.Event()
+
+        def handler(event: OnDemandRequestFailureEvent) -> None:
+            # Executado pelo EventBus na própria thread worker
+            if event.entity is original:
+                wrapper.add(corrected)
+                wrapper.flush()
+                handler_flush_returned.set()
+
+        EventBus.subscribe(OnDemandRequestFailureEvent, handler)
+        try:
+            with patch(
+                "sankhya_sdk.core.context.SankhyaContext."
+                "service_invoker_with_token",
+                side_effect=lambda request, session_token: service(request),
+            ):
+                wrapper = _create_session_wrapper(
+                    context,
+                    token,
+                    owns_session=True,
+                    throughput=10,
+                    allow_above_throughput=False,
+                )
+                try:
+                    wrapper.add(original)
+                    _call_with_timeout(wrapper.flush)
+                    assert handler_flush_returned.is_set()
+
+                    # O flush pedido pelo handler é atendido pelo worker
+                    _call_with_timeout(wrapper.flush)
+                    assert service.batches == [["A"], ["A"], ["A2"]]
+                    assert wrapper.entities_sent_successfully == 1
+
+                    _call_with_timeout(wrapper.dispose)
+                    assert not wrapper._worker.is_alive()
+                finally:
+                    _dispose_quietly(wrapper)
+        finally:
+            EventBus.unsubscribe(OnDemandRequestFailureEvent, handler)
+
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
