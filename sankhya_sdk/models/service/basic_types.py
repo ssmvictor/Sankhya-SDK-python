@@ -286,8 +286,13 @@ class DataRow(BaseModel):
 class ReferenceFetch(BaseModel):
     """
     Configuração de busca de referências.
-    
+
     Define se e como buscar registros relacionados.
+
+    Serializado como no .NET (``ReferenceFetch.cs``: ``Name`` em
+    ``[XmlAttribute("name")]`` e ``Field[]`` em ``[XmlElement("field")]``,
+    com o nome do campo no atributo ``name`` de ``Field.cs``), por exemplo
+    ``<referenceFetch name="Cidade"><field name="NOMECID"/></referenceFetch>``.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -302,22 +307,30 @@ class ReferenceFetch(BaseModel):
         if self.mode:
             elem.set("mode", self.mode)
         if self.entity_name:
-            elem.set("entityName", self.entity_name)
+            elem.set("name", self.entity_name)
         for field in self.fields:
-            create_xml_element("field", field, parent=elem)
+            etree.SubElement(elem, "field").set("name", field)
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "ReferenceFetch":
-        """Deserializa de elemento XML."""
-        fields = [
-            get_element_text(f) 
-            for f in element.findall("field") 
-            if get_element_text(f)
-        ]
+        """
+        Deserializa de elemento XML.
+
+        Aceita o formato .NET (``name`` e ``<field name="..."/>``) e o
+        formato legado (``entityName`` e ``<field>NOME</field>``).
+        """
+        fields = []
+        for field_elem in element.findall("field"):
+            field_name = get_element_attr(field_elem, "name") or get_element_text(field_elem)
+            if field_name:
+                fields.append(field_name)
+        entity_name = get_element_attr(element, "name")
+        if entity_name is None:
+            entity_name = get_element_attr(element, "entityName")
         return cls(
             mode=get_element_attr(element, "mode"),
-            entity_name=get_element_attr(element, "entityName"),
+            entity_name=entity_name,
             fields=fields,
         )
 

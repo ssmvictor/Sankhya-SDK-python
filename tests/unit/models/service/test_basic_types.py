@@ -332,37 +332,62 @@ class TestDataRow:
 
 
 class TestReferenceFetch:
-    """Testes para a classe ReferenceFetch."""
+    """
+    Testes para a classe ReferenceFetch.
+
+    .NET: ReferenceFetch.cs ([XmlAttribute("name")] Name e
+    [XmlElement("field")] Field[]) e Field.cs ([XmlAttribute("name")] Name).
+    """
 
     def test_to_xml(self):
         """Testa serialização para XML."""
         ref = ReferenceFetch(
-            mode="all", 
-            entity_name="Produto", 
+            mode="all",
+            entity_name="Produto",
             fields=["CODPROD", "DESCRPROD"]
         )
         xml = ref.to_xml()
-        
+
         assert xml.tag == "referenceFetch"
         assert xml.get("mode") == "all"
-        assert xml.get("entityName") == "Produto"
+        assert xml.get("name") == "Produto"
+        assert "entityName" not in xml.attrib
         fields = xml.findall("field")
-        assert len(fields) == 2
+        assert [f.get("name") for f in fields] == ["CODPROD", "DESCRPROD"]
+        assert all(f.text is None for f in fields)
 
     def test_from_xml(self):
-        """Testa deserialização de XML."""
+        """Testa deserialização do formato .NET."""
+        xml_str = """
+        <referenceFetch mode="all" name="Produto">
+            <field name="CODPROD"/>
+            <field name="DESCRPROD"/>
+        </referenceFetch>
+        """
+        elem = etree.fromstring(xml_str)
+        ref = ReferenceFetch.from_xml(elem)
+
+        assert ref.mode == "all"
+        assert ref.entity_name == "Produto"
+        assert ref.fields == ["CODPROD", "DESCRPROD"]
+
+    def test_from_xml_legacy_format(self):
+        """Testa deserialização do formato legado (entityName e texto)."""
         xml_str = """
         <referenceFetch mode="all" entityName="Produto">
             <field>CODPROD</field>
             <field>DESCRPROD</field>
         </referenceFetch>
         """
-        elem = etree.fromstring(xml_str)
-        ref = ReferenceFetch.from_xml(elem)
-        
-        assert ref.mode == "all"
+        ref = ReferenceFetch.from_xml(etree.fromstring(xml_str))
+
         assert ref.entity_name == "Produto"
         assert ref.fields == ["CODPROD", "DESCRPROD"]
+
+    def test_round_trip(self):
+        original = ReferenceFetch(entity_name="Cidade", fields=["CODCID", "NOMECID"])
+
+        assert ReferenceFetch.from_xml(original.to_xml()) == original
 
 
 class TestProp:

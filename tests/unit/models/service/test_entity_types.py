@@ -286,6 +286,33 @@ class TestEntityCriteria:
         assert all(c.text is None for c in entity.findall("criterio"))
 
 
+class TestEntityReferenceFetch:
+    """Entity.references_fetch (.NET Entity.cs, ReferenceFetch.cs e Field.cs)."""
+
+    def test_crud_find_request_sends_dotnet_reference_fetch_shape(self):
+        """
+        .NET HandleService (ServiceRequestExtensions.cs:537-543):
+        new ReferenceFetch { Field = reference.Value.ToArray(), Name = reference.Key }.
+        """
+        from sankhya_sdk.helpers.service_request_extensions import (
+            ServiceRequestExtensions,
+        )
+        from sankhya_sdk.models.transport import City, Partner
+
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+        ServiceRequestExtensions.resolve_with_entity(
+            request, Partner(code=1, city=City(code=5))
+        )
+
+        entity = _request_body(request).find("entity")
+        city = entity.find("referenceFetch[@name='Cidade']")
+        assert city is not None
+        assert "entityName" not in city.attrib
+        field_names = [f.get("name") for f in city.findall("field")]
+        assert "NOMECID" in field_names
+        assert all(f.text is None for f in city.findall("field"))
+
+
 class TestEntityCrudFields:
     """Campos de Entity usados por ServiceRequestExtensions (.NET Entity.cs)."""
 
