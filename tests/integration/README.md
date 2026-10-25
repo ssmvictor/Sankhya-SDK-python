@@ -92,8 +92,10 @@ por padrão:
 
 Além disso, `SimpleCRUDRequestWrapper.initialize(context)` adquire uma
 **sessão dedicada** (novo login + DWR), como
-`Context.AcquireNewSession(ServiceRequestType.SimpleCrud)` no .NET, e o
-`dispose()` faz o logout das duas sessões. Filas fixas de respostas
+`Context.AcquireNewSession(ServiceRequestType.SimpleCrud)` no .NET.
+`SimpleCRUDRequestWrapper.dispose()` faz o logout apenas dessa sessão
+dedicada; a sessão principal é encerrada por `context.dispose()` (por isso o
+teardown completo gera dois logouts). Filas fixas de respostas
 (`side_effect = [login, resposta, logout]`) quebram com essas requisições
 extras; por isso os testes de wrappers usam o `FakeSankhyaServer`.
 
@@ -139,11 +141,16 @@ a inicialização falhar.
 ### Isolamento entre testes
 
 `SankhyaContext` guarda os wrappers de todas as sessões num dicionário de
-classe, e o `__del__` de um contexto não descartado finaliza todas as sessões
-registradas. A fixture autouse `_isolate_shared_sdk_state` suspende a coleta
-automática do GC durante cada teste (um contexto vazado por outro teste não é
-finalizado no meio dele), coleta a geração jovem ao final e libera os
-wrappers estáticos (`SimpleCRUDRequestWrapper`, `KnowServicesRequestWrapper`).
+classe, e o `dispose()` de qualquer contexto finaliza todos os wrappers
+registrados. Como no .NET (`~SankhyaContext() => Dispose(false)`), o
+`__del__` apenas marca o contexto como descartado: um contexto não descartado
+não encerra sessões ao ser coletado pelo GC, e seus wrappers continuam
+registrados até um `dispose()` explícito.
+
+A fixture autouse `_isolate_shared_sdk_state` não mexe no GC: ao final de cada
+teste, ela apenas libera o estado de classe dos wrappers estáticos
+(`SimpleCRUDRequestWrapper.dispose()` e `KnowServicesRequestWrapper.dispose()`).
+Cada teste deve descartar os contextos que criar (`finally` ou `with`).
 
 ## Exemplos
 
