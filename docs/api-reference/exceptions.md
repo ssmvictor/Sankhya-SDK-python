@@ -1,21 +1,32 @@
 # Exceções
 
-Documentação completa das exceções do SDK.
+Documentação das exceções do SDK. As exceções da stack XML legada
+(`SankhyaContext`, `SankhyaWrapper` e request wrappers) e as do Gateway JSON
+(`SankhyaHttpError` e derivadas) ficam em `sankhya_sdk.exceptions`; as de
+OAuth2 ficam em `sankhya_sdk.auth`.
 
 ## Hierarquia
 
 ```mermaid
 classDiagram
     Exception <|-- SankhyaException
+    Exception <|-- ServiceRequestInvalidAuthorizationException
+    Exception <|-- ServiceRequestInvalidCredentialsException
+    Exception <|-- ServiceRequestExpiredAuthenticationException
+    Exception <|-- InvalidKeyFileException
     Exception <|-- AuthError
-    SankhyaException <|-- ServiceRequestException
+    SankhyaException <|-- ServiceRequestGeneralException
     SankhyaException <|-- SankhyaHttpError
-    SankhyaException <|-- InvalidKeyFileException
-    SankhyaException <|-- OperationException
-    SankhyaException <|-- PagedRequestException
-    ServiceRequestException <|-- ServiceRequestInvalidAuthorizationException
-    ServiceRequestException <|-- ServiceRequestCompetitionException
-    ServiceRequestException <|-- ServiceRequestDeadlockException
+    ServiceRequestGeneralException <|-- ServiceRequestTemporarilyException
+    ServiceRequestGeneralException <|-- ServiceRequestUnexpectedResultException
+    ServiceRequestGeneralException <|-- ServiceRequestTooManyResultsException
+    ServiceRequestGeneralException <|-- ServiceRequestFileNotFoundException
+    ServiceRequestGeneralException <|-- PagedRequestException
+    ServiceRequestTemporarilyException <|-- ServiceRequestCompetitionException
+    ServiceRequestTemporarilyException <|-- ServiceRequestDeadlockException
+    ServiceRequestTemporarilyException <|-- ServiceRequestTimeoutException
+    ServiceRequestTemporarilyException <|-- ServiceRequestUnavailableException
+    ServiceRequestTemporarilyException <|-- ServiceRequestInaccessibleException
     SankhyaHttpError <|-- SankhyaAuthError
     SankhyaHttpError <|-- SankhyaForbiddenError
     SankhyaHttpError <|-- SankhyaNotFoundError
@@ -25,22 +36,44 @@ classDiagram
     AuthError <|-- AuthNetworkError
 ```
 
+O diagrama mostra as classes principais. As demais exceções de serviço
+(`ServiceRequestPropertyValueException`, `ServiceRequestForeignKeyException`,
+`ServiceRequestCanceledQueryException`, ...) também derivam de
+`ServiceRequestGeneralException`.
+
+!!! warning "Exceções de autenticação fora de `SankhyaException`"
+    `ServiceRequestInvalidAuthorizationException`,
+    `ServiceRequestInvalidCredentialsException` e
+    `ServiceRequestExpiredAuthenticationException` derivam diretamente de
+    `Exception`: um `except SankhyaException` não as captura.
+
 ## Importação
 
 ```python
 from sankhya_sdk.exceptions import (
     # Base
     SankhyaException,
-    
-    # Legado (XML)
-    ServiceRequestException,
+    ServiceRequestGeneralException,
+    ServiceRequestTemporarilyException,
+
+    # Autenticação (XML legado)
     ServiceRequestInvalidAuthorizationException,
+    ServiceRequestInvalidCredentialsException,
+    ServiceRequestExpiredAuthenticationException,
+
+    # Erros temporários (XML legado)
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
+    ServiceRequestTimeoutException,
+    ServiceRequestUnavailableException,
+
+    # Resultado, arquivos e paginação (XML legado)
+    ServiceRequestUnexpectedResultException,
+    ServiceRequestTooManyResultsException,
+    ServiceRequestFileNotFoundException,
     InvalidKeyFileException,
-    OperationException,
     PagedRequestException,
-    
+
     # HTTP (Gateway JSON)
     SankhyaHttpError,
     SankhyaAuthError,
@@ -59,303 +92,389 @@ from sankhya_sdk.auth import (
 )
 ```
 
+## Como o SDK escolhe a exceção
+
+Quando o servidor responde com `status="0"`, o `StatusMessageHelper`
+procura trechos conhecidos na `statusMessage` e lança a exceção
+correspondente (porta do `StatusMessageHelper` do SDK .NET). Alguns exemplos:
+
+| Trecho da mensagem do servidor | Exceção |
+|--------------------------------|---------|
+| `situação de concorrência`, `log de acessos`, `violação da restrição primary key 'PK_TSIRLG'` | `ServiceRequestCompetitionException` |
+| `deadlock` | `ServiceRequestDeadlockException` |
+| `tempo limite da consulta` | `ServiceRequestTimeoutException` |
+| `I/O error`, `TDS protocol error`, `the connection object is closed`, ... | `ServiceRequestUnavailableException` |
+| `A consulta foi cancelada` | `ServiceRequestCanceledQueryException` |
+| `não autorizado` | `ServiceRequestInvalidAuthorizationException` |
+| `Usuário/Senha inválido` | `ServiceRequestInvalidCredentialsException` |
+| `Usuário expirou` | `ServiceRequestExpiredAuthenticationException` |
+| qualquer outra mensagem | `ServiceRequestUnexpectedResultException` |
+
+Antes de chegar ao seu código, algumas dessas exceções são repetidas
+automaticamente pelo `SankhyaWrapper`; veja
+[Retry Automático](../core-concepts/error-handling.md#retry-automatico).
+
 ---
 
 ## SankhyaException
 
-Classe base para todas as exceções do SDK.
-
-### Atributos
-
-| Atributo | Tipo | Descrição |
-|----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
-| `inner_exception` | `Exception \| None` | Exceção interna/causa |
+Classe base das exceções do SDK (exceto as de autenticação da stack XML,
+veja o aviso acima). Não define atributos próprios: a mensagem é `str(e)` e,
+quando há uma exceção de origem, ela fica em `e.__cause__`.
 
 ### Uso
 
 ```python
 from sankhya_sdk.exceptions import SankhyaException
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
 
+# SimpleCRUDRequestWrapper.initialize(ctx) já chamado (ver Request Wrappers)
 try:
-    # operação
+    partner = SimpleCRUDRequestWrapper.find(Partner(code=1))
 except SankhyaException as e:
-    print(f"Erro: {e.message}")
-    if e.inner_exception:
-        print(f"Causa: {e.inner_exception}")
+    print(f"Erro: {e}")
+    if e.__cause__ is not None:
+        print(f"Causa: {e.__cause__}")
 ```
 
 ---
 
-## ServiceRequestException
+## ServiceRequestGeneralException
 
-Erro durante comunicação com a API.
+Base dos erros de requisição de serviço da stack XML.
 
 ### Atributos
 
 | Atributo | Tipo | Descrição |
 |----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
-| `status_message` | `str` | Mensagem de status da API |
-| `status_code` | `int` | Código de status |
-| `service_name` | `str` | Nome do serviço chamado |
+| `request` | `ServiceRequest \| None` | Requisição que falhou |
+| `response` | `ServiceResponse \| None` | Resposta do servidor, quando disponível |
+| `request_xml` / `response_xml` | `str \| None` | XML da requisição/resposta, quando disponível |
+
+A mensagem é `str(e)` e a causa, quando houver, fica em `e.__cause__`.
 
 ### Uso
 
 ```python
-from sankhya_sdk.exceptions import ServiceRequestException
+from sankhya_sdk.exceptions import ServiceRequestGeneralException
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
 
 try:
-    result = wrapper.find(Partner, "CODPARC > 0")
-except ServiceRequestException as e:
-    print(f"Serviço: {e.service_name}")
-    print(f"Status: {e.status_code}")
-    print(f"Mensagem: {e.status_message}")
+    SimpleCRUDRequestWrapper.update(Partner(code=1, name="Novo Nome"))
+except ServiceRequestGeneralException as e:
+    print(f"Erro: {e}")
+    if e.request is not None:
+        print(f"Serviço: {e.request.service}")
+    if e.response is not None:
+        print(f"Mensagem do servidor: {e.response.status_message_text}")
 ```
+
+---
+
+## ServiceRequestUnexpectedResultException
+
+Resultado inesperado. É lançada quando:
+
+- o servidor retorna um erro cuja mensagem não corresponde a nenhum padrão
+  conhecido (a mensagem original fica em `error_message`);
+- `SimpleCRUDRequestWrapper.find`/`find_with_criteria` não encontram a
+  entidade.
+
+### Atributos
+
+| Atributo | Tipo | Descrição |
+|----------|------|-----------|
+| `error_message` | `str` | Mensagem original (vazia quando não informada) |
+| `request` | `ServiceRequest \| None` | Requisição que falhou |
+| `response` | `ServiceResponse \| None` | Resposta do servidor |
+
+### Uso
+
+```python
+from sankhya_sdk.exceptions import ServiceRequestUnexpectedResultException
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
+
+try:
+    partner = SimpleCRUDRequestWrapper.find(Partner(code=999999))
+except ServiceRequestUnexpectedResultException as e:
+    print(f"Resultado inesperado: {e}")
+```
+
+Para buscas em que a ausência é esperada, prefira `try_find`, que retorna
+`None`. Mais de um resultado em `try_find`/`find` gera
+`ServiceRequestTooManyResultsException`.
 
 ---
 
 ## ServiceRequestInvalidAuthorizationException
 
-Credenciais inválidas ou sessão não autorizada.
+Sessão não autorizada: o servidor respondeu `não autorizado` ou a
+requisição foi feita sem autenticação. Deriva de `Exception`.
 
-### Atributos
+O `SankhyaWrapper` trata essa exceção sozinho: invalida a sessão,
+autentica de novo com as mesmas credenciais e repete a requisição. Ela só
+chega ao seu código quando a sessão já tinha sido invalidada ou quando o
+wrapper não tem credenciais. A mensagem é `str(e)`; não há atributos
+adicionais.
 
-| Atributo | Tipo | Descrição |
-|----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
-| `username` | `str` | Nome de usuário utilizado |
+---
+
+## ServiceRequestInvalidCredentialsException
+
+Login recusado (`Usuário/Senha inválido`). Deriva de `Exception` e não é
+repetida automaticamente.
 
 ### Uso
 
 ```python
-from sankhya_sdk.exceptions import ServiceRequestInvalidAuthorizationException
+from sankhya_sdk import SankhyaContext
+from sankhya_sdk.exceptions import ServiceRequestInvalidCredentialsException
 
 try:
     ctx = SankhyaContext.from_settings()
-except ServiceRequestInvalidAuthorizationException as e:
-    print(f"Usuário inválido: {e.username}")
-    # Não adianta retry - credenciais erradas
+except ServiceRequestInvalidCredentialsException as e:
+    print(f"Credenciais recusadas: {e}")
+    # Não adianta repetir: corrija SANKHYA_USERNAME / SANKHYA_PASSWORD
+else:
+    ctx.dispose()
 ```
 
-### Quando Ocorre
-
-- Usuário ou senha incorretos
-- Usuário sem permissão para API
-- Token de sessão expirado e não renovável
+`ServiceRequestExpiredAuthenticationException` (`Usuário expirou`) segue
+o mesmo padrão.
 
 ---
 
 ## ServiceRequestCompetitionException
 
-Erro de concorrência/lock no recurso.
+O Sankhya identificou a sessão como **duplicada**. É lançada para as
+mensagens `situação de concorrência`, `log de acessos` ou violação da
+`PK_TSIRLG` (tabela de log de acessos). Não indica lock de registro ou de
+tabela.
+
+Mensagem: `The session has been identified as duplicated by Sankhya`.
 
 ### Atributos
 
 | Atributo | Tipo | Descrição |
 |----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
-| `retry_after` | `int` | Segundos para aguardar antes de retry |
+| `request` | `ServiceRequest \| None` | Requisição que falhou |
+| `response` | `ServiceResponse \| None` | Resposta do servidor |
+
+### Retry automático
+
+- Em serviços **não transacionais** (consultas, `removeRecord`, ...), o
+  `SankhyaWrapper` invalida a sessão, autentica de novo e repete a
+  requisição **sem atraso**, até `max_retries` vezes (padrão 3).
+- Em serviços **transacionais** (ex.: `CRUDServiceProvider.saveRecord`,
+  usado por `SimpleCRUDRequestWrapper.update`), a exceção é propagada sem
+  retry, para não repetir uma gravação.
 
 ### Uso
 
 ```python
+import logging
+
 from sankhya_sdk.exceptions import ServiceRequestCompetitionException
-import time
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
 
+partner = Partner(code=1, name="Novo Nome")
 try:
-    crud.update(entity)
+    SimpleCRUDRequestWrapper.update(partner)
 except ServiceRequestCompetitionException as e:
-    print(f"Recurso bloqueado, retry em: {e.retry_after}s")
-    time.sleep(e.retry_after)
-    crud.update(entity)  # Tentar novamente
+    # saveRecord é transacional: o SDK não repetiu a gravação
+    logging.warning(f"Sessão duplicada: {e}")
+    SimpleCRUDRequestWrapper.update(partner)  # repetir, se fizer sentido
 ```
-
-### Quando Ocorre
-
-- Outro processo está editando o mesmo registro
-- Lock de tabela ativo
-- Transação bloqueante em andamento
 
 ---
 
 ## ServiceRequestDeadlockException
 
-Deadlock detectado no banco de dados.
+Deadlock detectado no banco de dados (mensagem do servidor contendo
+`deadlock`).
 
 ### Atributos
 
 | Atributo | Tipo | Descrição |
 |----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
-| `transaction_id` | `str` | ID da transação envolvida |
+| `request` | `ServiceRequest \| None` | Requisição que falhou |
+| `response` | `ServiceResponse \| None` | Resposta do servidor |
+
+A mensagem (`str(e)`) é o texto retornado pelo servidor.
+
+### Retry automático
+
+- Em serviços **não transacionais**, o `SankhyaWrapper` repete com atraso
+  linear: 15 s, 30 s e 45 s (`tentativa × RequestRetryDelay.STABLE`).
+- Em serviços **transacionais** (ex.: `SimpleCRUDRequestWrapper.update`),
+  a exceção é propagada imediatamente, sem retry.
 
 ### Uso
 
 ```python
+import logging
+
 from sankhya_sdk.exceptions import ServiceRequestDeadlockException
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
 
 try:
-    crud.update(entity)
+    SimpleCRUDRequestWrapper.update(Partner(code=1, name="Novo Nome"))
 except ServiceRequestDeadlockException as e:
-    print(f"Deadlock na transação: {e.transaction_id}")
-    # SDK normalmente faz retry automático
+    # Gravação (transacional): chega aqui na primeira ocorrência
+    logging.error(f"Deadlock: {e}")
+    raise
 ```
 
-### Quando Ocorre
+---
 
-- Duas ou mais transações aguardando recursos uma da outra
-- Atualização massiva conflitante
+## ServiceRequestFileNotFoundException
+
+Arquivo não encontrado. `SankhyaWrapper.get_file` (e
+`SankhyaContext.get_file`) a lançam quando o servidor devolve a página HTML
+de erro no lugar do arquivo (chave inválida ou arquivo inexistente). A
+mensagem (`str(e)`) inclui a chave.
+
+### Uso
+
+```python
+from sankhya_sdk import SankhyaContext
+from sankhya_sdk.exceptions import ServiceRequestFileNotFoundException
+
+with SankhyaContext.from_settings() as wrapper:
+    try:
+        file = wrapper.get_file("CHAVE_DO_ARQUIVO")
+    except ServiceRequestFileNotFoundException as e:
+        print(f"Arquivo não encontrado: {e}")
+```
 
 ---
 
 ## InvalidKeyFileException
 
-Erro ao processar arquivo .key de credenciais.
-
-### Atributos
-
-| Atributo | Tipo | Descrição |
-|----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
-| `file_path` | `str` | Caminho do arquivo |
-
-### Uso
-
-```python
-from sankhya_sdk.exceptions import InvalidKeyFileException
-
-try:
-    settings = SankhyaSettings.from_key_file("credenciais.key", "senha")
-except InvalidKeyFileException as e:
-    print(f"Erro no arquivo: {e.file_path}")
-    print(f"Motivo: {e.message}")
-```
-
-### Quando Ocorre
-
-- Arquivo não encontrado
-- Formato inválido
-- Senha incorreta para descriptografia
-- Arquivo corrompido
-
----
-
-## OperationException
-
-Erro durante operação em entidade.
-
-### Atributos
-
-| Atributo | Tipo | Descrição |
-|----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
-| `operation` | `str` | Tipo de operação (find, update, etc.) |
-| `entity_type` | `type` | Tipo da entidade envolvida |
-
-### Uso
-
-```python
-from sankhya_sdk.exceptions import OperationException
-
-try:
-    crud.insert(partner)
-except OperationException as e:
-    print(f"Operação: {e.operation}")
-    print(f"Entidade: {e.entity_type.__name__}")
-    print(f"Erro: {e.message}")
-```
-
-### Quando Ocorre
-
-- Validação de entidade falhou
-- Operação não permitida
-- Regra de negócio violada
+Chave de arquivo inválida para a sessão ou removida do Sankhya. Deriva de
+`Exception`. No SDK .NET ela é lançada pelo download de arquivos; no SDK
+Python, `get_file` sinaliza essa situação com
+`ServiceRequestFileNotFoundException`, e `InvalidKeyFileException` não é
+lançada pelo SDK.
 
 ---
 
 ## PagedRequestException
 
-Erro durante operação paginada.
+Erro durante uma requisição paginada (`PagedRequestWrapper`). Existem duas
+classes com esse nome:
 
-### Atributos
+- `sankhya_sdk.exceptions.PagedRequestException`: porta da exceção do .NET
+  (`request` e causa em `__cause__`);
+- `sankhya_sdk.request_wrappers.PagedRequestException`: subclasse da
+  anterior, lançada pelo `PagedRequestWrapper`, que acrescenta `page` e
+  `inner_exception`.
+
+Um `except` com qualquer uma das duas captura os erros de paginação.
+
+### Atributos (`sankhya_sdk.request_wrappers.PagedRequestException`)
 
 | Atributo | Tipo | Descrição |
 |----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
-| `page_number` | `int` | Número da página com erro |
-| `total_pages` | `int` | Total de páginas esperado |
+| `page` | `int` | Página que falhou. Na exceção lançada por `get_paged_results`/`get_paged_results_async` vale `0`: a página fica em `e.inner_exception.page` |
+| `inner_exception` | `Exception \| None` | Exceção de origem (também em `e.__cause__`). Na exceção lançada pelo generator, é a exceção da página (com `page` preenchido), cujo `inner_exception` é o erro do serviço |
+| `request` | `ServiceRequest \| None` | Requisição paginada |
+
+A mensagem é `str(e)`.
 
 ### Uso
 
 ```python
-from sankhya_sdk.exceptions import PagedRequestException
+from sankhya_sdk import SankhyaContext
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import LiteralCriteria, ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestException, PagedRequestWrapper
 
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+ServiceRequestExtensions.resolve_with_literal_criteria(
+    request, Partner, LiteralCriteria("ATIVO = 'S'")
+)
+
+ctx = SankhyaContext.from_settings()
 try:
-    for partner in paged.get_paged_results(Partner):
-        process(partner)
+    for partner in PagedRequestWrapper.get_paged_results(request, Partner, ctx.token):
+        print(partner.name)
 except PagedRequestException as e:
-    print(f"Erro na página {e.page_number}/{e.total_pages}")
-    print(f"Motivo: {e.message}")
+    cause = e.inner_exception
+    print(f"Erro na página {getattr(cause, 'page', e.page)}: {e}")
+finally:
+    ctx.dispose()
 ```
 
 ### Quando Ocorre
 
-- Timeout ao carregar página
-- Erro de comunicação durante paginação
-- Sessão expirada durante iteração
+- Erro do serviço ao carregar uma página (já após os retries do
+  `SankhyaWrapper`)
+- Erro de comunicação durante a paginação
+
+O tempo limite da paginação (`timeout`) gera `TimeoutError`, não
+`PagedRequestException`.
 
 ---
 
 ## Padrão de Tratamento Recomendado
 
 ```python
+import logging
+
 from sankhya_sdk.exceptions import (
+    PagedRequestException,
     SankhyaException,
-    ServiceRequestException,
-    ServiceRequestInvalidAuthorizationException,
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
-    OperationException,
-    PagedRequestException,
+    ServiceRequestGeneralException,
+    ServiceRequestInvalidAuthorizationException,
+    ServiceRequestInvalidCredentialsException,
 )
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
 
+partner = Partner(code=1, name="Novo Nome")
 try:
-    # Sua operação
-    result = crud.find(Partner, "CODPARC > 0")
-    
-except ServiceRequestInvalidAuthorizationException:
-    # Credenciais incorretas - não adianta retry
-    logging.error("Credenciais inválidas")
+    SimpleCRUDRequestWrapper.update(partner)
+
+except (ServiceRequestInvalidCredentialsException,
+        ServiceRequestInvalidAuthorizationException):
+    # Credenciais/sessão: não adianta repetir
+    logging.error("Falha de autenticação")
     raise
-    
+
 except ServiceRequestCompetitionException as e:
-    # Concorrência - pode tentar novamente
-    logging.warning(f"Recurso bloqueado, aguardando {e.retry_after}s")
-    time.sleep(e.retry_after)
-    result = crud.find(Partner, "CODPARC > 0")
-    
+    # Sessão duplicada; gravações não são repetidas pelo SDK
+    logging.warning(f"Sessão duplicada: {e}")
+    SimpleCRUDRequestWrapper.update(partner)
+
 except ServiceRequestDeadlockException:
-    # Deadlock - SDK deve fazer retry automático
-    # Se chegou aqui, esgotou tentativas
-    logging.error("Deadlock persistente")
+    # Consultas já foram repetidas pelo SDK; gravações chegam aqui direto
+    logging.error("Deadlock")
     raise
-    
-except ServiceRequestException as e:
-    # Outros erros de comunicação
-    logging.error(f"Erro API: {e.status_message}")
+
+except PagedRequestException as e:
+    logging.error(f"Erro de paginação: {e}")
     raise
-    
-except OperationException as e:
-    # Erro de operação (validação, regra de negócio)
-    logging.error(f"Erro de operação: {e.message}")
+
+except ServiceRequestGeneralException as e:
+    # Demais erros de serviço
+    logging.error(f"Erro de serviço: {e}")
     raise
-    
+
 except SankhyaException as e:
     # Qualquer outro erro do SDK
-    logging.error(f"Erro SDK: {e.message}")
+    logging.error(f"Erro SDK: {e}")
     raise
-    
+
 except Exception as e:
     # Erros inesperados
     logging.exception(f"Erro inesperado: {e}")
