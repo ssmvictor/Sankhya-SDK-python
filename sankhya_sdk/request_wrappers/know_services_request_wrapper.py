@@ -172,14 +172,17 @@ class KnowServicesRequestWrapper:
         sessão pertence ao contexto, que a encerra no próprio dispose().
         
         Note:
-            No .NET (KnowServicesRequestWrapper.cs:22-26) a classe estática
-            sempre adquire uma sessão própria com
-            ``Context.AcquireNewSession(ServiceRequestType.KnowServices)``.
-            O ramo com contexto informado mantém a sessão principal porque
-            os testes de integração existentes (com sequências fixas de
-            respostas HTTP simuladas) dependem de não haver um login extra;
-            a troca para ``context.acquire_new_session(KNOW_SERVICES)``
-            depende da atualização desses testes.
+            Divergência conhecida do .NET: lá a classe estática sempre
+            adquire uma sessão própria com
+            ``Context.AcquireNewSession(ServiceRequestType.KnowServices)``
+            (KnowServicesRequestWrapper.cs:22-26), como o
+            SimpleCRUDRequestWrapper faz nesta porta. O ramo com contexto
+            informado mantém o comportamento das versões anteriores desta
+            porta: reaproveita a sessão principal do contexto, sem um login
+            adicional, e as chamadas não ficam isoladas em uma sessão
+            própria. O alinhamento com o .NET
+            (``context.acquire_new_session(ServiceRequestType.KNOW_SERVICES)``,
+            finalizada em dispose()) ainda não foi feito.
             
         Args:
             context: Contexto Sankhya existente (opcional)
