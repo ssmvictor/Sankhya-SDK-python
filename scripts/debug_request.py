@@ -40,7 +40,7 @@ def debug_request():
                         Field(name="ATIVO")
                     ]
                 ),
-                criteria=LiteralCriteria(expression="ATIVO = 'S'")
+                literal_criteria=LiteralCriteria(expression="ATIVO = 'S'")
             )
         )
 
