@@ -5,12 +5,17 @@ Testes unitários para SimpleCRUDRequestWrapper.
 Testa operações CRUD, gerenciamento de sessão e processamento de resposta.
 """
 
+import threading
 import uuid
+from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import requests
 
+from sankhya_sdk.config import SankhyaSettings
 from sankhya_sdk.core.context import SankhyaContext
+from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.fiscal_person_type import FiscalPersonType
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_request_type import ServiceRequestType
@@ -106,10 +111,12 @@ def reset_wrapper():
     """Reseta o estado do wrapper antes de cada teste."""
     SimpleCRUDRequestWrapper._context = None
     SimpleCRUDRequestWrapper._session_token = None
+    SimpleCRUDRequestWrapper._owns_context = False
     SimpleCRUDRequestWrapper._initialized = False
     yield
     SimpleCRUDRequestWrapper._context = None
     SimpleCRUDRequestWrapper._session_token = None
+    SimpleCRUDRequestWrapper._owns_context = False
     SimpleCRUDRequestWrapper._initialized = False
 
 
@@ -126,6 +133,72 @@ def mock_context():
 def mock_entity():
     """Cria uma entidade mock."""
     return MockEntity(code=123, name="Test Entity", active="S")
+
+
+def _http_response(content: bytes, content_type: str = "text/xml;charset=UTF-8") -> requests.Response:
+    """Cria uma resposta HTTP real (requests.Response) com status 200."""
+    response = requests.Response()
+    response.status_code = 200
+    response._content = content
+    response.headers["Content-Type"] = content_type
+    response.encoding = "utf-8"
+    return response
+
+
+class _SessionHttpStub:
+    """
+    Simula o servidor Sankhya como ``side_effect`` de ``requests.Session.request``.
+
+    Responde login (um JSESSIONID por login), logout e o registro de user
+    agent (DWR), contando logins e logouts. Thread-safe.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.logins = 0
+        self.logouts = 0
+
+    def __call__(self, method: str, url: str, **kwargs) -> requests.Response:
+        with self._lock:
+            if "serviceName=MobileLoginSP.login" in url:
+                self.logins += 1
+                return _http_response(
+                    '<serviceResponse status="1"><responseBody>'
+                    f"<jsessionid>SESSION_{uuid.uuid4().hex}</jsessionid>"
+                    "</responseBody></serviceResponse>".encode("utf-8")
+                )
+            if "serviceName=MobileLoginSP.logout" in url:
+                self.logouts += 1
+                return _http_response(b'<serviceResponse status="1"></serviceResponse>')
+            if "DWRController" in url:
+                return _http_response(b"", "text/html")
+        raise AssertionError(f"Requisição inesperada: {method} {url}")
+
+
+@pytest.fixture
+def http_stub():
+    """
+    Instala o servidor simulado no transporte HTTP do SDK e configura as
+    SankhyaSettings usadas por ``SankhyaContext.from_settings()``.
+    """
+    stub = _SessionHttpStub()
+    settings = SankhyaSettings(
+        SANKHYA_URL="http://test.local",
+        SANKHYA_PORT=8180,
+        SANKHYA_USERNAME="user",
+        SANKHYA_PASSWORD="pass",
+    )
+    with patch("sankhya_sdk.core.low_level_wrapper.requests.Session") as session_cls, \
+            patch("sankhya_sdk.config.settings", settings):
+        session_cls.return_value.request.side_effect = stub
+        yield stub
+
+
+def _authenticated_context() -> SankhyaContext:
+    """Cria um SankhyaContext real autenticado contra o servidor simulado."""
+    wrapper = SankhyaWrapper(host="http://test.local", port=8180)
+    wrapper.authenticate("user", "pass")
+    return SankhyaContext(wrapper=wrapper)
 
 
 # =============================================================================
@@ -209,6 +282,89 @@ class TestInitialization:
         """Lança exceção se não inicializado."""
         with pytest.raises(RuntimeError, match="não inicializado"):
             SimpleCRUDRequestWrapper._ensure_initialized()
+
+
+# =============================================================================
+# Internal Context Tests (initialize() sem contexto)
+# =============================================================================
+
+
+class TestInternalContext:
+    """
+    Contexto criado pelo próprio wrapper em initialize() sem contexto.
+
+    No .NET o contexto vem do ServiceLocator e pertence à aplicação, que o
+    descarta (SimpleCRUDRequestWrapper.cs:17-21). Aqui o wrapper cria o
+    contexto e é o único a referenciá-lo, então dispose() deve encerrar a
+    sessão principal desse contexto sem afetar sessões de outros contextos.
+    Apenas o transporte HTTP é simulado.
+    """
+
+    def test_context_manager_releases_internal_context_sessions(self, http_stub):
+        """Sai do bloco with sem deixar sessões autenticadas do contexto interno."""
+        with SimpleCRUDRequestWrapper():
+            internal_context = SimpleCRUDRequestWrapper._context
+            session_token = SimpleCRUDRequestWrapper._session_token
+            # Sessão principal do contexto interno + sessão dedicada SIMPLE_CRUD
+            assert http_stub.logins == 2
+
+        assert http_stub.logouts == 2
+        assert internal_context.token not in SankhyaContext._wrappers
+        assert session_token not in SankhyaContext._wrappers
+        assert SimpleCRUDRequestWrapper._owns_context is False
+
+    def test_dispose_keeps_sessions_of_other_contexts(self, http_stub):
+        """Encerra só o contexto interno: o contexto da aplicação segue ativo."""
+        app_context = _authenticated_context()
+        try:
+            SimpleCRUDRequestWrapper.initialize()
+            internal_context = SimpleCRUDRequestWrapper._context
+            SimpleCRUDRequestWrapper.dispose()
+
+            assert http_stub.logins == 3
+            assert http_stub.logouts == 2
+            assert internal_context.token not in SankhyaContext._wrappers
+            assert SankhyaContext._wrappers[app_context.token] is app_context.wrapper
+        finally:
+            app_context.dispose()
+
+    def test_dispose_does_not_release_provided_context(self, http_stub):
+        """Com contexto informado, dispose() só finaliza a sessão dedicada."""
+        context = _authenticated_context()
+        try:
+            SimpleCRUDRequestWrapper.initialize(context)
+            SimpleCRUDRequestWrapper.dispose()
+
+            assert http_stub.logins == 2
+            assert http_stub.logouts == 1
+            assert SankhyaContext._wrappers[context.token] is context.wrapper
+        finally:
+            context.dispose()
+
+    def test_initialize_releases_internal_context_when_session_fails(self, http_stub):
+        """Falha ao adquirir a sessão dedicada não deixa o contexto interno autenticado."""
+        created: List[SankhyaContext] = []
+        real_from_settings = SankhyaContext.from_settings
+
+        def from_settings() -> SankhyaContext:
+            created.append(real_from_settings())
+            return created[-1]
+
+        with patch.object(SankhyaContext, "from_settings", side_effect=from_settings), \
+                patch.object(
+                    SankhyaContext,
+                    "acquire_new_session",
+                    side_effect=RuntimeError("falha no login"),
+                ):
+            with pytest.raises(RuntimeError, match="falha no login"):
+                SimpleCRUDRequestWrapper.initialize()
+
+        assert len(created) == 1
+        assert created[0].token not in SankhyaContext._wrappers
+        assert http_stub.logins == 1
+        assert http_stub.logouts == 1
+        assert SimpleCRUDRequestWrapper._initialized is False
+        assert SimpleCRUDRequestWrapper._context is None
 
 
 # =============================================================================

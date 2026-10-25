@@ -17,6 +17,7 @@ import pytest
 import requests
 from lxml import etree
 
+from sankhya_sdk.config import SankhyaSettings
 from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.types import ServiceFile
 from sankhya_sdk.core.wrapper import SankhyaWrapper
@@ -59,12 +60,14 @@ def reset_wrapper():
     KnowServicesRequestWrapper._context = None
     KnowServicesRequestWrapper._session_token = None
     KnowServicesRequestWrapper._owns_session = False
+    KnowServicesRequestWrapper._owns_context = False
     KnowServicesRequestWrapper._initialized = False
     KnowServicesRequestWrapper._last_time_message_received = datetime.now()
     yield
     KnowServicesRequestWrapper._context = None
     KnowServicesRequestWrapper._session_token = None
     KnowServicesRequestWrapper._owns_session = False
+    KnowServicesRequestWrapper._owns_context = False
     KnowServicesRequestWrapper._initialized = False
 
 
@@ -150,9 +153,19 @@ class _SankhyaHttpStub:
 
 @pytest.fixture
 def http_stub():
-    """Instala o servidor simulado no transporte HTTP do SDK."""
+    """
+    Instala o servidor simulado no transporte HTTP do SDK e configura as
+    SankhyaSettings usadas por ``SankhyaContext.from_settings()``.
+    """
     stub = _SankhyaHttpStub(image=b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
-    with patch("sankhya_sdk.core.low_level_wrapper.requests.Session") as session_cls:
+    settings = SankhyaSettings(
+        SANKHYA_URL="http://test.local",
+        SANKHYA_PORT=8180,
+        SANKHYA_USERNAME="user",
+        SANKHYA_PASSWORD="pass",
+    )
+    with patch("sankhya_sdk.core.low_level_wrapper.requests.Session") as session_cls, \
+            patch("sankhya_sdk.config.settings", settings):
         session_cls.return_value.request.side_effect = stub
         yield stub
 
@@ -282,6 +295,84 @@ class TestLifecycle:
             with KnowServicesRequestWrapper():
                 mock_init.assert_called_once()
             mock_dispose.assert_called_once()
+
+
+class TestInternalContext:
+    """
+    Contexto criado pelo próprio wrapper em initialize() sem contexto.
+
+    No .NET o contexto vem do ServiceLocator e pertence à aplicação, que o
+    descarta (KnowServicesRequestWrapper.cs:22-26). Aqui o wrapper cria o
+    contexto e é o único a referenciá-lo, então dispose() deve encerrar a
+    sessão principal desse contexto sem afetar sessões de outros contextos.
+    Apenas o transporte HTTP é simulado.
+    """
+
+    def test_context_manager_releases_internal_context_sessions(self, http_stub):
+        """Sai do bloco with sem deixar sessões autenticadas do contexto interno."""
+        with KnowServicesRequestWrapper():
+            internal_context = KnowServicesRequestWrapper._context
+            session_token = KnowServicesRequestWrapper._session_token
+            # Sessão principal do contexto interno + sessão dedicada KNOW_SERVICES
+            assert http_stub.logins == 2
+
+        assert http_stub.logouts == 2
+        assert internal_context.token not in SankhyaContext._wrappers
+        assert session_token not in SankhyaContext._wrappers
+        assert KnowServicesRequestWrapper._owns_context is False
+
+    def test_dispose_keeps_sessions_of_other_contexts(self, http_stub):
+        """Encerra só o contexto interno: o contexto da aplicação segue ativo."""
+        app_context = _authenticated_context()
+        try:
+            KnowServicesRequestWrapper.initialize()
+            internal_context = KnowServicesRequestWrapper._context
+            KnowServicesRequestWrapper.dispose()
+
+            assert http_stub.logins == 3
+            assert http_stub.logouts == 2
+            assert internal_context.token not in SankhyaContext._wrappers
+            assert SankhyaContext._wrappers[app_context.token] is app_context.wrapper
+        finally:
+            app_context.dispose()
+
+    def test_dispose_does_not_release_provided_context(self, http_stub):
+        """Com contexto informado, dispose() não encerra a sessão principal dele."""
+        context = _authenticated_context()
+        try:
+            KnowServicesRequestWrapper.initialize(context)
+            KnowServicesRequestWrapper.dispose()
+
+            assert http_stub.logins == 1
+            assert http_stub.logouts == 0
+            assert SankhyaContext._wrappers[context.token] is context.wrapper
+        finally:
+            context.dispose()
+
+    def test_initialize_releases_internal_context_when_session_fails(self, http_stub):
+        """Falha ao adquirir a sessão dedicada não deixa o contexto interno autenticado."""
+        created: List[SankhyaContext] = []
+        real_from_settings = SankhyaContext.from_settings
+
+        def from_settings() -> SankhyaContext:
+            created.append(real_from_settings())
+            return created[-1]
+
+        with patch.object(SankhyaContext, "from_settings", side_effect=from_settings), \
+                patch.object(
+                    SankhyaContext,
+                    "acquire_new_session",
+                    side_effect=RuntimeError("falha no login"),
+                ):
+            with pytest.raises(RuntimeError, match="falha no login"):
+                KnowServicesRequestWrapper.initialize()
+
+        assert len(created) == 1
+        assert created[0].token not in SankhyaContext._wrappers
+        assert http_stub.logins == 1
+        assert http_stub.logouts == 1
+        assert KnowServicesRequestWrapper._initialized is False
+        assert KnowServicesRequestWrapper._context is None
 
 
 # =============================================================================

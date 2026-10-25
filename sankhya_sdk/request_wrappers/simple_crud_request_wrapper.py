@@ -60,6 +60,9 @@ class SimpleCRUDRequestWrapper:
     Attributes:
         _context: Contexto Sankhya para gerenciamento de sessão
         _session_token: Token UUID da sessão ativa
+        _owns_context: Indica se o contexto foi criado pelo próprio wrapper
+            (initialize() sem contexto) e, portanto, deve ter sua sessão
+            principal encerrada em dispose()
         _initialized: Flag indicando se o wrapper foi inicializado
     
     Example:
@@ -81,6 +84,7 @@ class SimpleCRUDRequestWrapper:
     
     _context: ClassVar[Optional["SankhyaContext"]] = None
     _session_token: ClassVar[Optional[uuid.UUID]] = None
+    _owns_context: ClassVar[bool] = False
     _initialized: ClassVar[bool] = False
     
     def __init__(self) -> None:
@@ -129,6 +133,10 @@ class SimpleCRUDRequestWrapper:
         uma sessão dedicada (ServiceRequestType.SIMPLE_CRUD) é adquirida
         do contexto e finalizada em dispose().
         
+        O contexto criado internamente pertence ao wrapper: sua sessão
+        principal também é encerrada em dispose(). Um contexto informado
+        pertence a quem o criou, que deve descartá-lo.
+        
         Args:
             context: Contexto Sankhya existente (opcional)
             
@@ -152,13 +160,22 @@ class SimpleCRUDRequestWrapper:
             cls._session_token = context.acquire_new_session(
                 ServiceRequestType.SIMPLE_CRUD
             )
+            cls._owns_context = False
         else:
             # Import local para evitar circular
             from sankhya_sdk.core.context import SankhyaContext
-            cls._context = SankhyaContext.from_settings()
-            cls._session_token = cls._context.acquire_new_session(
-                ServiceRequestType.SIMPLE_CRUD
-            )
+            owned_context = SankhyaContext.from_settings()
+            try:
+                session_token = owned_context.acquire_new_session(
+                    ServiceRequestType.SIMPLE_CRUD
+                )
+            except Exception:
+                # Ninguém mais referencia o contexto criado aqui
+                cls._release_owned_context(owned_context)
+                raise
+            cls._context = owned_context
+            cls._session_token = session_token
+            cls._owns_context = True
         
         cls._initialized = True
         logger.info(
@@ -170,7 +187,9 @@ class SimpleCRUDRequestWrapper:
         """
         Libera os recursos do wrapper.
         
-        Finaliza a sessão e limpa os atributos de classe.
+        Finaliza a sessão dedicada e limpa os atributos de classe. Se o
+        contexto foi criado pelo próprio wrapper (initialize() sem
+        contexto), encerra também a sessão principal desse contexto.
         Pode ser chamado múltiplas vezes sem efeito.
         
         Example:
@@ -185,10 +204,46 @@ class SimpleCRUDRequestWrapper:
             except Exception as e:
                 logger.warning(f"Erro ao finalizar sessão: {e}")
         
+        if cls._owns_context and cls._context:
+            cls._release_owned_context(cls._context)
+        
         cls._context = None
         cls._session_token = None
+        cls._owns_context = False
         cls._initialized = False
         logger.info("SimpleCRUDRequestWrapper descartado")
+    
+    @staticmethod
+    def _release_owned_context(context: "SankhyaContext") -> None:
+        """
+        Encerra a sessão principal de um contexto criado pelo wrapper.
+        
+        No .NET o contexto vem do ServiceLocator e pertence à aplicação,
+        que o descarta (SimpleCRUDRequestWrapper.cs:17); o wrapper nunca
+        cria um. Aqui, sem contexto informado, o contexto criado em
+        initialize() só é referenciado pelo wrapper, e
+        ``SankhyaContext.__del__`` não encerra sessões
+        (``~SankhyaContext() => Dispose(false)``): sem esta liberação a
+        sessão principal ficaria autenticada no registro de classe.
+        
+        ``SankhyaContext.dispose()`` não é usado porque descarta TODOS os
+        wrappers do registro de classe, inclusive sessões de outros
+        contextos ainda em uso. Apenas a sessão principal deste contexto é
+        removida do registro e encerrada (logout).
+        
+        Args:
+            context: Contexto criado pelo próprio wrapper
+        """
+        from sankhya_sdk.core.context import SankhyaContext
+        
+        with SankhyaContext._wrappers_lock:
+            SankhyaContext._wrappers.pop(context.token, None)
+        try:
+            context.wrapper.dispose()
+        except Exception as e:
+            logger.warning(f"Erro ao encerrar a sessão principal do contexto: {e}")
+        finally:
+            context._disposed = True
     
     @classmethod
     def _ensure_initialized(cls) -> None:

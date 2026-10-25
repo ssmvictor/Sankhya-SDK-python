@@ -92,6 +92,9 @@ class KnowServicesRequestWrapper:
         _session_token: Token UUID da sessão ativa
         _owns_session: Indica se a sessão foi adquirida pelo próprio wrapper
             (e, portanto, deve ser finalizada em dispose())
+        _owns_context: Indica se o contexto foi criado pelo próprio wrapper
+            (initialize() sem contexto) e, portanto, deve ter sua sessão
+            principal encerrada em dispose()
         _initialized: Flag indicando se o wrapper foi inicializado
         _last_time_message_received: Timestamp da última mensagem recebida
     
@@ -113,6 +116,7 @@ class KnowServicesRequestWrapper:
     _context: ClassVar[Optional["SankhyaContext"]] = None
     _session_token: ClassVar[Optional[uuid.UUID]] = None
     _owns_session: ClassVar[bool] = False
+    _owns_context: ClassVar[bool] = False
     _initialized: ClassVar[bool] = False
     _last_time_message_received: ClassVar[datetime] = datetime.now()
     
@@ -160,7 +164,8 @@ class KnowServicesRequestWrapper:
         Se nenhum contexto for fornecido, cria um novo usando
         as configurações padrão (SankhyaSettings) e adquire dele uma
         sessão dedicada (ServiceRequestType.KNOW_SERVICES), finalizada
-        em dispose().
+        em dispose(). O contexto criado internamente pertence ao wrapper:
+        sua sessão principal também é encerrada em dispose().
         
         Com um contexto informado, o wrapper usa a sessão principal do
         contexto (``context.token``) e NÃO a finaliza em dispose(): a
@@ -196,14 +201,23 @@ class KnowServicesRequestWrapper:
             cls._context = context
             cls._session_token = context.token
             cls._owns_session = False
+            cls._owns_context = False
         else:
             # Import local para evitar circular
             from sankhya_sdk.core.context import SankhyaContext
-            cls._context = SankhyaContext.from_settings()
-            cls._session_token = cls._context.acquire_new_session(
-                ServiceRequestType.KNOW_SERVICES
-            )
+            owned_context = SankhyaContext.from_settings()
+            try:
+                session_token = owned_context.acquire_new_session(
+                    ServiceRequestType.KNOW_SERVICES
+                )
+            except Exception:
+                # Ninguém mais referencia o contexto criado aqui
+                cls._release_owned_context(owned_context)
+                raise
+            cls._context = owned_context
+            cls._session_token = session_token
             cls._owns_session = True
+            cls._owns_context = True
         
         cls._last_time_message_received = datetime.now()
         cls._initialized = True
@@ -217,9 +231,10 @@ class KnowServicesRequestWrapper:
         Libera os recursos do wrapper.
         
         Finaliza a sessão adquirida pelo próprio wrapper (inicialização sem
-        contexto) e limpa os atributos de classe. A sessão principal de um
-        contexto informado em initialize(context) não é finalizada, pois
-        pertence ao contexto.
+        contexto) e limpa os atributos de classe. Nesse caso o contexto
+        também foi criado pelo wrapper, e sua sessão principal é encerrada.
+        A sessão principal de um contexto informado em initialize(context)
+        não é finalizada, pois pertence ao contexto.
         Pode ser chamado múltiplas vezes sem efeito.
         
         Example:
@@ -234,12 +249,48 @@ class KnowServicesRequestWrapper:
             except Exception as e:
                 logger.warning(f"Erro ao finalizar sessão: {e}")
         
+        if cls._owns_context and cls._context:
+            cls._release_owned_context(cls._context)
+        
         cls._context = None
         cls._session_token = None
         cls._owns_session = False
+        cls._owns_context = False
         cls._initialized = False
         cls._last_time_message_received = datetime.now()
         logger.info("KnowServicesRequestWrapper descartado")
+    
+    @staticmethod
+    def _release_owned_context(context: "SankhyaContext") -> None:
+        """
+        Encerra a sessão principal de um contexto criado pelo wrapper.
+        
+        No .NET o contexto vem do ServiceLocator e pertence à aplicação,
+        que o descarta (KnowServicesRequestWrapper.cs:22); o wrapper nunca
+        cria um. Aqui, sem contexto informado, o contexto criado em
+        initialize() só é referenciado pelo wrapper, e
+        ``SankhyaContext.__del__`` não encerra sessões
+        (``~SankhyaContext() => Dispose(false)``): sem esta liberação a
+        sessão principal ficaria autenticada no registro de classe.
+        
+        ``SankhyaContext.dispose()`` não é usado porque descarta TODOS os
+        wrappers do registro de classe, inclusive sessões de outros
+        contextos ainda em uso. Apenas a sessão principal deste contexto é
+        removida do registro e encerrada (logout).
+        
+        Args:
+            context: Contexto criado pelo próprio wrapper
+        """
+        from sankhya_sdk.core.context import SankhyaContext
+        
+        with SankhyaContext._wrappers_lock:
+            SankhyaContext._wrappers.pop(context.token, None)
+        try:
+            context.wrapper.dispose()
+        except Exception as e:
+            logger.warning(f"Erro ao encerrar a sessão principal do contexto: {e}")
+        finally:
+            context._disposed = True
     
     @classmethod
     def _ensure_initialized(cls) -> None:
