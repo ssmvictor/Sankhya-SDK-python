@@ -113,7 +113,13 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         self._stop_event = asyncio.Event()
         self._flush_event = asyncio.Event()
         self._work_available = asyncio.Event()
-        self._flush_complete = asyncio.Event()
+        
+        # Conclusão do flush: total de entidades adicionadas x processadas
+        # (ver flush)
+        self._flush_cond = asyncio.Condition()
+        self._added_count = 0
+        self._processed_count = 0
+        self._worker_finished = False
         
         # Sessão e contexto
         self._context = context
@@ -174,6 +180,7 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
     async def start(self) -> None:
         """Inicia a task worker."""
         if self._worker_task is None or self._worker_task.done():
+            self._worker_finished = False
             self._worker_task = asyncio.create_task(
                 self._process(),
                 name=f"AsyncOnDemandWorker-{id(self)}",
@@ -198,7 +205,10 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         if self._cancel_event.is_set():
             raise CanceledOnDemandRequestWrapperException()
         
+        # Contabiliza depois de enfileirar (sem await entre os dois): o alvo
+        # de um flush nunca inclui uma entidade que ainda não está na fila
         await self._queue.put(entity)
+        self._added_count += 1
         self._work_available.set()
         
         logger.debug(f"Entidade adicionada à fila: {type(entity).__name__}")
@@ -208,11 +218,19 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         Força o processamento imediato de todas as entidades na fila.
         
         Aguarda até que todas as entidades pendentes sejam processadas.
+        
+        Pendentes são as entidades adicionadas antes da chamada, inclusive
+        as de um lote que o worker já está enviando. A fila é FIFO e uma única
+        task worker a consome, então elas estão processadas quando o total de
+        entidades processadas alcança o total adicionado até a chamada. Cada
+        chamada aguarda o seu próprio alvo: o fim do flush de outra task não
+        a libera antes da hora.
         """
         if self._disposed:
             return
         
-        if self._queue.empty():
+        target = self._added_count
+        if self._processed_count >= target:
             return
         
         # Sem task worker ativa ninguém processaria a fila nem sinalizaria
@@ -220,12 +238,16 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         if not self._is_worker_running():
             await self.start()
         
-        self._flush_complete.clear()
         self._flush_event.set()
         self._work_available.set()
         
-        # Aguarda conclusão do flush
-        await self._flush_complete.wait()
+        # Aguarda conclusão do flush. Worker já encerrado (ex.: após
+        # cancelamento) não processaria mais nada: ele marca o término antes
+        # de notificar os flushes pendentes.
+        async with self._flush_cond:
+            await self._flush_cond.wait_for(
+                lambda: self._processed_count >= target or self._worker_finished
+            )
         
         logger.debug("Flush concluído")
 
@@ -317,8 +339,10 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
                 except Exception as e:
                     logger.error(f"Erro na worker task: {e}", exc_info=True)
         finally:
-            # Sinaliza conclusão de qualquer flush pendente
-            self._flush_complete.set()
+            # Marca o término antes de liberar flushes pendentes (ver flush)
+            self._worker_finished = True
+            async with self._flush_cond:
+                self._flush_cond.notify_all()
             self._release_session()
             logger.debug("Worker task finalizada")
 
@@ -388,47 +412,46 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         if is_flushing:
             self._flush_event.clear()
         
-        try:
-            is_cancelling = self._cancel_event.is_set()
-            is_disposing = self._stop_event.is_set()
-            
-            if self._queue.empty() and (is_cancelling or is_disposing):
-                return True
-            
-            force_request = is_cancelling or is_disposing or is_flushing
-            
-            if self._queue.qsize() < self._throughput and not force_request:
-                return False
-            
-            # Coleta itens da fila
-            items: List[TEntity] = []
-            while (
-                len(items) < self._throughput
-                or force_request
-                or self._allow_above_throughput
-            ):
-                try:
-                    items.append(self._queue.get_nowait())
-                except asyncio.QueueEmpty:
-                    break
-            
-            if not items:
-                return False
-            
-            try:
-                await self._process_batch(items)
-            finally:
-                # Como no .NET (que não reseta o evento após enviar um lote),
-                # a fila é reavaliada sem esperar novo add(): se ainda houver
-                # throughput, o próximo lote é enviado em seguida
-                self._work_available.set()
-            
+        is_cancelling = self._cancel_event.is_set()
+        is_disposing = self._stop_event.is_set()
+        
+        if self._queue.empty() and (is_cancelling or is_disposing):
+            return True
+        
+        force_request = is_cancelling or is_disposing or is_flushing
+        
+        if self._queue.qsize() < self._throughput and not force_request:
             return False
+        
+        # Coleta itens da fila
+        items: List[TEntity] = []
+        while (
+            len(items) < self._throughput
+            or force_request
+            or self._allow_above_throughput
+        ):
+            try:
+                items.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        
+        if not items:
+            return False
+        
+        try:
+            await self._process_batch(items)
         finally:
-            # O flush é sinalizado mesmo se o processamento falhar, para que
-            # flush() não fique bloqueado para sempre
-            if is_flushing:
-                self._flush_complete.set()
+            # O lote é contabilizado mesmo se o processamento falhar, para
+            # que flush() não fique bloqueado para sempre
+            self._processed_count += len(items)
+            async with self._flush_cond:
+                self._flush_cond.notify_all()
+            # Como no .NET (que não reseta o evento após enviar um lote),
+            # a fila é reavaliada sem esperar novo add(): se ainda houver
+            # throughput, o próximo lote é enviado em seguida
+            self._work_available.set()
+        
+        return False
 
     async def _process_batch(self, items: List[TEntity]) -> None:
         """

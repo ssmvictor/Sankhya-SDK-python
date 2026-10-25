@@ -8,7 +8,7 @@ Testes básicos de inicialização e propriedades, evitando bloqueios de threads
 import asyncio
 import threading
 import time
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 import pytest
@@ -267,17 +267,20 @@ class _RecordingService:
     ``outcomes`` define, em ordem, a exceção lançada por cada chamada
     (``None`` = sucesso). Com ``block_first_call`` a primeira chamada fica
     bloqueada até ``release`` ser sinalizado, segurando o worker em um
-    ponto conhecido.
+    ponto conhecido. ``gates`` faz o mesmo para outras chamadas: a chamada
+    de número ``n`` (a partir de 1) aguarda o evento ``gates[n]``.
     """
 
     def __init__(
         self,
         outcomes: Sequence[Optional[BaseException]] = (),
         block_first_call: bool = False,
+        gates: Optional[Dict[int, threading.Event]] = None,
     ) -> None:
         self._cond = threading.Condition()
         self._outcomes = list(outcomes)
         self._block_first_call = block_first_call
+        self._gates = dict(gates or {})
         self.batches: List[List[str]] = []
         self.first_call_started = threading.Event()
         self.release = threading.Event()
@@ -291,6 +294,8 @@ class _RecordingService:
         if index == 1 and self._block_first_call:
             self.first_call_started.set()
             self.release.wait(SYNC_TIMEOUT)
+        if index in self._gates:
+            self._gates[index].wait(SYNC_TIMEOUT)
         if outcome is not None:
             raise outcome
         return MagicMock()
@@ -344,6 +349,23 @@ def _dispose_quietly(wrapper: OnDemandRequestWrapper) -> None:
     thread = threading.Thread(target=wrapper.dispose, daemon=True)
     thread.start()
     thread.join(SYNC_TIMEOUT)
+
+
+class _CallbackEvent(threading.Event):
+    """
+    threading.Event que executa ``on_set`` a cada ``set()``.
+
+    Substitui o ``_flush_event`` do wrapper para que o teste reaja, sem
+    esperas, ao momento em que um flush pede o envio ao worker.
+    """
+
+    def __init__(self, on_set: Callable[[], None]) -> None:
+        super().__init__()
+        self._on_set = on_set
+
+    def set(self) -> None:
+        super().set()
+        self._on_set()
 
 
 @pytest.fixture
@@ -662,6 +684,95 @@ class TestOnDemandFlush:
             wrapper._queue.put(Partner(name="A"))
             _call_with_timeout(wrapper.flush)
         finally:
+            _dispose_quietly(wrapper)
+
+
+class TestOnDemandFlushCompletion:
+    """flush() só retorna depois que as entidades pendentes foram enviadas."""
+
+    def test_flush_waits_for_batch_already_in_flight(self):
+        """Com a fila vazia, flush() aguarda o lote que o worker está enviando."""
+        service = _RecordingService(block_first_call=True)
+        wrapper = _create_wrapper(
+            service, throughput=2, allow_above_throughput=False
+        )
+        # O lote em andamento só é liberado quando o flush pede o envio: um
+        # flush que retornasse sem aguardar veria o lote ainda pendente
+        wrapper._flush_event = _CallbackEvent(service.release.set)
+        sent_when_flush_returned: List[int] = []
+
+        def flush() -> None:
+            wrapper.flush()
+            sent_when_flush_returned.append(wrapper.entities_sent_successfully)
+
+        try:
+            wrapper.add(Partner(name="A"))
+            wrapper.add(Partner(name="B"))
+            # Throughput atingido: o worker já retirou as duas da fila
+            assert service.first_call_started.wait(SYNC_TIMEOUT)
+            assert wrapper.queue_size == 0
+
+            _call_with_timeout(flush)
+
+            assert sent_when_flush_returned == [2]
+            assert service.batches == [["A", "B"]]
+        finally:
+            service.release.set()
+            _dispose_quietly(wrapper)
+
+    def test_concurrent_flush_waits_for_its_own_entities(self):
+        """O fim do flush de outra thread não libera um flush antes da hora."""
+        release_a = threading.Event()
+        release_b = threading.Event()
+        service = _RecordingService(gates={1: release_a, 2: release_b})
+        wrapper = _create_wrapper(
+            service, throughput=10, allow_above_throughput=False
+        )
+        # Pedidos de flush: o 2º libera o envio de A e o 3º, o de B
+        flush_requests: List[int] = []
+
+        def on_flush_request() -> None:
+            flush_requests.append(len(flush_requests) + 1)
+            if len(flush_requests) == 2:
+                release_a.set()
+            elif len(flush_requests) == 3:
+                release_b.set()
+
+        wrapper._flush_event = _CallbackEvent(on_flush_request)
+        sent_when_second_flush_returned: List[int] = []
+
+        def second_flush() -> None:
+            wrapper.flush()
+            sent_when_second_flush_returned.append(
+                wrapper.entities_sent_successfully
+            )
+
+        first = threading.Thread(target=wrapper.flush, daemon=True)
+        second = threading.Thread(target=second_flush, daemon=True)
+        try:
+            # 1º flush: o worker envia [A] e fica retido
+            wrapper.add(Partner(name="A"))
+            first.start()
+            assert service.wait_for_calls(1)
+
+            # 2º flush (B ainda na fila) libera A; o worker segue para B
+            wrapper.add(Partner(name="B"))
+            second.start()
+            assert service.wait_for_calls(2)
+
+            # B só é liberado por um novo pedido de flush, feito com o envio
+            # de B já em andamento
+            _call_with_timeout(wrapper.flush)
+            first.join(SYNC_TIMEOUT)
+            second.join(SYNC_TIMEOUT)
+            assert not first.is_alive() and not second.is_alive()
+
+            # O 2º flush retornou só depois do envio de B
+            assert sent_when_second_flush_returned == [2]
+            assert service.batches == [["A"], ["B"]]
+        finally:
+            release_a.set()
+            release_b.set()
             _dispose_quietly(wrapper)
 
 
