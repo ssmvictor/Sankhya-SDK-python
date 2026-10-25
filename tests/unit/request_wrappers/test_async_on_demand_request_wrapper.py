@@ -368,6 +368,53 @@ class TestAsyncOnDemandRequestBuilding:
 
 
 # =============================================================================
+# Evento de falha (.NET OnDemandRequestWrapper.cs:309-315)
+# =============================================================================
+
+
+class TestAsyncOnDemandFailureEvent:
+    """is_update do evento segue o serviço: ``service == CrudServiceSave``."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("service", "expected_is_update"),
+        [
+            (ServiceName.CRUD_SERVICE_SAVE, True),
+            (ServiceName.CRUD_SERVICE_REMOVE, False),
+        ],
+    )
+    async def test_is_update_reflects_the_service(
+        self, failure_events, service, expected_is_update
+    ):
+        """Falha de remoção publica is_update=False; de salvamento, True."""
+
+        async def fail(request) -> None:
+            raise ServiceRequestCompetitionException()
+
+        context = MagicMock()
+        context.service_invoker_async = fail
+        wrapper = AsyncOnDemandRequestWrapper(
+            service=service,
+            cancel_event=asyncio.Event(),
+            context=context,
+            throughput=10,
+            allow_above_throughput=False,
+        )
+        await wrapper.start()
+        # Chave preenchida: o valor não depende da presença das chaves
+        partner = Partner(code=1, name="A")
+        try:
+            await wrapper.add(partner)
+            await _flush(wrapper)
+
+            assert len(failure_events) == 1
+            assert failure_events[0].entity is partner
+            assert failure_events[0].is_update is expected_is_update
+        finally:
+            await _dispose_quietly(wrapper)
+
+
+# =============================================================================
 # Flush
 # =============================================================================
 

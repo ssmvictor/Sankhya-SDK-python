@@ -42,22 +42,6 @@ from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.models.service.service_request import ServiceRequest
 
 
-def _is_update_operation(entity: EntityBase) -> bool:
-    """Verifica se a operação é de atualização baseado nas chaves."""
-    # Se todos os campos chave estão preenchidos, é atualização
-    from sankhya_sdk.attributes.reflection import get_field_metadata
-    for field_name, field_info in entity.model_fields.items():
-        try:
-            metadata = get_field_metadata(field_info)
-            if metadata.is_key:
-                value = getattr(entity, field_name, None)
-                if value is None:
-                    return False
-        except Exception:
-            continue
-    return True
-
-
 logger = logging.getLogger(__name__)
 
 # TypeVar para entidades genéricas
@@ -533,7 +517,9 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             item: Entidade que falhou
             exception: Exceção que causou a falha
         """
-        is_update = _is_update_operation(item)
+        # .NET (OnDemandRequestWrapper.cs:309-315): isUpdate indica se a
+        # requisição que falhou era de salvamento (e não de remoção)
+        is_update = self._service == ServiceName.CRUD_SERVICE_SAVE
         failure_event = OnDemandRequestFailureEvent(
             entity=item,
             is_update=is_update,

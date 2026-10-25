@@ -581,6 +581,47 @@ class TestOnDemandRequestBuilding:
 
 
 # =============================================================================
+# Evento de falha (.NET OnDemandRequestWrapper.cs:309-315)
+# =============================================================================
+
+
+class TestOnDemandFailureEvent:
+    """is_update do evento segue o serviço: ``service == CrudServiceSave``."""
+
+    @pytest.mark.parametrize(
+        ("service", "expected_is_update"),
+        [
+            (ServiceName.CRUD_SERVICE_SAVE, True),
+            (ServiceName.CRUD_SERVICE_REMOVE, False),
+        ],
+    )
+    def test_is_update_reflects_the_service(
+        self, failure_events, service, expected_is_update
+    ):
+        """Falha de remoção publica is_update=False; de salvamento, True."""
+        context = MagicMock()
+        context.service_invoker.side_effect = ServiceRequestCompetitionException()
+        wrapper = OnDemandRequestWrapper(
+            service=service,
+            cancel_token=threading.Event(),
+            context=context,
+            throughput=10,
+            allow_above_throughput=False,
+        )
+        # Chave preenchida: o valor não depende da presença das chaves
+        partner = Partner(code=1, name="A")
+        try:
+            wrapper.add(partner)
+            _call_with_timeout(wrapper.flush)
+
+            assert len(failure_events) == 1
+            assert failure_events[0].entity is partner
+            assert failure_events[0].is_update is expected_is_update
+        finally:
+            _dispose_quietly(wrapper)
+
+
+# =============================================================================
 # Flush
 # =============================================================================
 
