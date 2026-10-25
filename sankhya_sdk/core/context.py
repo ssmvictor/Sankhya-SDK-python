@@ -729,11 +729,20 @@ class SankhyaContext:
         Finaliza todas as sessões (on-demand e regulares), remove todos
         os wrappers registrados e faz dispose em cada um.
 
+        Com sessões on-demand ativas, finaliza antes os wrappers do
+        OnDemandRequestFactory (``OnDemandRequestFactory.finalize_all()``),
+        como o .NET (SankhyaContext.cs:179-182): cada worker envia as
+        entidades pendentes e só então libera a própria sessão.
+
         Note:
             - Idempotente: múltiplas chamadas não causam erro
             - Thread-safe via lock global
             - Silencia exceções de dispose individuais
             - Dispõe TODOS os wrappers, não apenas on-demand
+            - Os AsyncOnDemandRequestWrappers precisam ser aguardados:
+              use ``async with`` (``__aexit__`` aguarda
+              ``AsyncOnDemandRequestFactory.finalize_all()``) ou aguarde-o
+              antes de chamar dispose()
 
         Example:
             >>> ctx.dispose()
@@ -743,7 +752,20 @@ class SankhyaContext:
 
         logger.debug("Descartando SankhyaContext")
 
-        # Snapshot de tokens on-demand para finalização (thread-safe)
+        # Finaliza os on-demand wrappers antes das sessões deles: liberar
+        # uma sessão antes faria falhar os envios pendentes do worker
+        if self._has_on_demand_sessions():
+            # Import local: request_wrappers depende de core
+            from sankhya_sdk.request_wrappers.on_demand_request_factory import (
+                OnDemandRequestFactory,
+            )
+
+            try:
+                OnDemandRequestFactory.finalize_all()
+            except Exception as e:
+                logger.warning(f"Erro ao finalizar on-demand wrappers: {e}")
+
+        # Snapshot dos tokens on-demand restantes para finalização (thread-safe)
         with SankhyaContext._wrappers_lock:
             on_demand_tokens_snapshot = list(self._on_demand_tokens)
             self._on_demand_tokens.clear()
@@ -784,6 +806,11 @@ class SankhyaContext:
 
         self._disposed = True
         logger.debug(f"SankhyaContext descartado: token={self._token}")
+
+    def _has_on_demand_sessions(self) -> bool:
+        """Indica se há sessões on-demand ativas neste contexto (thread-safe)."""
+        with SankhyaContext._wrappers_lock:
+            return bool(self._on_demand_tokens)
 
     # ==========================================================================
     # Context Manager Protocol
@@ -837,8 +864,24 @@ class SankhyaContext:
         Sai do contexto assíncrono, liberando todos os recursos.
 
         Note:
-            O dispose() é síncrono, mas chamado em contexto async.
+            O dispose() é síncrono, mas chamado em contexto async. Antes
+            dele, com sessões on-demand ativas, aguarda
+            ``AsyncOnDemandRequestFactory.finalize_all()``, que o dispose()
+            não consegue aguardar: cada worker assíncrono envia as entidades
+            pendentes e só então libera a própria sessão.
         """
+        if not self._disposed and self._has_on_demand_sessions():
+            # Import local: request_wrappers depende de core
+            from sankhya_sdk.request_wrappers.async_on_demand_request_factory import (
+                AsyncOnDemandRequestFactory,
+            )
+
+            try:
+                await AsyncOnDemandRequestFactory.finalize_all()
+            except Exception as e:
+                logger.warning(
+                    f"Erro ao finalizar on-demand wrappers assíncronos: {e}"
+                )
         self.dispose()
 
     # ==========================================================================

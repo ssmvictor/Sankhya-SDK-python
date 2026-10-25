@@ -421,6 +421,115 @@ class TestSankhyaContextLifecycle:
             assert SankhyaContext._wrappers.get(other_token) is other_wrapper
 
 
+class TestSankhyaContextOnDemandDisposal:
+    """
+    dispose() finaliza os on-demand wrappers antes das sessões deles.
+
+    Como no .NET (SankhyaContext.cs:179-182: ``OnDemandRequestFactory.
+    FinalizeAll()`` antes de descartar os wrappers), cada worker envia as
+    entidades pendentes e só então libera a própria sessão.
+    """
+
+    @staticmethod
+    def _session_wrapper(calls: list) -> MagicMock:
+        """Wrapper da sessão dedicada que registra envios e o dispose."""
+        session_wrapper = MagicMock()
+        session_wrapper.service_invoker.side_effect = (
+            lambda request: calls.append("send")
+        )
+
+        async def service_invoker_async(request):
+            calls.append("send")
+
+        session_wrapper.service_invoker_async = service_invoker_async
+        session_wrapper.dispose.side_effect = lambda: calls.append("dispose")
+        return session_wrapper
+
+    def test_dispose_drains_on_demand_wrappers_before_their_sessions(
+        self, mock_wrapper
+    ):
+        """Entidades na fila são enviadas antes do logout da sessão on-demand."""
+        from sankhya_sdk.enums.service_name import ServiceName
+        from sankhya_sdk.models.transport.partner import Partner
+        from sankhya_sdk.request_wrappers.on_demand_request_factory import (
+            OnDemandRequestFactory,
+        )
+
+        ctx = SankhyaContext(mock_wrapper)
+        calls: list = []
+        session_wrapper = self._session_wrapper(calls)
+        OnDemandRequestFactory.clear()
+        try:
+            with patch(
+                "sankhya_sdk.core.context.SankhyaWrapper",
+                return_value=session_wrapper,
+            ):
+                key = OnDemandRequestFactory.create_instance(
+                    entity_type=Partner,
+                    service=ServiceName.CRUD_SERVICE_SAVE,
+                    cancel_token=threading.Event(),
+                    context=ctx,
+                )
+            on_demand = OnDemandRequestFactory.get_instance_by_key(key)
+            # Abaixo do throughput: a entidade fica na fila até o dispose
+            on_demand.add(Partner(name="A"))
+
+            ctx.dispose()
+
+            assert calls == ["send", "dispose"]
+            assert on_demand.entities_sent_successfully == 1
+            assert OnDemandRequestFactory.get_instance_count() == 0
+            assert not on_demand._worker.is_alive()
+            assert len(ctx._on_demand_tokens) == 0
+            mock_wrapper.dispose.assert_called_once()
+        finally:
+            OnDemandRequestFactory.finalize_all()
+            OnDemandRequestFactory.clear()
+
+    @pytest.mark.asyncio
+    async def test_async_exit_drains_async_on_demand_wrappers_before_their_sessions(
+        self, mock_wrapper
+    ):
+        """No ``async with`` os wrappers assíncronos também são drenados antes."""
+        import asyncio
+
+        from sankhya_sdk.enums.service_name import ServiceName
+        from sankhya_sdk.models.transport.partner import Partner
+        from sankhya_sdk.request_wrappers.async_on_demand_request_factory import (
+            AsyncOnDemandRequestFactory,
+        )
+
+        ctx = SankhyaContext(mock_wrapper)
+        calls: list = []
+        session_wrapper = self._session_wrapper(calls)
+        await AsyncOnDemandRequestFactory.clear()
+        try:
+            with patch(
+                "sankhya_sdk.core.context.SankhyaWrapper",
+                return_value=session_wrapper,
+            ):
+                key = await AsyncOnDemandRequestFactory.create_instance(
+                    entity_type=Partner,
+                    service=ServiceName.CRUD_SERVICE_SAVE,
+                    cancel_event=asyncio.Event(),
+                    context=ctx,
+                )
+            on_demand = await AsyncOnDemandRequestFactory.get_instance_by_key(key)
+            # Abaixo do throughput: a entidade fica na fila até a saída
+            await on_demand.add(Partner(name="A"))
+
+            async with ctx:
+                pass
+
+            assert calls == ["send", "dispose"]
+            assert on_demand.entities_sent_successfully == 1
+            assert await AsyncOnDemandRequestFactory.get_instance_count() == 0
+            mock_wrapper.dispose.assert_called_once()
+        finally:
+            await AsyncOnDemandRequestFactory.finalize_all()
+            await AsyncOnDemandRequestFactory.clear()
+
+
 class TestSankhyaContextManager:
     """Tests for context manager protocol."""
 
