@@ -24,6 +24,7 @@ from sankhya_sdk.enums.service_request_type import ServiceRequestType
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
 
+from .constants import DEFAULT_TIMEOUT, MAX_RETRY_COUNT
 from .types import ServiceFile
 from .wrapper import SankhyaWrapper
 
@@ -121,6 +122,12 @@ class SankhyaContext:
         self._username: Optional[str] = username
         self._password: Optional[str] = password
 
+        # Configurações de transporte repassadas às novas sessões: as do
+        # wrapper principal (SANKHYA_TIMEOUT / SANKHYA_MAX_RETRIES em
+        # SankhyaWrapper.from_settings) ou os padrões do SankhyaWrapper
+        self._timeout: int = DEFAULT_TIMEOUT
+        self._max_retries: int = MAX_RETRY_COUNT
+
         if wrapper is not None:
             # Usa wrapper existente
             self._wrapper = wrapper
@@ -132,6 +139,10 @@ class SankhyaContext:
                 self._host = wrapper._host
             if hasattr(wrapper, "_port"):
                 self._port = wrapper._port
+            if hasattr(wrapper, "_timeout"):
+                self._timeout = wrapper._timeout
+            if hasattr(wrapper, "_max_retries"):
+                self._max_retries = wrapper._max_retries
         elif host and port and username and password:
             # Cria novo wrapper e autentica
             self._wrapper = SankhyaWrapper(host=host, port=port)
@@ -279,9 +290,9 @@ class SankhyaContext:
         """
         Cria uma nova sessão autenticada e retorna seu token.
 
-        Cria um novo SankhyaWrapper com as mesmas credenciais da
-        sessão principal, autentica e retorna um token UUID para
-        identificar a nova sessão.
+        Cria um novo SankhyaWrapper com as mesmas credenciais, timeout e
+        número de tentativas da sessão principal, autentica e retorna um
+        token UUID para identificar a nova sessão.
 
         Args:
             request_type: Tipo de requisição para a nova sessão.
@@ -314,11 +325,13 @@ class SankhyaContext:
                 "Não foi possível obter credenciais para criar nova sessão"
             )
 
-        # Cria novo wrapper
+        # Cria novo wrapper com o mesmo timeout e tentativas do principal
         new_wrapper = SankhyaWrapper(
             host=self._host,
             port=self._port,
             request_type=request_type,
+            timeout=self._timeout,
+            max_retries=self._max_retries,
         )
 
         # Autentica

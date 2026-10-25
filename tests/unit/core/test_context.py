@@ -156,6 +156,38 @@ class TestSankhyaContextSessionManagement:
         
         assert token in ctx._on_demand_tokens
 
+    def test_acquire_new_session_keeps_main_timeout_and_retries(self):
+        """A nova sessão usa SANKHYA_TIMEOUT / SANKHYA_MAX_RETRIES do principal."""
+        from sankhya_sdk.config import SankhyaSettings
+
+        settings = SankhyaSettings(
+            SANKHYA_URL="http://example.com",
+            SANKHYA_PORT=8180,
+            SANKHYA_USERNAME="user",
+            SANKHYA_PASSWORD="pass",
+            SANKHYA_TIMEOUT=120,
+            SANKHYA_MAX_RETRIES=0,
+        )
+
+        def authenticate(wrapper, username, password):
+            wrapper._session_info = MagicMock(username=username, password=password)
+
+        # Sem rede: login simulado e logout (_invalidate) desativado
+        with patch.object(
+            SankhyaWrapper, "authenticate", autospec=True, side_effect=authenticate
+        ), patch.object(SankhyaWrapper, "_invalidate", autospec=True):
+            ctx = SankhyaContext.from_settings(settings)
+            try:
+                token = ctx.acquire_new_session(ServiceRequestType.SIMPLE_CRUD)
+                with SankhyaContext._wrappers_lock:
+                    session = SankhyaContext._wrappers[token]
+
+                assert (ctx.wrapper._timeout, ctx.wrapper._max_retries) == (120, 0)
+                assert session._timeout == 120
+                assert session._max_retries == 0
+            finally:
+                ctx.dispose()
+
     def test_acquire_new_session_raises_when_disposed(self, mock_wrapper):
         """Test that acquire_new_session raises when disposed."""
         ctx = SankhyaContext(mock_wrapper)
