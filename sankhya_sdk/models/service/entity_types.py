@@ -100,6 +100,31 @@ def _fieldset_to_xml(fieldset: Field) -> Element:
     return elem
 
 
+def _append_with_legacy(parent: Element, legacy: Optional[Any], items: List[Any]) -> None:
+    """
+    Anexa ``items`` ao elemento pai, precedidos do campo legado ``legacy``.
+
+    No .NET só existe a lista (``DataSet.Entities``,
+    ``Entity.ReferencesFetch``). O campo legado de valor único
+    (``DataSet.entity``, ``Entity.reference_fetch``) só é serializado se
+    nenhum item da lista gerar o mesmo XML, para que cada elemento seja
+    enviado uma única vez, inclusive após ``model_dump``/``model_validate``.
+
+    Args:
+        parent: Elemento pai
+        legacy: Valor do campo legado (ou None)
+        items: Itens da lista
+    """
+    elements = [item.to_xml() for item in items]
+    if legacy is not None:
+        legacy_element = legacy.to_xml()
+        legacy_xml = etree.tostring(legacy_element)
+        if all(etree.tostring(element) != legacy_xml for element in elements):
+            parent.append(legacy_element)
+    for element in elements:
+        parent.append(element)
+
+
 class DataSetRow(BaseModel):
     """
     Linha de dados (``<dataRow>``) de um DataSet do CRUDServiceProvider.
@@ -151,7 +176,10 @@ class Entity(BaseModel):
     ``rows_limit`` -> ``rowsLimit``, ``data_set_id`` -> ``datasetid``,
     ``campos`` -> ``<campo>``, ``fieldset`` -> ``<fieldset>``,
     ``criteria`` -> ``<criterio>``, ``references_fetch`` ->
-    ``<referenceFetch>`` e ``ids`` -> ``<id>``).
+    ``<referenceFetch>`` e ``ids`` -> ``<id>``). ``reference_fetch`` é
+    mantido por compatibilidade: quando definido, é serializado antes de
+    ``references_fetch`` (sem repetir um elemento idêntico da lista).
+    ``from_xml`` preenche apenas ``references_fetch``.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -236,14 +264,8 @@ class Entity(BaseModel):
         if self.literal_criteria_sql:
             elem.append(self.literal_criteria_sql.to_xml())
         
-        # Reference fetch
-        references = list(self.references_fetch or [])
-        if self.reference_fetch and not any(
-            ref is self.reference_fetch for ref in references
-        ):
-            elem.append(self.reference_fetch.to_xml())
-        for ref in references:
-            elem.append(ref.to_xml())
+        # Reference fetch (reference_fetch é o campo legado)
+        _append_with_legacy(elem, self.reference_fetch, list(self.references_fetch or []))
 
         # Ids (CRUDServiceProvider.removeRecord): <id><CHAVE>valor</CHAVE></id>
         for entity_id in self.ids:
@@ -339,9 +361,7 @@ class Entity(BaseModel):
             criteria=criteria,
             literal_criteria=literal_criteria,
             literal_criteria_sql=literal_criteria_sql,
-            # O primeiro referenceFetch também fica em reference_fetch
-            # (campo legado); a serialização não o duplica.
-            reference_fetch=references_fetch[0] if references_fetch else None,
+            # Apenas a lista, como no .NET (reference_fetch é só de entrada)
             references_fetch=references_fetch or None,
             ids=ids,
             order_by_expression=get_element_attr(element, "orderByExpression"),
@@ -363,7 +383,9 @@ class DataSet(BaseModel):
     ``pageNumber``, ``pager_id`` -> ``pagerID``, ``data_set_id`` ->
     ``datasetid``, ``data_rows`` -> ``<dataRow>``, ``literal_criteria`` ->
     ``<criteria>`` e ``entities`` -> ``<entity>``). ``entity`` é mantido
-    por compatibilidade e é serializado como um ``<entity>`` adicional.
+    por compatibilidade: quando definido, é serializado como um
+    ``<entity>`` antes de ``entities`` (sem repetir um elemento idêntico
+    da lista). ``from_xml`` preenche apenas ``entities``.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -432,12 +454,9 @@ class DataSet(BaseModel):
             criteria_elem.tag = "criteria"
             elem.append(criteria_elem)
 
-        if self.entity and not any(e is self.entity for e in self.entities):
-            elem.append(self.entity.to_xml())
+        # entity é o campo legado
+        _append_with_legacy(elem, self.entity, self.entities)
 
-        for entity in self.entities:
-            elem.append(entity.to_xml())
-        
         if self.rows:
             for row in self.rows:
                 elem.append(row.to_xml())
@@ -503,9 +522,7 @@ class DataSet(BaseModel):
             pager_id=get_element_attr(element, SankhyaConstants.PAGER_ID),
             data_set_id=get_element_attr(element, "datasetid"),
             data_source=get_element_attr(element, "dataSource"),
-            # A primeira entidade também fica em entity (campo legado);
-            # a serialização não a duplica.
-            entity=entities[0] if entities else None,
+            # Apenas a lista, como no .NET (entity é só de entrada)
             entities=entities,
             data_rows=data_rows,
             rows=rows,

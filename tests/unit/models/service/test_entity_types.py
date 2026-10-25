@@ -14,6 +14,7 @@ from sankhya_sdk.models.service.basic_types import (
     Field,
     FieldValue,
     LiteralCriteria,
+    ReferenceFetch,
 )
 from sankhya_sdk.models.service.entity_types import (
     CrudServiceEntities,
@@ -203,8 +204,10 @@ class TestDataSetCrudServiceProviderShape:
         assert parsed.parallel_loader is True
         assert parsed.data_rows[0].keys == {"CODPARC": "1"}
         assert parsed.data_rows[0].local_fields == {"NOMEPARC": "X"}
-        # Campo legado continua apontando para a primeira entidade
-        assert parsed.entity is parsed.entities[0]
+        # Como no .NET (só DataSet.Entities), o parse preenche apenas a lista;
+        # o campo legado não espelha a primeira entidade
+        assert parsed.entity is None
+        assert len(parsed.entities) == 1
 
     def test_legacy_entity_still_serialized(self):
         data_set = DataSet(
@@ -216,6 +219,122 @@ class TestDataSetCrudServiceProviderShape:
 
         assert len(entities) == 1
         assert entities[0].get("name") == "Produto"
+
+
+class TestLegacySingleFields:
+    """
+    Campos legados de valor único (DataSet.entity, Entity.reference_fetch).
+
+    O .NET só possui as listas (DataSet.cs: Entity[] Entities; Entity.cs:
+    ReferenceFetch[] ReferencesFetch): cada elemento é enviado uma única vez.
+    """
+
+    _DATA_SET_XML = (
+        '<dataSet rootEntity="Parceiro"><entity path="">'
+        '<fieldset list="CODPARC,NOMEPARC"/></entity></dataSet>'
+    )
+    _ENTITY_XML = (
+        '<entity name="Parceiro"><referenceFetch name="Cidade">'
+        '<field name="NOMECID"/></referenceFetch></entity>'
+    )
+
+    def test_replaced_entities_are_not_resent(self):
+        data_set = DataSet.from_xml(etree.fromstring(self._DATA_SET_XML))
+        data_set.entities = [Entity(path="", fieldset=Field(name="", list="CODPARC"))]
+
+        entities = data_set.to_xml().findall("entity")
+
+        assert [e.find("fieldset").get("list") for e in entities] == ["CODPARC"]
+
+    def test_cleared_references_fetch_is_not_resent(self):
+        entity = Entity.from_xml(etree.fromstring(self._ENTITY_XML))
+        entity.references_fetch = None
+
+        assert entity.to_xml().findall("referenceFetch") == []
+
+    def test_parsed_request_without_references(self):
+        """include_references=False remove o referenceFetch de um request lido."""
+        from sankhya_sdk.helpers.entity_query_options import EntityQueryOptions
+        from sankhya_sdk.helpers.service_request_extensions import (
+            ServiceRequestExtensions,
+        )
+
+        request = ServiceRequest.from_xml_string(
+            '<serviceRequest serviceName="crud.find"><requestBody>'
+            f"{self._ENTITY_XML}</requestBody></serviceRequest>"
+        )
+
+        ServiceRequestExtensions._apply_options_to_request(
+            request, EntityQueryOptions(include_references=False)
+        )
+
+        assert _request_body(request).find("entity/referenceFetch") is None
+
+    @pytest.mark.parametrize(
+        "copy",
+        [
+            lambda m: type(m).model_validate(m.model_dump()),
+            lambda m: type(m).model_validate_json(m.model_dump_json()),
+            lambda m: type(m).model_validate(m.model_dump(exclude_unset=True)),
+        ],
+        ids=["model_dump", "json", "model_dump_exclude_unset"],
+    )
+    def test_data_set_copy_sends_entity_once(self, copy):
+        data_set = DataSet.from_xml(etree.fromstring(self._DATA_SET_XML))
+
+        entities = copy(data_set).to_xml().findall("entity")
+
+        assert len(entities) == 1
+        assert entities[0].find("fieldset").get("list") == "CODPARC,NOMEPARC"
+
+    @pytest.mark.parametrize(
+        "copy",
+        [
+            lambda m: type(m).model_validate(m.model_dump()),
+            lambda m: type(m).model_validate_json(m.model_dump_json()),
+            lambda m: type(m).model_validate(m.model_dump(exclude_unset=True)),
+        ],
+        ids=["model_dump", "json", "model_dump_exclude_unset"],
+    )
+    def test_entity_copy_sends_reference_fetch_once(self, copy):
+        entity = Entity.from_xml(etree.fromstring(self._ENTITY_XML))
+
+        assert len(copy(entity).to_xml().findall("referenceFetch")) == 1
+
+    def test_copy_without_unset_fields_round_trips_exactly(self):
+        data_set = DataSet.from_xml(etree.fromstring(self._DATA_SET_XML))
+        entity = Entity.from_xml(etree.fromstring(self._ENTITY_XML))
+
+        for model in (data_set, entity):
+            copied = type(model).model_validate(model.model_dump(exclude_unset=True))
+            assert etree.tostring(copied.to_xml()) == etree.tostring(model.to_xml())
+
+    def test_legacy_field_equal_to_list_item_is_sent_once(self):
+        data_set = DataSet(
+            root_entity="Produto",
+            entity=Entity(name="Produto"),
+            entities=[Entity(name="Produto")],
+        )
+        entity = Entity(
+            name="Parceiro",
+            reference_fetch=ReferenceFetch(entity_name="Cidade", fields=["NOMECID"]),
+            references_fetch=[ReferenceFetch(entity_name="Cidade", fields=["NOMECID"])],
+        )
+
+        assert len(data_set.to_xml().findall("entity")) == 1
+        assert len(entity.to_xml().findall("referenceFetch")) == 1
+
+    def test_distinct_legacy_field_is_sent_before_list(self):
+        entity = Entity(
+            name="Parceiro",
+            reference_fetch=ReferenceFetch(entity_name="Bairro", fields=["NOMEBAI"]),
+            references_fetch=[ReferenceFetch(entity_name="Cidade", fields=["NOMECID"])],
+        )
+        data_set = DataSet(entity=Entity(path=""), entities=[Entity(path="Cidade")])
+
+        refs = entity.to_xml().findall("referenceFetch")
+        assert [r.get("name") for r in refs] == ["Bairro", "Cidade"]
+        assert [e.get("path") for e in data_set.to_xml().findall("entity")] == ["", "Cidade"]
 
 
 class TestEntityCriteria:
