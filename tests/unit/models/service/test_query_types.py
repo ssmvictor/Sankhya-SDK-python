@@ -4,6 +4,8 @@ Testes unitários para QueryCriteria e QueryBuilder.
 Garante que os tipos de valor usam apenas membros existentes de ParameterType.
 """
 
+from decimal import Decimal
+
 import pytest
 
 from sankhya_sdk.enums.parameter_type import ParameterType
@@ -82,3 +84,89 @@ class TestQueryBuilder:
             (ParameterType.STRING, "Cliente"),
         ]
         assert [p.to_xml().get("type") for p in params] == ["I", "S"]
+
+
+class TestWhereIn:
+    """
+    QueryBuilder.where_in e critérios IN/NOT IN.
+
+    Sem equivalente no .NET: a expressão vai como literal criteria sem
+    alteração (Resolve<T>(StringBuilder), ServiceRequestExtensions.cs:751-760),
+    então o builder precisa gerar uma lista IN válida.
+    """
+
+    def test_integers_are_not_quoted(self):
+        builder = QueryBuilder("Parceiro").where_in("CODCID", [1, 2])
+
+        assert builder.build_expression() == "CODCID IN (1, 2)"
+
+    def test_strings_are_quoted_and_escaped(self):
+        builder = QueryBuilder("Parceiro").where_in("NOMEPARC", ["O'Neil", "A"])
+
+        assert builder.build_expression() == "NOMEPARC IN ('O''Neil', 'A')"
+
+    def test_mixed_values(self):
+        builder = (
+            QueryBuilder("Parceiro")
+            .where_in("CODIGO", [-5, Decimal("1.50"), None, "1", True])
+            .where("CODPARC", 5, value_type=ParameterType.INTEGER)
+        )
+
+        assert builder.build_expression() == (
+            "CODIGO IN (-5, 1.50, NULL, '1', 'True') AND CODPARC = 5"
+        )
+
+    def test_injection_attempt_stays_inside_string_literal(self):
+        builder = QueryBuilder("Parceiro").where_in(
+            "NOMEPARC", ["x') OR 1=1 --"]
+        )
+
+        assert builder.build_expression() == "NOMEPARC IN ('x'') OR 1=1 --')"
+
+    def test_non_finite_decimal_is_rejected(self):
+        with pytest.raises(ValueError):
+            QueryBuilder("Parceiro").where_in("VLR", [Decimal("NaN")])
+
+    def test_empty_values_add_no_criteria(self):
+        assert QueryBuilder("Parceiro").where_in("CODCID", []).build_expression() == ""
+
+    def test_literal_criteria_expression(self):
+        from sankhya_sdk.enums.service_name import ServiceName
+        from sankhya_sdk.helpers.service_request_extensions import (
+            ServiceRequestExtensions,
+        )
+        from sankhya_sdk.models.service.service_request import ServiceRequest
+        from sankhya_sdk.models.transport import Partner
+
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        builder = QueryBuilder("Parceiro").where_in("CODCID", [1, 2])
+
+        ServiceRequestExtensions.resolve_with_literal_criteria(request, Partner, builder)
+
+        assert request.request_body.data_set.literal_criteria.expression == (
+            "CODCID IN (1, 2)"
+        )
+
+    @pytest.mark.parametrize("operator", ["IN", "NOT IN", "not  in"])
+    def test_query_criteria_set_operator_keeps_list(self, operator):
+        crit = QueryCriteria(field="CODCID", operator=operator, value="(1, 'A''B', NULL)")
+
+        assert crit.to_sql() == f"CODCID {operator} (1, 'A''B', NULL)"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "1, 2",
+            "(1, 2) OR 1=1",
+            "(1); DELETE FROM TGFPAR",
+            "('a' || 'b')",
+            "('unterminated)",
+            "()",
+            "(SELECT CODCID FROM TSICID)",
+        ],
+    )
+    def test_query_criteria_invalid_list_is_rejected(self, value):
+        crit = QueryCriteria(field="CODCID", operator="IN", value=value)
+
+        with pytest.raises(ValueError):
+            crit.to_sql()

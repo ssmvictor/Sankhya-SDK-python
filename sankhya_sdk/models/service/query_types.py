@@ -8,7 +8,9 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Service/
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from typing import Any, List, Optional, Protocol, Type, runtime_checkable
 
 from lxml import etree
@@ -22,6 +24,20 @@ from .xml_serialization import (
     get_element_text,
 )
 from .basic_types import Parameter
+
+
+#: Literal SQL aceito em uma lista IN: número, texto entre aspas com as
+#: aspas internas duplicadas ou NULL.
+_SQL_IN_LITERAL = r"(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|'(?:[^']|'')*'|NULL)"
+
+#: Lista IN completa, por exemplo ``(1, 'A''B', NULL)``.
+_SQL_IN_LIST_PATTERN = re.compile(
+    rf"\A\s*\(\s*{_SQL_IN_LITERAL}(?:\s*,\s*{_SQL_IN_LITERAL})*\s*\)\s*\Z",
+    re.IGNORECASE,
+)
+
+#: Operadores cujo valor é uma lista entre parênteses.
+_SQL_SET_OPERATORS = ("IN", "NOT IN")
 
 
 @runtime_checkable
@@ -170,6 +186,17 @@ class QueryCriteria(BaseModel):
                 return f"{self.field} IS NOT NULL"
             return f"{self.field} {self.operator} NULL"
         
+        if " ".join(self.operator.split()).upper() in _SQL_SET_OPERATORS:
+            # Lista já formatada (QueryBuilder.where_in), por exemplo
+            # "(1, 'A')": vai sem aspas externas, mas é validada para não
+            # inserir texto arbitrário no SQL
+            if not _SQL_IN_LIST_PATTERN.match(self.value):
+                raise ValueError(
+                    f"Valor '{self.value}' do campo {self.field} não é uma lista "
+                    f"{self.operator} válida"
+                )
+            return f"{self.field} {self.operator} {self.value.strip()}"
+
         # Escape de valores string
         safe_value = str(self.value).replace("'", "''")
         
@@ -296,18 +323,41 @@ class QueryBuilder:
         return self
 
     def where_in(self, field: str, values: List[Any]) -> "QueryBuilder":
-        """Adiciona critério IN."""
+        """
+        Adiciona critério IN.
+
+        Inteiros e ``Decimal`` vão sem aspas, ``None`` vira ``NULL`` e os
+        demais valores vão entre aspas com as aspas internas duplicadas,
+        por exemplo ``CODCID IN (1, 2)`` e ``NOMEPARC IN ('O''Neil')``.
+
+        Raises:
+            ValueError: Se um ``Decimal`` não for finito
+        """
         if not values:
             return self
         
         # Formata valores para IN
-        formatted = ", ".join(f"'{v}'" for v in values)
+        formatted = ", ".join(self._format_in_value(v) for v in values)
         self._criteria.append(QueryCriteria(
             field=field,
             operator="IN",
             value=f"({formatted})",
         ))
         return self
+
+    @staticmethod
+    def _format_in_value(value: Any) -> str:
+        """Formata um item de uma lista IN como literal SQL."""
+        if value is None:
+            return "NULL"
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(int(value))
+        if isinstance(value, Decimal):
+            if not value.is_finite():
+                raise ValueError(f"Valor '{value}' não é um número finito")
+            return str(value)
+        safe_value = str(value).replace("'", "''")
+        return f"'{safe_value}'"
 
     def order_by(self, expression: str) -> "QueryBuilder":
         """
