@@ -9,6 +9,7 @@ comportamento esperado não ocorre (evitam travar a suíte).
 """
 
 import asyncio
+import threading
 from typing import Callable, Dict, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
@@ -823,3 +824,32 @@ class TestAsyncOnDemandSession:
         await asyncio.wait_for(wrapper.dispose(), SYNC_TIMEOUT)
 
         context.detach_on_demand_request_wrapper.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "ending",
+        ["dispose", "dispose_without_started_worker", "cancellation"],
+    )
+    async def test_owned_session_is_released_off_the_event_loop(self, ending):
+        """O logout da sessão própria (HTTP bloqueante) não roda no event loop."""
+        context = MagicMock()
+        token = uuid4()
+        release_threads: List[int] = []
+        context.detach_on_demand_request_wrapper.side_effect = (
+            lambda session_token: release_threads.append(threading.get_ident())
+        )
+        cancel_event = asyncio.Event()
+        wrapper = _create_session_wrapper(
+            context, token, cancel_event=cancel_event, owns_session=True
+        )
+        if ending != "dispose_without_started_worker":
+            await wrapper.start()
+
+        if ending == "cancellation":
+            cancel_event.set()
+            await asyncio.wait_for(asyncio.shield(wrapper._worker_task), SYNC_TIMEOUT)
+        await asyncio.wait_for(wrapper.dispose(), SYNC_TIMEOUT)
+
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+        assert len(release_threads) == 1
+        assert release_threads[0] != threading.get_ident()

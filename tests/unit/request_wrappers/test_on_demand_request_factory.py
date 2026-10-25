@@ -446,6 +446,68 @@ class TestAsyncOnDemandRequestFactorySession:
         context.detach_on_demand_request_wrapper.assert_called_once_with(token)
         assert await AsyncOnDemandRequestFactory.get_instance_count() == 0
 
+    @pytest.mark.asyncio
+    async def test_dedicated_session_login_and_logout_run_off_the_event_loop(self):
+        """Login e logout da sessão dedicada (HTTP bloqueante) rodam fora do loop."""
+        token = uuid4()
+        context = MagicMock()
+        session_threads: dict = {}
+
+        def acquire(request_type):
+            session_threads["acquire"] = threading.get_ident()
+            return token
+
+        def detach(session_token):
+            session_threads["detach"] = threading.get_ident()
+
+        context.acquire_new_session.side_effect = acquire
+        context.detach_on_demand_request_wrapper.side_effect = detach
+
+        key = await AsyncOnDemandRequestFactory.create_instance(
+            entity_type=FactoryTestEntity,
+            service=ServiceName.CRUD_SERVICE_SAVE,
+            cancel_event=asyncio.Event(),
+            context=context,
+        )
+        await AsyncOnDemandRequestFactory.finalize_by_key(key)
+
+        context.acquire_new_session.assert_called_once_with(
+            ServiceRequestType.ON_DEMAND_CRUD
+        )
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+        loop_thread = threading.get_ident()
+        assert session_threads["acquire"] != loop_thread
+        assert session_threads["detach"] != loop_thread
+
+    @pytest.mark.asyncio
+    async def test_session_release_after_creation_failure_runs_off_the_event_loop(
+        self,
+    ):
+        """O logout após falha na criação do wrapper também roda fora do loop."""
+        token = uuid4()
+        context = _session_context(token)
+        detach_threads = []
+        context.detach_on_demand_request_wrapper.side_effect = (
+            lambda session_token: detach_threads.append(threading.get_ident())
+        )
+
+        with patch(
+            "sankhya_sdk.request_wrappers.async_on_demand_request_factory."
+            "AsyncOnDemandRequestWrapper",
+            side_effect=RuntimeError("falha ao criar wrapper"),
+        ):
+            with pytest.raises(RuntimeError):
+                await AsyncOnDemandRequestFactory.create_instance(
+                    entity_type=FactoryTestEntity,
+                    service=ServiceName.CRUD_SERVICE_SAVE,
+                    cancel_event=asyncio.Event(),
+                    context=context,
+                )
+
+        context.detach_on_demand_request_wrapper.assert_called_once_with(token)
+        assert len(detach_threads) == 1
+        assert detach_threads[0] != threading.get_ident()
+
 
 # =============================================================================
 # Flush pela factory na thread worker

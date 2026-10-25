@@ -288,7 +288,7 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         
         # Finaliza sessão se for proprietário (o worker já o faz ao terminar;
         # aqui cobre o wrapper cuja task worker nunca foi iniciada)
-        self._release_session()
+        await self._release_session()
         
         logger.info(
             f"AsyncOnDemandRequestWrapper finalizado: "
@@ -343,23 +343,32 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
             self._worker_finished = True
             async with self._flush_cond:
                 self._flush_cond.notify_all()
-            self._release_session()
+            await self._release_session()
             logger.debug("Worker task finalizada")
 
-    def _release_session(self) -> None:
+    async def _release_session(self) -> None:
         """
         Finaliza a sessão dedicada, se ela pertencer ao wrapper.
         
         Equivalente a ``_context.DetachOnDemandRequestWrapper(sessionToken)``
-        ao fim do worker no .NET (OnDemandRequestWrapper.cs:164).
+        ao fim do worker no .NET (OnDemandRequestWrapper.cs:164), que roda
+        na thread dedicada do worker. Aqui o logout (requisição HTTP
+        bloqueante) roda em outra thread com ``asyncio.to_thread``, como os
+        envios (``SankhyaWrapper.service_invoker_async``), para não travar o
+        event loop.
         """
         if not self._owns_session or self._session_released:
             return
+        # Marcada antes do await: o fim do worker e o dispose() não liberam
+        # a sessão duas vezes
         self._session_released = True
         
         if self._session_token and self._context:
             try:
-                self._context.detach_on_demand_request_wrapper(self._session_token)
+                await asyncio.to_thread(
+                    self._context.detach_on_demand_request_wrapper,
+                    self._session_token,
+                )
             except Exception as e:
                 logger.warning(f"Erro ao finalizar sessão: {e}")
 

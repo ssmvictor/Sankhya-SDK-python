@@ -108,11 +108,13 @@ class AsyncOnDemandRequestFactory:
             ...     cancel_event
             ... )
         """
-        # Cria sessão dedicada se contexto fornecido
+        # Cria sessão dedicada se contexto fornecido. O login (requisição
+        # HTTP bloqueante) roda fora do event loop
         session_token: Optional[UUID] = None
         if context:
-            session_token = context.acquire_new_session(
-                ServiceRequestType.ON_DEMAND_CRUD
+            session_token = await asyncio.to_thread(
+                context.acquire_new_session,
+                ServiceRequestType.ON_DEMAND_CRUD,
             )
         
         # Cria wrapper; a sessão dedicada passa a pertencer a ele e é
@@ -133,7 +135,9 @@ class AsyncOnDemandRequestFactory:
             await wrapper.start()
         except Exception:
             if context and session_token:
-                context.detach_on_demand_request_wrapper(session_token)
+                await asyncio.to_thread(
+                    context.detach_on_demand_request_wrapper, session_token
+                )
             raise
         
         # Gera chave única
