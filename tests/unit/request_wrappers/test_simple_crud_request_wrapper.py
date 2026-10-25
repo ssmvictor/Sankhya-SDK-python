@@ -87,6 +87,16 @@ def _partner_entities_xml(*codes: int) -> str:
     return f'<entities total="{len(codes)}">{rows}</entities>'
 
 
+def _mock_entities_xml(*entities: "MockEntity") -> str:
+    """Gera <entities> com os campos de MockEntity (chaves nomeadas)."""
+    rows = "".join(
+        f"<entity><code>{entity.code}</code><name>{entity.name}</name>"
+        f"<active>{entity.active}</active></entity>"
+        for entity in entities
+    )
+    return f'<entities total="{len(entities)}">{rows}</entities>'
+
+
 def _assert_typed_partner(partner: Partner) -> None:
     """Valida a conversão tipada de PARTNER_METADATA_ENTITIES_XML."""
     assert isinstance(partner, Partner)
@@ -448,29 +458,36 @@ class TestFindOperations:
         """find retorna entidade quando encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
         
+        # Como MustFindInternal (.NET), find monta e envia a própria
+        # requisição (não passa por try_find): simula-se o transporte.
         with patch.object(
             SimpleCRUDRequestWrapper,
-            "_can_find_internal",
-            return_value=mock_entity,
+            "_invoke_service",
+            return_value=_service_response(_mock_entities_xml(mock_entity)),
         ):
             entity = MockEntity(code=123)
             result = SimpleCRUDRequestWrapper.find(entity)
             
             assert result is not None
+            assert result.code == 123
     
     def test_find_raises_when_not_found(self, mock_context):
         """find lança exceção quando não encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
+        response = _service_response('<entities total="0"/>')
         
         with patch.object(
             SimpleCRUDRequestWrapper,
-            "_can_find_internal",
-            return_value=None,
-        ):
+            "_invoke_service",
+            return_value=response,
+        ) as invoke:
             entity = MockEntity(code=999)
             
-            with pytest.raises(ServiceRequestUnexpectedResultException):
+            with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
                 SimpleCRUDRequestWrapper.find(entity)
+        
+        assert exc_info.value.request is invoke.call_args[0][0]
+        assert exc_info.value.response is response
     
     def test_find_all_returns_list(self, mock_context, mock_entity):
         """find_all retorna lista de entidades."""
@@ -530,16 +547,20 @@ class TestFindWithCriteria:
     def test_find_with_criteria_raises_when_not_found(self, mock_context):
         """find_with_criteria lança exceção quando não encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
+        response = _service_response('<entities total="0"/>')
         
         with patch.object(
             SimpleCRUDRequestWrapper,
-            "_can_find_with_criteria_internal",
-            return_value=None,
-        ):
+            "_invoke_service",
+            return_value=response,
+        ) as invoke:
             criteria = LiteralCriteria.equals("code", 999)
             
-            with pytest.raises(ServiceRequestUnexpectedResultException):
+            with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
                 SimpleCRUDRequestWrapper.find_with_criteria(MockEntity, criteria)
+        
+        assert exc_info.value.request is invoke.call_args[0][0]
+        assert exc_info.value.response is response
 
 
 # =============================================================================
@@ -615,17 +636,21 @@ class TestAsyncOperations:
     async def test_find_async_raises_when_not_found(self, mock_context):
         """find_async lança exceção quando não encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
+        response = _service_response('<entities total="0"/>')
         
         with patch.object(
             SimpleCRUDRequestWrapper,
-            "_can_find_internal_async",
+            "_invoke_service_async",
             new_callable=AsyncMock,
-            return_value=None,
-        ):
+            return_value=response,
+        ) as invoke:
             entity = MockEntity(code=999)
             
-            with pytest.raises(ServiceRequestUnexpectedResultException):
+            with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
                 await SimpleCRUDRequestWrapper.find_async(entity)
+        
+        assert exc_info.value.request is invoke.call_args[0][0]
+        assert exc_info.value.response is response
     
     @pytest.mark.asyncio
     async def test_update_async(self, mock_context, mock_entity):
@@ -1011,6 +1036,90 @@ class TestParsedServiceResponseErrors:
 
         assert exc_info.value.request is invoker.call_args[0][0]
         assert exc_info.value.response is response
+
+    def test_find_not_found_raises_with_request_and_response(self):
+        """
+        find sem entidade lança UnexpectedResult com a requisição e a resposta.
+
+        Como MustFindInternal (.NET, SimpleCRUDRequestWrapper.cs:135-139):
+        ``throw new ServiceRequestUnexpectedResultException(request, response)``.
+        """
+        response = _service_response('<entities total="0"/>')
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
+                SimpleCRUDRequestWrapper.find(Partner(code=1))
+
+        request = invoker.call_args[0][0]
+        assert invoker.call_count == 1
+        assert exc_info.value.request is request
+        assert exc_info.value.response is response
+        assert request.service == ServiceName.CRUD_SERVICE_FIND
+        assert "Unknown" not in str(exc_info.value)
+        assert "(Parceiro)" in str(exc_info.value)
+
+    def test_find_with_criteria_not_found_raises_with_request_and_response(self):
+        """find_with_criteria sem entidade carrega a requisição e a resposta (.NET)."""
+        response = _service_response('<entities total="0"/>')
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=response
+        ) as invoker:
+            with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
+                SimpleCRUDRequestWrapper.find_with_criteria(
+                    Partner, LiteralCriteria.equals("CODPARC", 1)
+                )
+
+        assert exc_info.value.request is invoker.call_args[0][0]
+        assert exc_info.value.response is response
+        assert "Unknown" not in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_find_async_not_found_raises_with_request_and_response(self):
+        """
+        find_async sem entidade carrega a requisição e a resposta.
+
+        Como MustFindInternalAsync (.NET, SimpleCRUDRequestWrapper.cs:176-186).
+        """
+        response = _service_response('<entities total="0"/>')
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=response,
+        ) as invoker:
+            with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
+                await SimpleCRUDRequestWrapper.find_async(Partner(code=1))
+
+        assert invoker.call_count == 1
+        assert exc_info.value.request is invoker.call_args[0][0]
+        assert exc_info.value.response is response
+        assert "Unknown" not in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_find_async_with_criteria_not_found_raises_with_request_and_response(
+        self,
+    ):
+        """find_async_with_criteria sem entidade carrega a requisição e a resposta."""
+        response = _service_response('<entities total="0"/>')
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=response,
+        ) as invoker:
+            with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
+                await SimpleCRUDRequestWrapper.find_async_with_criteria(
+                    Partner, LiteralCriteria.equals("CODPARC", 1)
+                )
+
+        assert exc_info.value.request is invoker.call_args[0][0]
+        assert exc_info.value.response is response
+        assert "Unknown" not in str(exc_info.value)
 
     def test_update_too_many_results_raises(self):
         """update exige exatamente uma entidade (``Entities.Single()`` no .NET)."""

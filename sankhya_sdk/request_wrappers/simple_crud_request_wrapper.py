@@ -594,12 +594,12 @@ class SimpleCRUDRequestWrapper:
     # =========================================================================
     
     @classmethod
-    def _can_find_internal(
+    def _build_find_request(
         cls,
         entity: T,
         options: Optional["EntityQueryOptions"],
-    ) -> Optional[T]:
-        """Lógica core de busca opcional."""
+    ) -> ServiceRequest:
+        """Monta a requisição de busca pelas chaves da entidade."""
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
         
         if options:
@@ -607,6 +607,34 @@ class SimpleCRUDRequestWrapper:
         else:
             ServiceRequestExtensions.resolve_with_entity(request, entity)
         
+        return request
+    
+    @classmethod
+    def _build_find_with_criteria_request(
+        cls,
+        entity_type: Type[T],
+        criteria: ILiteralCriteria,
+        options: Optional["EntityQueryOptions"],
+    ) -> ServiceRequest:
+        """Monta a requisição de busca por critério literal."""
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        ServiceRequestExtensions.resolve_with_literal_criteria(
+            request, entity_type, criteria
+        )
+        
+        if options:
+            ServiceRequestExtensions._apply_options_to_request(request, options)
+        
+        return request
+    
+    @classmethod
+    def _can_find_internal(
+        cls,
+        entity: T,
+        options: Optional["EntityQueryOptions"],
+    ) -> Optional[T]:
+        """Lógica core de busca opcional."""
+        request = cls._build_find_request(entity, options)
         response = cls._invoke_service(request)
         return cls._process_find_response(
             response, type(entity), optional=True, request=request
@@ -620,14 +648,7 @@ class SimpleCRUDRequestWrapper:
         options: Optional["EntityQueryOptions"],
     ) -> Optional[T]:
         """Lógica core de busca com critérios opcional."""
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        ServiceRequestExtensions.resolve_with_literal_criteria(
-            request, entity_type, criteria
-        )
-        
-        if options:
-            ServiceRequestExtensions._apply_options_to_request(request, options)
-        
+        request = cls._build_find_with_criteria_request(entity_type, criteria, options)
         response = cls._invoke_service(request)
         return cls._process_find_response(
             response, entity_type, optional=True, request=request
@@ -639,15 +660,18 @@ class SimpleCRUDRequestWrapper:
         entity: T,
         options: Optional["EntityQueryOptions"],
     ) -> T:
-        """Lógica core de busca obrigatória."""
-        result = cls._can_find_internal(entity, options)
-        if result is None:
-            entity_name = type(entity).__name__
-            raise ServiceRequestUnexpectedResultException(
-                message=f"Entidade {entity_name} não encontrada",
-                request=None,
-            )
-        return result
+        """
+        Lógica core de busca obrigatória.
+        
+        Como ``MustFindInternal`` (.NET, SimpleCRUDRequestWrapper.cs:122-151),
+        sem entidade na resposta lança ServiceRequestUnexpectedResultException
+        com a requisição enviada e a resposta recebida.
+        """
+        request = cls._build_find_request(entity, options)
+        response = cls._invoke_service(request)
+        return cls._process_find_response(
+            response, type(entity), optional=False, request=request
+        )
     
     @classmethod
     def _must_find_with_criteria_internal(
@@ -656,14 +680,17 @@ class SimpleCRUDRequestWrapper:
         criteria: ILiteralCriteria,
         options: Optional["EntityQueryOptions"],
     ) -> T:
-        """Lógica core de busca com critérios obrigatória."""
-        result = cls._can_find_with_criteria_internal(entity_type, criteria, options)
-        if result is None:
-            raise ServiceRequestUnexpectedResultException(
-                message=f"Entidade {entity_type.__name__} não encontrada",
-                request=None,
-            )
-        return result
+        """
+        Lógica core de busca com critérios obrigatória.
+        
+        Como ``MustFindInternal<T>(ILiteralCriteria)`` (.NET,
+        SimpleCRUDRequestWrapper.cs:153-174).
+        """
+        request = cls._build_find_with_criteria_request(entity_type, criteria, options)
+        response = cls._invoke_service(request)
+        return cls._process_find_response(
+            response, entity_type, optional=False, request=request
+        )
     
     @classmethod
     def _find_all_internal(
@@ -693,13 +720,7 @@ class SimpleCRUDRequestWrapper:
         options: Optional["EntityQueryOptions"],
     ) -> Optional[T]:
         """Versão assíncrona de _can_find_internal."""
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        
-        if options:
-            ServiceRequestExtensions.resolve_with_options(request, entity, options)
-        else:
-            ServiceRequestExtensions.resolve_with_entity(request, entity)
-        
+        request = cls._build_find_request(entity, options)
         response = await cls._invoke_service_async(request)
         return cls._process_find_response(
             response, type(entity), optional=True, request=request
@@ -713,14 +734,7 @@ class SimpleCRUDRequestWrapper:
         options: Optional["EntityQueryOptions"],
     ) -> Optional[T]:
         """Versão assíncrona de _can_find_with_criteria_internal."""
-        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        ServiceRequestExtensions.resolve_with_literal_criteria(
-            request, entity_type, criteria
-        )
-        
-        if options:
-            ServiceRequestExtensions._apply_options_to_request(request, options)
-        
+        request = cls._build_find_with_criteria_request(entity_type, criteria, options)
         response = await cls._invoke_service_async(request)
         return cls._process_find_response(
             response, entity_type, optional=True, request=request
@@ -732,15 +746,17 @@ class SimpleCRUDRequestWrapper:
         entity: T,
         options: Optional["EntityQueryOptions"],
     ) -> T:
-        """Versão assíncrona de _must_find_internal."""
-        result = await cls._can_find_internal_async(entity, options)
-        if result is None:
-            entity_name = type(entity).__name__
-            raise ServiceRequestUnexpectedResultException(
-                message=f"Entidade {entity_name} não encontrada",
-                request=None,
-            )
-        return result
+        """
+        Versão assíncrona de _must_find_internal.
+        
+        Como ``MustFindInternalAsync`` (.NET, SimpleCRUDRequestWrapper.cs:176-186):
+        a exceção de não encontrada recebe a requisição e a resposta.
+        """
+        request = cls._build_find_request(entity, options)
+        response = await cls._invoke_service_async(request)
+        return cls._process_find_response(
+            response, type(entity), optional=False, request=request
+        )
     
     @classmethod
     async def _must_find_with_criteria_internal_async(
@@ -749,16 +765,17 @@ class SimpleCRUDRequestWrapper:
         criteria: ILiteralCriteria,
         options: Optional["EntityQueryOptions"],
     ) -> T:
-        """Versão assíncrona de _must_find_with_criteria_internal."""
-        result = await cls._can_find_with_criteria_internal_async(
-            entity_type, criteria, options
+        """
+        Versão assíncrona de _must_find_with_criteria_internal.
+        
+        Como ``MustFindInternalAsync<T>(ILiteralCriteria)`` (.NET,
+        SimpleCRUDRequestWrapper.cs:188-198).
+        """
+        request = cls._build_find_with_criteria_request(entity_type, criteria, options)
+        response = await cls._invoke_service_async(request)
+        return cls._process_find_response(
+            response, entity_type, optional=False, request=request
         )
-        if result is None:
-            raise ServiceRequestUnexpectedResultException(
-                message=f"Entidade {entity_type.__name__} não encontrada",
-                request=None,
-            )
-        return result
     
     # =========================================================================
     # Internal Methods - Service Invocation
