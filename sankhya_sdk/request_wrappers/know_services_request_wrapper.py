@@ -1364,18 +1364,19 @@ class KnowServicesRequestWrapper:
         if entity is None:
             raise ValueError("entity não pode ser None")
         
-        entity_name = type(entity).__name__
-        logger.debug(f"Obtendo imagem da entidade: {entity_name}")
-        
-        # Extrair chaves da entidade
+        # Como GetImage (.NET, KnowServicesRequestWrapper.cs:664-677): usa o
+        # nome da entidade (atributo Entity, ex.: "Produto") e as chaves
+        # extraídas como dicionário {nome: valor}
         from sankhya_sdk.helpers.entity_extensions import extract_keys
-        keys_dict = extract_keys(entity)
+        result = extract_keys(entity)
+        keys = {key["name"]: key["value"] for key in result.keys}
+        logger.debug(f"Obtendo imagem da entidade: {result.name}")
         
         # Delegar para o contexto
         if cls._context is None:
             raise RuntimeError("Contexto não disponível")
         
-        return cls._context.get_image(entity_name, keys_dict)
+        return cls._context.get_image(result.name, keys)
     
     @classmethod
     async def get_image_async(cls, entity: T) -> ServiceFile:
@@ -1400,18 +1401,17 @@ class KnowServicesRequestWrapper:
         if entity is None:
             raise ValueError("entity não pode ser None")
         
-        entity_name = type(entity).__name__
-        logger.debug(f"Obtendo imagem (async) da entidade: {entity_name}")
-        
-        # Extrair chaves da entidade
+        # Como GetImageAsync (.NET, KnowServicesRequestWrapper.cs:679-692)
         from sankhya_sdk.helpers.entity_extensions import extract_keys
-        keys_dict = extract_keys(entity)
+        result = extract_keys(entity)
+        keys = {key["name"]: key["value"] for key in result.keys}
+        logger.debug(f"Obtendo imagem (async) da entidade: {result.name}")
         
         # Delegar para o contexto
         if cls._context is None:
             raise RuntimeError("Contexto não disponível")
         
-        return await cls._context.get_image_async(entity_name, keys_dict)
+        return await cls._context.get_image_async(result.name, keys)
     
     # =========================================================================
     # Internal Methods - Service Invocation

@@ -7,14 +7,19 @@ session operations, messaging, invoice operations, billing,
 financial operations, and file/image handling.
 """
 
+import threading
 import uuid
 from datetime import datetime
+from typing import List
 from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
+import requests
 from lxml import etree
 
+from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.types import ServiceFile
+from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.billing_type import BillingType
 from sankhya_sdk.enums.movement_type import MovementType
 from sankhya_sdk.enums.sankhya_warning_level import SankhyaWarningLevel
@@ -37,6 +42,7 @@ from sankhya_sdk.models.service.invoice_types import Invoice, InvoiceItem, Invoi
 from sankhya_sdk.models.service.response_body import ResponseBody
 from sankhya_sdk.models.service.service_response import ServiceResponse
 from sankhya_sdk.models.service.user_types import SessionInfo
+from sankhya_sdk.models.transport.product import Product
 from sankhya_sdk.request_wrappers.know_services_request_wrapper import (
     KnowServicesRequestWrapper,
 )
@@ -93,6 +99,69 @@ def _service_response(service_name: str, response_body_xml: str) -> ServiceRespo
         f"<responseBody>{response_body_xml}</responseBody>"
         "</serviceResponse>"
     )
+
+
+def _http_response(content: bytes, content_type: str = "text/xml;charset=UTF-8") -> requests.Response:
+    """Cria uma resposta HTTP real (requests.Response) com status 200."""
+    response = requests.Response()
+    response.status_code = 200
+    response._content = content
+    response.headers["Content-Type"] = content_type
+    response.encoding = "utf-8"
+    return response
+
+
+class _SankhyaHttpStub:
+    """
+    Simula o servidor Sankhya como ``side_effect`` de ``requests.Session.request``.
+
+    Responde login (um JSESSIONID por login), logout, o registro de user
+    agent (DWR) e o download de imagens (``.dbimage``), contando logins e
+    logouts e registrando as URLs requisitadas. Thread-safe.
+    """
+
+    def __init__(self, image: bytes = b"", image_content_type: str = "image/png") -> None:
+        self._lock = threading.Lock()
+        self._image = image
+        self._image_content_type = image_content_type
+        self.urls: List[str] = []
+        self.logins = 0
+        self.logouts = 0
+
+    def __call__(self, method: str, url: str, **kwargs) -> requests.Response:
+        with self._lock:
+            self.urls.append(url)
+            if "serviceName=MobileLoginSP.login" in url:
+                self.logins += 1
+                return _http_response(
+                    '<serviceResponse status="1"><responseBody>'
+                    f"<jsessionid>SESSION_{uuid.uuid4().hex}</jsessionid>"
+                    "</responseBody></serviceResponse>".encode("utf-8")
+                )
+            if "serviceName=MobileLoginSP.logout" in url:
+                self.logouts += 1
+                return _http_response(b'<serviceResponse status="1"></serviceResponse>')
+            if "DWRController" in url:
+                return _http_response(b"", "text/html")
+            if url.endswith(".dbimage"):
+                return _http_response(self._image, self._image_content_type)
+        raise AssertionError(f"Requisição inesperada: {method} {url}")
+
+
+@pytest.fixture
+def http_stub():
+    """Instala o servidor simulado no transporte HTTP do SDK."""
+    stub = _SankhyaHttpStub(image=b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    with patch("sankhya_sdk.core.low_level_wrapper.requests.Session") as session_cls:
+        session_cls.return_value.request.side_effect = stub
+        yield stub
+
+
+def _authenticated_context() -> SankhyaContext:
+    """Cria um SankhyaContext real autenticado contra o servidor simulado."""
+    wrapper = SankhyaWrapper(host="http://test.local", port=8180)
+    wrapper.authenticate("user", "pass")
+    return SankhyaContext(wrapper=wrapper)
 
 
 @pytest.fixture
@@ -1263,31 +1332,89 @@ class TestImageOperations:
             KnowServicesRequestWrapper.get_image(None)
 
     def test_get_image(self, mock_context):
-        """Test get_image delegates to context."""
+        """
+        get_image usa o nome da entidade e as chaves como dicionário.
+
+        Como GetImage no .NET (KnowServicesRequestWrapper.cs:664-677):
+        ``Context.GetImage(result.Name, result.Keys.ToDictionary(...))``,
+        com o nome do atributo Entity ("Produto"), não o nome da classe.
+        """
         mock_file = ServiceFile(
             data=b"image data",
             content_type="image/jpeg",
             file_extension="jpg",
         )
         mock_context.get_image.return_value = mock_file
-        
+
         KnowServicesRequestWrapper.initialize(mock_context)
-        
-        entity = MagicMock()
-        
-        with patch(
-            "sankhya_sdk.helpers.entity_extensions.extract_keys",
-            return_value={"code": 123},
-        ):
-            result = KnowServicesRequestWrapper.get_image(entity)
-            
-            assert result == mock_file
+
+        result = KnowServicesRequestWrapper.get_image(Product(code=10))
+
+        assert result == mock_file
+        mock_context.get_image.assert_called_once_with("Produto", {"CODPROD": "10"})
+
+    @pytest.mark.asyncio
+    async def test_get_image_async(self, mock_context):
+        """get_image_async usa o nome da entidade e as chaves (GetImageAsync no .NET)."""
+        mock_file = ServiceFile(
+            data=b"image data",
+            content_type="image/jpeg",
+            file_extension="jpg",
+        )
+        mock_context.get_image_async = AsyncMock(return_value=mock_file)
+
+        KnowServicesRequestWrapper.initialize(mock_context)
+
+        result = await KnowServicesRequestWrapper.get_image_async(Product(code=10))
+
+        assert result == mock_file
+        mock_context.get_image_async.assert_awaited_once_with(
+            "Produto", {"CODPROD": "10"}
+        )
+
+    def test_get_image_end_to_end(self, http_stub):
+        """get_image baixa a imagem de mge/Produto@IMAGEM@CODPROD=10.dbimage."""
+        ctx = _authenticated_context()
+        try:
+            KnowServicesRequestWrapper.initialize(ctx)
+
+            image = KnowServicesRequestWrapper.get_image(Product(code=10))
+        finally:
+            KnowServicesRequestWrapper.dispose()
+            ctx.dispose()
+
+        assert image is not None
+        assert image.data.startswith(b"\x89PNG")
+        assert image.content_type == "image/png"
+        assert (
+            "http://test.local:8180/mge/Produto@IMAGEM@CODPROD=10.dbimage"
+            in http_stub.urls
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_image_async_end_to_end(self, http_stub):
+        """get_image_async baixa a imagem pela mesma URL do .NET."""
+        ctx = _authenticated_context()
+        try:
+            KnowServicesRequestWrapper.initialize(ctx)
+
+            image = await KnowServicesRequestWrapper.get_image_async(Product(code=10))
+        finally:
+            KnowServicesRequestWrapper.dispose()
+            ctx.dispose()
+
+        assert image is not None
+        assert image.data.startswith(b"\x89PNG")
+        assert (
+            "http://test.local:8180/mge/Produto@IMAGEM@CODPROD=10.dbimage"
+            in http_stub.urls
+        )
 
     @pytest.mark.asyncio
     async def test_get_image_async_none_entity_raises(self, mock_context):
         """Test get_image_async with None entity raises ValueError."""
         KnowServicesRequestWrapper.initialize(mock_context)
-        
+
         with pytest.raises(ValueError, match="entity não pode ser None"):
             await KnowServicesRequestWrapper.get_image_async(None)
 
