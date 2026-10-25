@@ -605,3 +605,90 @@ class TestIgnoreInlineReference:
 
         data_row = save_request.request_body.data_set.data_rows[0]
         assert data_row.local_fields == {"CIF_FOB": "C"}
+
+
+class TestCustomFieldsAreNotInlineReferences:
+    """
+    Campos customizados (AD_*) não são referências inline.
+
+    ServiceRequestExtensions.cs:88-89 usa EntityValidation.cs:14-27
+    (``^(?!AD)...``), que exclui os campos AD_ da convenção Entidade_CAMPO.
+    """
+
+    @staticmethod
+    def _entity_type():
+        from typing import Optional
+
+        from sankhya_sdk.attributes.decorators import (
+            entity,
+            entity_element,
+            entity_key,
+        )
+        from sankhya_sdk.models.transport.base import TransportEntityBase
+
+        @entity("Parceiro")
+        class _CustomPartner(TransportEntityBase):
+            code: Optional[int] = entity_key(
+                entity_element("CODPARC", default=None)
+            )
+            external_code: Optional[str] = entity_element(
+                "AD_CODEXTERNO", default=None
+            )
+            city_name: Optional[str] = entity_element(
+                "Cidade_NOMECID", default=None
+            )
+            state_initials: Optional[str] = entity_element(
+                "Cidade_UnidadeFederativa_UF", default=None
+            )
+
+        return _CustomPartner
+
+    def test_crud_service_find_keeps_custom_field_in_root_fieldset(self):
+        custom_partner = self._entity_type()
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            request, custom_partner(external_code="X1")
+        )
+
+        data_set = request.request_body.data_set
+        assert data_set.literal_criteria.expression == "AD_CODEXTERNO = 'X1'"
+        assert [(e.path, e.fieldset.list) for e in data_set.entities] == [
+            ("", "CODPARC,AD_CODEXTERNO"),
+            ("Cidade", "NOMECID"),
+            ("Cidade.UnidadeFederativa", "UF"),
+        ]
+
+    def test_crud_find_keeps_custom_field_in_fields(self):
+        custom_partner = self._entity_type()
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+
+        ServiceRequestExtensions.resolve_generic(request, custom_partner)
+
+        entity = request.request_body.entity
+        assert [f.name for f in entity.fields] == ["CODPARC", "AD_CODEXTERNO"]
+        assert [ref.entity_name for ref in entity.references_fetch] == [
+            "Cidade",
+            "Cidade.UnidadeFederativa",
+        ]
+
+    def test_save_sends_custom_field(self):
+        custom_partner = self._entity_type()
+        save_request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            save_request, custom_partner(code=1, external_code="X1")
+        )
+
+        data_row = save_request.request_body.data_set.data_rows[0]
+        assert data_row.local_fields == {"AD_CODEXTERNO": "X1"}
+
+        crud_save_request = ServiceRequest(service=ServiceName.CRUD_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            crud_save_request, custom_partner(code=1, external_code="X1")
+        )
+
+        assert [
+            (c.name, c.value) for c in crud_save_request.request_body.entity.campos
+        ] == [("CODPARC", "1"), ("AD_CODEXTERNO", "X1")]

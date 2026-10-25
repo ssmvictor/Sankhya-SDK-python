@@ -10,7 +10,6 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Helpers/ServiceRequestExtensions.cs
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from decimal import Decimal
 from typing import (
@@ -32,6 +31,7 @@ from sankhya_sdk.exceptions import (
     InvalidServiceRequestOperationException,
     TooInnerLevelsException,
 )
+from sankhya_sdk.validations.entity_validation import EntityValidation
 
 if TYPE_CHECKING:
     from sankhya_sdk.models.base import EntityBase
@@ -43,13 +43,15 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound="EntityBase")
 
 
-# Padrões regex para campos de referência
-REFERENCE_FIELDS_FIRST_LEVEL_PATTERN = re.compile(
-    r"^(?P<entity>\w+)_(?P<field>\w+)$"
+# Padrões regex para campos de referência inline. Como no .NET
+# (ServiceRequestExtensions.cs:88-89 e 252-257), são os padrões de
+# EntityValidation, cujo (?!AD) exclui os campos customizados (AD_*).
+REFERENCE_FIELDS_FIRST_LEVEL_PATTERN = (
+    EntityValidation.REFERENCE_FIELDS_FIRST_LEVEL_PATTERN
 )
 
-REFERENCE_FIELDS_SECOND_LEVEL_PATTERN = re.compile(
-    r"^(?P<parentEntity>\w+)_(?P<entity>\w+)_(?P<field>\w+)$"
+REFERENCE_FIELDS_SECOND_LEVEL_PATTERN = (
+    EntityValidation.REFERENCE_FIELDS_SECOND_LEVEL_PATTERN
 )
 
 
