@@ -9,9 +9,8 @@ O Sankhya SDK suporta múltiplos métodos de autenticação:
 | Método | Segurança | Uso Recomendado |
 |--------|-----------|-----------------|
 | OAuth2 (Token) | ⭐⭐⭐⭐⭐ | **Recomendado** (Novas Integrações) |
-| Variáveis de ambiente | ⭐⭐⭐ | Desenvolvimento e CI/CD |
-| Arquivo .key | ⭐⭐⭐⭐ | Produção (Legado) |
-| Configuração direta | ⭐⭐ | Testes |
+| Variáveis de ambiente (usuário/senha, legado) | ⭐⭐⭐ | Desenvolvimento, CI/CD e produção (API XML) |
+| Configuração direta (legado) | ⭐⭐ | Testes |
 
 ## Método Recomendado: OAuth2 (Bearer Token)
 
@@ -73,99 +72,84 @@ O `SankhyaSession` detecta automaticamente erros `401 Unauthorized` e tenta reno
 
 ## Método 1: Variáveis de Ambiente (Legado)
 
+A API XML legada autentica com usuário e senha (`MobileLoginSP.login`).
+
 ### Configuração
 
-Crie um arquivo `.env`:
+Crie um arquivo `.env` (ou defina as variáveis no ambiente):
 
 ```ini
-SANKHYA_BASE_URL=https://api.sankhya.com.br
+SANKHYA_URL=http://seu-servidor.com.br
+SANKHYA_PORT=8180
 SANKHYA_USERNAME=seu_usuario
 SANKHYA_PASSWORD=sua_senha
-SANKHYA_ENVIRONMENT=producao
 ```
 
 ### Uso
 
 ```python
 from sankhya_sdk import SankhyaContext
-from dotenv import load_dotenv
 
-load_dotenv()
-
-with SankhyaContext.from_settings() as ctx:
-    print(f"Autenticado como: {ctx.user_code}")
+ctx = SankhyaContext.from_settings()
+try:
+    print(f"Autenticado como: {ctx.user_name} (código {ctx.user_code})")
+finally:
+    ctx.dispose()
 ```
+
+`SankhyaContext.from_settings()` sem argumentos usa a instância global
+`sankhya_sdk.config.settings`, criada na importação do módulo a partir das
+variáveis de ambiente e do arquivo `.env` do diretório atual. Para usar
+valores definidos depois da importação, passe um `SankhyaSettings` novo
+(veja o Método 2).
 
 ### Variáveis Disponíveis
 
 | Variável | Obrigatória | Descrição |
 |----------|-------------|-----------|
-| `SANKHYA_BASE_URL` | Sim | URL base da API |
+| `SANKHYA_URL` | Não (padrão `http://localhost`) | URL do servidor, sem a porta |
+| `SANKHYA_PORT` | Não (padrão `8180`) | Porta; também define o ambiente: 8180 produção, 8280 homologação, 8380 treinamento |
 | `SANKHYA_USERNAME` | Sim | Nome de usuário |
 | `SANKHYA_PASSWORD` | Sim | Senha do usuário |
-| `SANKHYA_ENVIRONMENT` | Não | Ambiente (producao/homologacao/treinamento) |
-| `SANKHYA_TIMEOUT` | Não | Timeout em segundos (padrão: 30) |
-| `SANKHYA_MAX_RETRIES` | Não | Máximo de tentativas (padrão: 3) |
-| `SANKHYA_LOG_LEVEL` | Não | Nível de log (DEBUG/INFO/WARNING/ERROR) |
+| `SANKHYA_TIMEOUT` | Não | Timeout HTTP em segundos (padrão: 30) |
+| `SANKHYA_MAX_RETRIES` | Não | Máximo de retries automáticos (padrão: 3) |
 
-## Método 2: Arquivo .key
+`SankhyaSettings` também lê `SANKHYA_KEY_PATH`, `SANKHYA_APPKEY`,
+`SANKHYA_TOKEN` e `SANKHYA_LOG_LEVEL`, mas o login do `SankhyaWrapper` usa
+apenas usuário e senha.
 
-Para maior segurança em produção, use arquivos de chave encriptados.
+## Método 2: Configuração Direta
 
-### Criando um Arquivo .key
-
-```python
-from sankhya_sdk.core.settings import SankhyaSettings
-
-# Cria configurações
-settings = SankhyaSettings(
-    base_url="https://api.sankhya.com.br",
-    username="seu_usuario",
-    password="sua_senha",
-    environment="producao"
-)
-
-# Exporta para arquivo .key (encriptado)
-settings.to_key_file("credenciais.key", passphrase="sua_frase_secreta")
-```
-
-### Usando um Arquivo .key
+Para testes e desenvolvimento rápido. Os campos de `SankhyaSettings` são
+informados pelos nomes das variáveis (aliases):
 
 ```python
 from sankhya_sdk import SankhyaContext
-from sankhya_sdk.core.settings import SankhyaSettings
+from sankhya_sdk.config import SankhyaSettings
 
-# Carrega do arquivo .key
-settings = SankhyaSettings.from_key_file(
-    "credenciais.key",
-    passphrase="sua_frase_secreta"
+settings = SankhyaSettings(
+    SANKHYA_URL="http://sankhya.example.com",
+    SANKHYA_PORT=8180,
+    SANKHYA_USERNAME="usuario_teste",
+    SANKHYA_PASSWORD="senha_teste",
 )
 
-with SankhyaContext(settings) as ctx:
-    print(f"Autenticado via .key: {ctx.user_code}")
+with SankhyaContext.from_settings(settings) as wrapper:
+    print(f"Sessão: {wrapper.session_id}")
 ```
 
-!!! warning "Segurança"
-    - Nunca versione arquivos `.key`
-    - Armazene a passphrase em um gerenciador de segredos
-    - Use permissões de arquivo restritivas (chmod 600)
-
-## Método 3: Configuração Direta
-
-Para testes e desenvolvimento rápido:
+Também é possível informar host, porta e credenciais diretamente:
 
 ```python
 from sankhya_sdk import SankhyaContext
-from sankhya_sdk.core.settings import SankhyaSettings
 
-settings = SankhyaSettings(
-    base_url="https://api.sankhya.com.br",
+ctx = SankhyaContext(
+    host="http://sankhya.example.com",
+    port=8180,
     username="usuario_teste",
-    password="senha_teste"
+    password="senha_teste",
 )
-
-with SankhyaContext(settings) as ctx:
-    # ...
+ctx.dispose()
 ```
 
 !!! danger "Aviso"
@@ -175,12 +159,22 @@ with SankhyaContext(settings) as ctx:
 
 ### Sessão Única (Padrão)
 
-O context manager gerencia automaticamente login/logout:
+O context manager gerencia automaticamente login/logout. A variável do
+`with` recebe o `SankhyaWrapper` da sessão principal:
 
 ```python
-with SankhyaContext.from_settings() as ctx:
+from sankhya_sdk import SankhyaContext
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
+
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+ServiceRequestExtensions.resolve_with_entity(request, Partner(code=1))
+
+with SankhyaContext.from_settings() as wrapper:
     # Sessão aberta
-    resultado = ctx.wrapper.find(...)
+    response = wrapper.service_invoker(request)
 # Sessão fechada (logout automático)
 ```
 
@@ -190,24 +184,30 @@ Para aplicações que precisam de múltiplas sessões simultâneas:
 
 ```python
 from sankhya_sdk import SankhyaContext
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
+
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+ServiceRequestExtensions.resolve_with_entity(request, Partner(code=1))
 
 # Cria contexto principal
 ctx = SankhyaContext.from_settings()
+try:
+    # Adquire sessões adicionais (um login cada)
+    token1 = ctx.acquire_new_session()
+    token2 = ctx.acquire_new_session()
 
-# Adquire sessões adicionais
-token1 = ctx.acquire_session()
-token2 = ctx.acquire_session()
+    # Usa sessões específicas
+    result1 = SankhyaContext.service_invoker_with_token(request, token1)
+    result2 = SankhyaContext.service_invoker_with_token(request, token2)
 
-# Usa sessões específicas
-result1 = ctx.invoke_with_token(token1, service_name, request)
-result2 = ctx.invoke_with_token(token2, service_name, request)
-
-# Finaliza sessões
-ctx.finalize_session(token1)
-ctx.finalize_session(token2)
-
-# Fecha contexto principal
-ctx.dispose()
+    # Finaliza uma sessão adicional
+    ctx.finalize_session(token1)
+finally:
+    # Logout das sessões restantes (token2 e principal)
+    ctx.dispose()
 ```
 
 ```mermaid
@@ -218,47 +218,57 @@ sequenceDiagram
     
     App->>Ctx: from_settings()
     Ctx->>API: Login
-    API-->>Ctx: Session Token (Principal)
+    API-->>Ctx: Sessão principal
     
-    App->>Ctx: acquire_session()
+    App->>Ctx: acquire_new_session()
     Ctx->>API: Login
-    API-->>Ctx: Session Token 1
+    API-->>Ctx: Token 1
     
-    App->>Ctx: acquire_session()
+    App->>Ctx: acquire_new_session()
     Ctx->>API: Login
-    API-->>Ctx: Session Token 2
+    API-->>Ctx: Token 2
     
-    App->>Ctx: invoke_with_token(token1, ...)
-    Ctx->>API: Request com Token 1
+    App->>Ctx: service_invoker_with_token(request, token1)
+    Ctx->>API: Request com a sessão 1
     API-->>Ctx: Response
     
     App->>Ctx: finalize_session(token1)
-    Ctx->>API: Logout Token 1
+    Ctx->>API: Logout sessão 1
     
     App->>Ctx: dispose()
-    Ctx->>API: Logout Token 2
-    Ctx->>API: Logout Principal
+    Ctx->>API: Logout sessão 2
+    Ctx->>API: Logout sessão principal
 ```
 
 ### Thread Safety
 
-O SDK é thread-safe. Para aplicações multi-thread:
+O registro de sessões do `SankhyaContext` é protegido por lock, e as
+requisições de uma mesma sessão são serializadas. Para paralelismo, use uma
+sessão por thread:
 
 ```python
 import threading
+
 from sankhya_sdk import SankhyaContext
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
 
 ctx = SankhyaContext.from_settings()
 
-def worker(thread_id):
+
+def worker(thread_id: int) -> None:
     """Cada thread usa uma sessão separada."""
-    token = ctx.acquire_session()
+    token = ctx.acquire_new_session()
     try:
-        # Operações usando invoke_with_token
-        result = ctx.invoke_with_token(token, "ServiceName", request)
-        print(f"Thread {thread_id}: {result}")
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        ServiceRequestExtensions.resolve_with_entity(request, Partner(code=thread_id + 1))
+        response = SankhyaContext.service_invoker_with_token(request, token)
+        print(f"Thread {thread_id}: {len(response.entities)} registro(s)")
     finally:
         ctx.finalize_session(token)
+
 
 # Cria threads
 threads = [
@@ -277,21 +287,30 @@ for t in threads:
 ctx.dispose()
 ```
 
-## Renovação Automática de Token
+## Renovação Automática de Sessão
 
-O SDK gerencia automaticamente a renovação de tokens expirados:
+Se o servidor responder que a sessão não está autorizada (sessão expirada
+ou derrubada), o `SankhyaWrapper` autentica de novo com as mesmas
+credenciais e repete a requisição:
 
 ```python
-with SankhyaContext.from_settings() as ctx:
-    # Se o token expirar durante uma operação,
-    # o SDK automaticamente:
-    # 1. Detecta o erro de autenticação
+from sankhya_sdk import SankhyaContext
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
+
+ctx = SankhyaContext.from_settings()
+try:
+    SimpleCRUDRequestWrapper.initialize(ctx)
+
+    # Se a sessão expirar durante uma operação, o SDK automaticamente:
+    # 1. Detecta o erro de autorização
     # 2. Faz login novamente
     # 3. Repete a operação
-    
-    for i in range(1000):  # Operação longa
-        crud.find(Partner, f"CODPARC = {i}")
-        # Token renovado automaticamente se necessário
+    for code in range(1, 1001):  # Operação longa
+        SimpleCRUDRequestWrapper.try_find(Partner(code=code))
+finally:
+    SimpleCRUDRequestWrapper.dispose()
+    ctx.dispose()
 ```
 
 ## Boas Práticas de Segurança
@@ -311,24 +330,31 @@ credentials/
 ```yaml
 # GitHub Actions
 env:
-  SANKHYA_BASE_URL: ${{ secrets.SANKHYA_URL }}
+  SANKHYA_URL: ${{ secrets.SANKHYA_URL }}
   SANKHYA_USERNAME: ${{ secrets.SANKHYA_USER }}
   SANKHYA_PASSWORD: ${{ secrets.SANKHYA_PASS }}
 ```
 
 ### 3. Rotacione Credenciais Regularmente
 
-```python
-# Script de rotação (executar periodicamente)
-from sankhya_sdk.core.settings import SankhyaSettings
+Troque a senha do usuário de integração periodicamente e atualize o segredo
+usado em `SANKHYA_PASSWORD`. Antes de publicar a nova senha, valide-a com um
+login:
 
-old_settings = SankhyaSettings.from_key_file("old.key", passphrase)
+```python
+import os
+
+from sankhya_sdk import SankhyaContext
+from sankhya_sdk.config import SankhyaSettings
+
 new_settings = SankhyaSettings(
-    base_url=old_settings.base_url,
-    username=old_settings.username,
-    password=new_password  # Nova senha
+    SANKHYA_URL=os.environ.get("SANKHYA_URL", "http://localhost"),
+    SANKHYA_USERNAME=os.environ.get("SANKHYA_USERNAME", "usuario"),
+    SANKHYA_PASSWORD=os.environ.get("SANKHYA_NEW_PASSWORD", ""),
 )
-new_settings.to_key_file("new.key", new_passphrase)
+
+# Lança ServiceRequestInvalidCredentialsException se a senha for recusada
+SankhyaContext.from_settings(new_settings).dispose()
 ```
 
 ### 4. Use Usuários com Permissões Mínimas
@@ -346,14 +372,15 @@ Crie usuários específicos para cada integração com apenas as permissões nec
 ```python
 import logging
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('sankhya_sdk.auth')
+from sankhya_sdk import SankhyaContext
 
-# Cada login/logout será registrado
-with SankhyaContext.from_settings() as ctx:
-    # [INFO] Login successful: user=admin, session=abc123
+logging.basicConfig(level=logging.INFO)
+
+# O login é registrado em 'sankhya_sdk.core.wrapper'
+with SankhyaContext.from_settings() as wrapper:
+    # [INFO] Autenticando usuário: admin
+    # [INFO] Autenticação bem-sucedida: user_code=1
     ...
-# [INFO] Logout: session=abc123
 ```
 
 ## Configuração por Ambiente
@@ -364,67 +391,58 @@ with SankhyaContext.from_settings() as ctx:
 config/
 ├── .env.development
 ├── .env.staging
-├── .env.production
-└── credentials/
-    ├── dev.key
-    ├── staging.key
-    └── prod.key
+└── .env.production
 ```
 
 ### Carregamento Dinâmico
 
 ```python
 import os
-from dotenv import load_dotenv
+
 from sankhya_sdk import SankhyaContext
+from sankhya_sdk.config import SankhyaSettings
 
 # Determina ambiente
 env = os.getenv("APP_ENV", "development")
 
-# Carrega arquivo correspondente
-load_dotenv(f"config/.env.{env}")
+# Carrega o arquivo correspondente (SankhyaSettings lê o .env informado)
+settings = SankhyaSettings(_env_file=f"config/.env.{env}")
 
-with SankhyaContext.from_settings() as ctx:
+with SankhyaContext.from_settings(settings) as wrapper:
     print(f"Conectado ao ambiente: {env}")
 ```
 
 ## Solução de Problemas
 
-### Erro: Invalid Credentials
+### Erro: Credenciais inválidas
 
-```python
-ServiceRequestInvalidAuthorizationException: Invalid credentials
+```
+ServiceRequestInvalidCredentialsException: Unable to authenticate in Sankhya web service with provided credentials data
 ```
 
 **Verificações:**
 
 1. Usuário e senha corretos
 2. Usuário tem acesso à API
-3. Ambiente correto (produção vs homologação)
+3. Ambiente correto (porta de produção vs homologação)
 
-### Erro: Session Expired
+### Erro: Usuário expirado
 
-```python
-ServiceRequestException: Session expired
+```
+ServiceRequestExpiredAuthenticationException: The user's session is expired
 ```
 
-**Solução:** O SDK deve renovar automaticamente. Se persistir:
+**Solução:** o servidor recusou o login porque o usuário expirou; reative o
+usuário no Sankhya. Sessões expiradas durante o uso são renovadas
+automaticamente (veja [Renovação Automática de Sessão](#renovacao-automatica-de-sessao)).
 
-```python
-ctx.wrapper.logout()
-ctx.wrapper.login()
-```
-
-### Erro: Too Many Sessions
-
-```python
-ServiceRequestException: Maximum sessions exceeded
-```
+### Erro: Muitas sessões abertas
 
 **Solução:**
 
-1. Feche sessões não utilizadas
-2. Use `dispose()` corretamente
+1. Feche sessões não utilizadas (`ctx.finalize_session(token)`)
+2. Use `dispose()` corretamente (`with` ou `try/finally`); o `__del__` do
+   `SankhyaContext` não faz logout
 3. Aguarde expiração de sessões antigas
 
 ## Próximos Passos

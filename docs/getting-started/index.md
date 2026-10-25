@@ -45,9 +45,10 @@ Antes de começar, certifique-se de ter:
 ```python
 from sankhya_sdk import SankhyaContext
 
-# Conecta usando variáveis de ambiente
-with SankhyaContext.from_settings() as ctx:
-    print(f"Conectado como: {ctx.user_code}")
+# Conecta usando variáveis de ambiente (SANKHYA_URL, SANKHYA_USERNAME, ...)
+with SankhyaContext.from_settings() as wrapper:
+    # O `with` entrega o SankhyaWrapper da sessão principal
+    print(f"Conectado como: {wrapper.user_code}")
 ```
 
 ## Próximos Passos

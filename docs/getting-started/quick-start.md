@@ -83,49 +83,68 @@ for record in records:
 
 ### Abordagem Clássica: SankhyaContext (Legado)
 
-Vamos buscar dados de parceiros (clientes/fornecedores):
+Vamos buscar dados de parceiros (clientes/fornecedores) pela API XML, com
+usuário e senha. As credenciais vêm de `SankhyaSettings` (variáveis
+`SANKHYA_URL`, `SANKHYA_PORT`, `SANKHYA_USERNAME` e `SANKHYA_PASSWORD`, ou o
+arquivo `.env`):
 
 ```python
 from sankhya_sdk import SankhyaContext
+from sankhya_sdk.models.transport import Partner
 from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
-from sankhya_sdk.transport_entities import Partner
-from dotenv import load_dotenv
 
-load_dotenv()
+ctx = SankhyaContext.from_settings()  # autentica a sessão principal
+try:
+    # Adquire uma sessão dedicada para o wrapper (um login extra)
+    SimpleCRUDRequestWrapper.initialize(ctx)
 
-with SankhyaContext.from_settings() as ctx:
-    # Cria o wrapper CRUD
-    crud = SimpleCRUDRequestWrapper(ctx.wrapper)
-    
-    # Busca os 10 primeiros parceiros
-    partners = crud.find(
-        entity_type=Partner,
-        criteria="CODPARC > 0",
-        max_results=10
-    )
-    
+    # Busca os parceiros ativos
+    partners = SimpleCRUDRequestWrapper.find_all(Partner(is_active=True))
+
     # Exibe resultados
     for partner in partners:
-        print(f"Código: {partner.code_partner}")
+        print(f"Código: {partner.code}")
         print(f"Nome: {partner.name}")
         print("-" * 40)
+finally:
+    SimpleCRUDRequestWrapper.dispose()  # logout da sessão dedicada
+    ctx.dispose()                       # logout das demais sessões
 ```
 
 ## Entendendo o Código
 
-### 1. Context Manager
+### 1. Contexto e sessões
 
-O `SankhyaContext` gerencia o ciclo de vida da conexão:
+O `SankhyaContext` gerencia o ciclo de vida das sessões. `dispose()` faz o
+logout de todas as sessões registradas:
 
 ```python
-with SankhyaContext.from_settings() as ctx:
-    # Conexão automaticamente aberta
+from sankhya_sdk import SankhyaContext
+
+ctx = SankhyaContext.from_settings()  # Conexão aberta (login)
+try:
     ...
-# Conexão automaticamente fechada (logout)
+finally:
+    ctx.dispose()  # Conexão fechada (logout)
 ```
 
-!!! tip "Boas Práticas"
-    Sempre use o context manager (`with`) para garantir que a sessão seja fechada corretamente, mesmo em caso de exceções.
+Também é possível usar `with`. Nesse caso a variável do `with` recebe o
+`SankhyaWrapper` da sessão principal, não o contexto:
+
+```python
+from sankhya_sdk import SankhyaContext
+
+with SankhyaContext.from_settings() as wrapper:
+    # `wrapper` é um SankhyaWrapper (service_invoker, get_file, ...)
+    ...
+# dispose() chamado automaticamente (logout)
+```
+
+!!! warning "Sempre libere o contexto"
+    Use `with` ou `try/finally` com `dispose()`. O `__del__` do
+    `SankhyaContext` apenas marca o contexto como descartado (como o
+    finalizer do SDK .NET): um contexto que sai de escopo sem `dispose()`
+    não faz logout, e suas sessões continuam registradas.
 
 ### 2. Request Wrappers
 
@@ -133,17 +152,17 @@ O SDK fornece wrappers de alto nível para operações comuns:
 
 | Wrapper | Descrição |
 |---------|-----------|
-| `SimpleCRUDRequestWrapper` | Operações CRUD básicas |
+| `SimpleCRUDRequestWrapper` | Operações CRUD básicas (métodos de classe; `initialize(ctx)` adquire uma sessão dedicada) |
 | `PagedRequestWrapper` | Consultas paginadas para grandes volumes |
-| `OnDemandRequestWrapper` | Processamento em lote assíncrono |
-| `KnowServicesRequestWrapper` | Serviços específicos (NF-e, faturamento, etc.) |
+| `OnDemandRequestWrapper` | Processamento em lote em segundo plano |
+| `KnowServicesRequestWrapper` | Serviços específicos (notas, faturamento, avisos, sessões, arquivos) |
 
 ### 3. Transport Entities
 
 Entidades pré-definidas para interação com a API:
 
 ```python
-from sankhya_sdk.transport_entities import (
+from sankhya_sdk.models.transport import (
     Partner,        # Parceiros (clientes/fornecedores)
     Product,        # Produtos
     InvoiceHeader,  # Cabeçalho de notas fiscais
@@ -153,45 +172,51 @@ from sankhya_sdk.transport_entities import (
 
 ## Exemplo Completo: CRUD de Parceiros
 
+Os exemplos a seguir assumem o `SimpleCRUDRequestWrapper` inicializado como
+acima (`SimpleCRUDRequestWrapper.initialize(ctx)` e, ao final,
+`SimpleCRUDRequestWrapper.dispose()` e `ctx.dispose()`).
+
 ### Buscar (Find)
 
 ```python
-from sankhya_sdk import SankhyaContext
+from sankhya_sdk.helpers import EntityQueryOptions, LiteralCriteria
+from sankhya_sdk.models.transport import Partner
 from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
-from sankhya_sdk.transport_entities import Partner
-from sankhya_sdk.helpers import EntityQueryOptions
 
-with SankhyaContext.from_settings() as ctx:
-    crud = SimpleCRUDRequestWrapper(ctx.wrapper)
-    
-    # Busca simples
-    partners = crud.find(Partner, "CODPARC = 1")
-    
-    # Busca com opções avançadas
-    options = EntityQueryOptions(
-        include_fields=["CODPARC", "NOMEPARC", "CGC_CPF"],
-        order_by="NOMEPARC",
-        max_results=100
-    )
-    partners = crud.find_with_options(Partner, "ATIVO = 'S'", options)
+# Busca pela chave primária (None se não existir)
+partner = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
+
+# Busca obrigatória (ServiceRequestUnexpectedResultException se não existir)
+partner = SimpleCRUDRequestWrapper.find(Partner(code=1))
+
+# Todos os parceiros que correspondem aos campos preenchidos
+clients = SimpleCRUDRequestWrapper.find_all(Partner(is_client=True, is_active=True))
+
+# Busca com opções (limite de linhas, sem entidades referenciadas)
+options = EntityQueryOptions(max_results=100, include_references=False)
+active = SimpleCRUDRequestWrapper.find_all(Partner(is_active=True), options)
+
+# Busca por critério literal (no máximo um resultado)
+partner = SimpleCRUDRequestWrapper.try_find_with_criteria(
+    Partner, LiteralCriteria.equals("CGC_CPF", "12345678000199")
+)
 ```
 
 ### Atualizar (Update)
 
 ```python
-with SankhyaContext.from_settings() as ctx:
-    crud = SimpleCRUDRequestWrapper(ctx.wrapper)
-    
-    # Busca o parceiro
-    partners = crud.find(Partner, "CODPARC = 1")
-    
-    if partners:
-        partner = partners[0]
-        partner.email = "novo@email.com"
-        
-        # Atualiza
-        result = crud.update(partner)
-        print(f"Parceiro atualizado: {result}")
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
+
+# Busca o parceiro
+partner = SimpleCRUDRequestWrapper.try_find(Partner(code=1))
+
+if partner:
+    partner.email_address = "novo@email.com"
+
+    # Atualiza (CRUDServiceProvider.saveRecord)
+    result = SimpleCRUDRequestWrapper.update(partner)
+    print(f"Parceiro atualizado: {result.code}")
 ```
 
 ### Update Parcial (GatewayClient - Recomendado)
@@ -233,33 +258,34 @@ client.save_record(
 
 ### Criar (Insert)
 
+Não existe um método `insert`: `update` usa `CRUDServiceProvider.saveRecord`
+e, sem chave primária preenchida, o servidor cria o registro (como no SDK
+.NET):
+
 ```python
-with SankhyaContext.from_settings() as ctx:
-    crud = SimpleCRUDRequestWrapper(ctx.wrapper)
-    
-    # Cria novo parceiro
-    new_partner = Partner()
-    new_partner.name = "Novo Cliente LTDA"
-    new_partner.cgc_cpf = "12345678000199"
-    new_partner.type_partner = "C"  # Cliente
-    
-    # Insere
-    result = crud.insert(new_partner)
-    print(f"Parceiro criado com código: {result.code_partner}")
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
+
+# Cria novo parceiro (sem CODPARC)
+new_partner = Partner(
+    name="Novo Cliente LTDA",
+    document="12345678000199",
+    is_client=True,
+)
+
+result = SimpleCRUDRequestWrapper.update(new_partner)
+print(f"Parceiro criado com código: {result.code}")
 ```
 
 ### Remover (Delete)
 
 ```python
-with SankhyaContext.from_settings() as ctx:
-    crud = SimpleCRUDRequestWrapper(ctx.wrapper)
-    
-    # Remove parceiro
-    partner = Partner()
-    partner.code_partner = 999  # ID do parceiro a remover
-    
-    result = crud.remove(partner)
-    print(f"Parceiro removido: {result}")
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
+
+# Remove pelo código (chave primária); não há valor de retorno
+SimpleCRUDRequestWrapper.remove(Partner(code=999))
+print("Parceiro removido")
 ```
 
 ## Tratamento de Erros
@@ -270,28 +296,38 @@ Sempre trate exceções para uma integração robusta:
 from sankhya_sdk import SankhyaContext
 from sankhya_sdk.exceptions import (
     SankhyaException,
-    ServiceRequestException,
-    ServiceRequestInvalidAuthorizationException,
+    ServiceRequestGeneralException,
+    ServiceRequestInvalidCredentialsException,
 )
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
 
 try:
-    with SankhyaContext.from_settings() as ctx:
-        crud = SimpleCRUDRequestWrapper(ctx.wrapper)
-        partners = crud.find(Partner, "CODPARC > 0")
-        
-except ServiceRequestInvalidAuthorizationException:
+    ctx = SankhyaContext.from_settings()
+except ServiceRequestInvalidCredentialsException:
     print("Erro: Credenciais inválidas")
-    
-except ServiceRequestException as e:
-    print(f"Erro na requisição: {e.message}")
-    print(f"Status: {e.status_message}")
-    
+    raise
+
+try:
+    SimpleCRUDRequestWrapper.initialize(ctx)
+    partners = SimpleCRUDRequestWrapper.find_all(Partner(is_active=True))
+
+except ServiceRequestGeneralException as e:
+    print(f"Erro na requisição: {e}")
+    if e.response is not None:
+        print(f"Status: {e.response.status_message_text}")
+
 except SankhyaException as e:
     print(f"Erro geral do SDK: {e}")
-    
-except Exception as e:
-    print(f"Erro inesperado: {e}")
+
+finally:
+    SimpleCRUDRequestWrapper.dispose()
+    ctx.dispose()
 ```
+
+As exceções de autenticação (`ServiceRequestInvalidCredentialsException` e
+afins) não derivam de `SankhyaException`. Veja
+[Tratamento de Erros](../core-concepts/error-handling.md).
 
 ## Logging
 
@@ -300,17 +336,19 @@ O SDK suporta logging integrado:
 ```python
 import logging
 
+from sankhya_sdk import SankhyaContext
+
 # Configura logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# O SDK usará o logger 'sankhya_sdk'
+# Os módulos do SDK usam loggers sob 'sankhya_sdk' (ex.: 'sankhya_sdk.core.wrapper')
 logger = logging.getLogger('sankhya_sdk')
 logger.setLevel(logging.DEBUG)
 
-with SankhyaContext.from_settings() as ctx:
+with SankhyaContext.from_settings() as wrapper:
     # Logs detalhados serão exibidos
     ...
 ```
@@ -320,13 +358,13 @@ with SankhyaContext.from_settings() as ctx:
 ```mermaid
 flowchart TD
     A[Carregar Configurações] --> B[Criar SankhyaContext]
-    B --> C[Autenticação Automática]
+    B --> C[Autenticação - login]
     C --> D{Sucesso?}
     D -->|Não| E[Tratar Erro]
-    D -->|Sim| F[Criar Request Wrapper]
+    D -->|Sim| F[Inicializar Request Wrapper - sessão dedicada]
     F --> G[Executar Operações]
     G --> H[Processar Resultados]
-    H --> I[Fechar Contexto]
+    H --> I[dispose do wrapper e do contexto - logout]
     E --> J[Logging/Retry]
     J --> B
 ```

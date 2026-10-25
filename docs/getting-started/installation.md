@@ -116,9 +116,9 @@ from dotenv import load_dotenv
 # Carrega variaveis de ambiente
 load_dotenv()
 
-# Verifica versao
-from sankhya_sdk import __version__
-print(f"Sankhya SDK Python v{__version__}")
+# Verifica versao (distribuicao instalada com pip install -e .)
+from importlib.metadata import version
+print(f"Sankhya SDK Python v{version('sankhya-sdk-python')}")
 print("-" * 40)
 
 # Verifica configuracao OAuth2
@@ -296,7 +296,8 @@ Para compatibilidade com integracoes existentes, o SDK ainda suporta autenticaca
 
 ```ini
 # .env (modo legado)
-SANKHYA_BASE_URL=https://api.sankhya.com.br
+SANKHYA_URL=http://seu-servidor.com.br
+SANKHYA_PORT=8180
 SANKHYA_USERNAME=seu_usuario
 SANKHYA_PASSWORD=sua_senha
 ```
@@ -304,9 +305,12 @@ SANKHYA_PASSWORD=sua_senha
 ```python
 from sankhya_sdk import SankhyaContext
 
-with SankhyaContext.from_settings() as ctx:
-    # Usar wrappers legados...
+ctx = SankhyaContext.from_settings()
+try:
+    # Usar wrappers legados (ex.: SimpleCRUDRequestWrapper.initialize(ctx))...
     pass
+finally:
+    ctx.dispose()
 ```
 
 !!! warning "Recomendacao"
