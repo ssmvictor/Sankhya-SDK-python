@@ -4,12 +4,39 @@ Testes unitários para ServiceResponse.
 Testa parsing XML e acesso a entidades.
 """
 
+import base64
+from unittest.mock import Mock, patch
+
 import pytest
 from lxml import etree
 
+from sankhya_sdk.core.wrapper import SankhyaWrapper
+from sankhya_sdk.exceptions import (
+    ServiceRequestDeadlockException,
+    ServiceRequestExpiredAuthenticationException,
+    ServiceRequestInvalidAuthorizationException,
+    ServiceRequestInvalidCredentialsException,
+    ServiceRequestTimeoutException,
+)
+from sankhya_sdk.helpers.status_message_helper import StatusMessageHelper
+from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_response_status import ServiceResponseStatus
+
+
+def _base64_error_response(
+    message: str, service: str = "crud.find", encoding: str = "iso-8859-1"
+) -> bytes:
+    """Resposta de erro como o servidor envia: statusMessage em Base64 (CDATA)."""
+    encoded = base64.b64encode(message.encode(encoding)).decode("ascii")
+    return (
+        '<?xml version="1.0" encoding="ISO-8859-1"?>'
+        f'<serviceResponse serviceName="{service}" status="0" '
+        'transactionId="F1E2D3C4B5A6">'
+        f"<statusMessage><![CDATA[{encoded}]]></statusMessage>"
+        "</serviceResponse>"
+    ).encode("iso-8859-1")
 
 
 class TestServiceResponseParsing:
@@ -70,6 +97,76 @@ class TestServiceResponseParsing:
         resp = ServiceResponse.from_xml_string(xml_str)
         
         assert resp.pending_printing is True
+
+
+class TestServiceResponseBase64StatusMessage:
+    """
+    statusMessage em Base64 é decodificado antes da classificação do erro.
+
+    .NET: ServiceResponse.cs:309 (StatusMessage.ValueInternal => FromBase64)
+    e StatusMessageHelper.cs, que compara os padrões com o valor decodificado.
+    """
+
+    @pytest.mark.parametrize("encoding", ["iso-8859-1", "utf-8"])
+    @pytest.mark.parametrize(
+        ("service", "message", "expected"),
+        [
+            (
+                ServiceName.LOGIN,
+                "Usuário/Senha inválido.",
+                ServiceRequestInvalidCredentialsException,
+            ),
+            (
+                ServiceName.CRUD_SERVICE_FIND,
+                "A transação (ID do processo 64) entrou em deadlock em recursos "
+                "de bloqueio com outro processo e foi escolhida como vítima do "
+                "deadlock. Execute a transação novamente.",
+                ServiceRequestDeadlockException,
+            ),
+            (
+                ServiceName.CRUD_SERVICE_FIND,
+                "Erro ao executar a consulta: O tempo limite da consulta expirou.",
+                ServiceRequestTimeoutException,
+            ),
+            (
+                ServiceName.CRUD_SERVICE_FIND,
+                "Não autorizado.",
+                ServiceRequestInvalidAuthorizationException,
+            ),
+            (
+                ServiceName.CRUD_SERVICE_FIND,
+                "Usuário expirou.",
+                ServiceRequestExpiredAuthenticationException,
+            ),
+        ],
+    )
+    def test_error_is_classified_from_decoded_message(
+        self, service, message, expected, encoding
+    ):
+        response = ServiceResponse.from_xml_bytes(
+            _base64_error_response(message, service.internal_value, encoding)
+        )
+
+        assert response.status_message_text == message
+        with pytest.raises(expected):
+            StatusMessageHelper.process_status_message(
+                service, ServiceRequest(service=service), response
+            )
+
+    @patch.object(SankhyaWrapper, "_make_request")
+    def test_authenticate_raises_invalid_credentials(self, mock_request):
+        """Login com statusMessage em Base64 (formato real do servidor)."""
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.content = _base64_error_response(
+            "Usuário/Senha inválido.", "MobileLoginSP.login"
+        )
+        mock_request.return_value = mock_response
+        wrapper = SankhyaWrapper(host="http://example.com", port=8180)
+
+        with pytest.raises(ServiceRequestInvalidCredentialsException):
+            wrapper.authenticate("usuario", "senha-errada")
 
 
 class TestServiceResponseEntities:

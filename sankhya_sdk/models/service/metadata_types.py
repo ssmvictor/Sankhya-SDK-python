@@ -8,6 +8,9 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Service/
 
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 from typing import Any, Dict, List, Optional, Type
 
 from lxml import etree
@@ -28,11 +31,153 @@ from .xml_serialization import (
 from .basic_types import Field
 
 
+# ============================================================
+# Decodificação Base64 da mensagem de status
+# ============================================================
+
+#: Base64 do alfabeto padrão, com padding apenas no final.
+_BASE64_TEXT_PATTERN = re.compile(r"\A[A-Za-z0-9+/]*={0,2}\Z")
+
+#: Abaixo deste tamanho o texto decodificado segue regras mais estritas.
+_STATUS_SHORT_TEXT_LENGTH = 16
+
+#: Pontuação comum (aceita também em textos curtos).
+_STATUS_COMMON_PUNCTUATION = frozenset(" .,:;!?'\"()/-_%<>$")
+
+#: Letras acentuadas do português (únicas aceitas em textos curtos).
+_STATUS_PORTUGUESE_ACCENTED = frozenset("áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇ")
+
+#: Símbolos tipográficos não ASCII aceitos em textos longos.
+_STATUS_TYPOGRAPHIC_CHARS = frozenset("ºª°§–—‘’“”…€«»\u00a0")
+
+
+def _is_latin_letter(char: str) -> bool:
+    """Indica se o caractere é uma letra latina (ASCII ou acentuada)."""
+    return char.isalpha() and (char.isascii() or 0xC0 <= ord(char) <= 0x24F)
+
+
+def _is_plausible_status_text(text: str) -> bool:
+    """
+    Indica se um texto decodificado de Base64 parece uma mensagem legível.
+
+    Uma mensagem em texto puro formada só por caracteres do alfabeto Base64
+    (por exemplo ``deadlock``, ``Pendente`` ou ``12345678``) também é Base64
+    válido, mas os bytes decodificados viram lixo (``uæ\\x9d\\x96\\x87$``).
+    Estas regras recusam esse lixo para que o texto original seja mantido:
+
+    - ao menos 4 caracteres e uma letra;
+    - apenas letras latinas, dígitos ASCII, espaços e quebras de linha,
+      símbolos ASCII imprimíveis e alguns símbolos tipográficos (``º``,
+      ``°``, ``§``, aspas curvas, ``€``...);
+    - no máximo 30% de caracteres não ASCII, nunca três seguidos;
+    - no máximo 35% de símbolos e 10% de símbolos fora da pontuação comum;
+    - textos curtos (menos de 16 caracteres) devem ter uma única linha,
+      apenas pontuação comum, apenas acentos do português junto de uma
+      letra e nenhuma maiúscula logo após uma minúscula.
+
+    Args:
+        text: Texto decodificado
+
+    Returns:
+        True se o texto parecer uma mensagem legível
+    """
+    length = len(text)
+    if length < 4 or not text.strip():
+        return False
+
+    short = length < _STATUS_SHORT_TEXT_LENGTH
+    letters = symbols = uncommon_symbols = non_ascii = non_ascii_run = 0
+    previous = ""
+    for index, char in enumerate(text):
+        if char.isascii():
+            non_ascii_run = 0
+        else:
+            non_ascii += 1
+            non_ascii_run += 1
+            if non_ascii_run >= 3:
+                return False
+
+        if _is_latin_letter(char):
+            letters += 1
+            if short:
+                if char.isupper() and previous.islower():
+                    return False
+                if not char.isascii():
+                    following = text[index + 1 : index + 2]
+                    if char not in _STATUS_PORTUGUESE_ACCENTED or not (
+                        previous.isalpha() or following.isalpha()
+                    ):
+                        return False
+        elif char.isascii() and char.isdigit():
+            pass
+        elif short:
+            if char not in _STATUS_COMMON_PUNCTUATION:
+                return False
+            if char != " ":
+                symbols += 1
+        elif char in "\t\r\n ":
+            pass
+        elif (char.isascii() and char.isprintable()) or char in _STATUS_TYPOGRAPHIC_CHARS:
+            symbols += 1
+            if char not in _STATUS_COMMON_PUNCTUATION:
+                uncommon_symbols += 1
+        else:
+            return False
+        previous = char
+
+    return (
+        letters > 0
+        and non_ascii * 10 <= length * 3
+        and symbols * 100 <= length * 35
+        and uncommon_symbols * 10 <= length
+    )
+
+
+def _decode_status_message(raw: str) -> Optional[str]:
+    """
+    Decodifica o conteúdo Base64 de ``<statusMessage>``.
+
+    Porta de ``StatusMessage.ValueInternal`` (.NET), que sempre aplica
+    ``FromBase64`` ao texto (ServiceResponse.cs:309). No CrispyWaffle,
+    ``FromBase64`` usa ``Convert.FromBase64String`` e decodifica os bytes
+    com ISO-8859-1. Aqui os bytes são lidos como UTF-8 estrito e, se não
+    forem UTF-8 válido, como ISO-8859-1 (como no .NET). Quebras de linha
+    (Base64 quebrado em linhas) são ignoradas.
+
+    O .NET lança FormatException para conteúdo que não é Base64; aqui o
+    conteúdo só é decodificado se for Base64 canônico (tamanho múltiplo de
+    4, padding correto, bits finais zerados) e resultar em um texto legível
+    (``_is_plausible_status_text``). Caso contrário retorna None e o texto
+    original é mantido.
+
+    Args:
+        raw: Conteúdo do elemento ``<statusMessage>``
+
+    Returns:
+        Texto decodificado ou None se o conteúdo não for uma mensagem em Base64
+    """
+    compact = raw.strip().replace("\r", "").replace("\n", "")
+    if not compact or len(compact) % 4 or not _BASE64_TEXT_PATTERN.match(compact):
+        return None
+    try:
+        data = base64.b64decode(compact, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if base64.b64encode(data).decode("ascii") != compact:
+        return None
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("iso-8859-1")
+    return text if _is_plausible_status_text(text) else None
+
+
 class StatusMessage(BaseModel):
     """
     Mensagem de status retornada pelo serviço.
-    
-    O valor pode ser codificado em Base64 dependendo do contexto.
+
+    O servidor envia o texto em Base64 (``<statusMessage><![CDATA[...]]>``);
+    ``from_xml`` o decodifica, como ``StatusMessage.ValueInternal`` no .NET.
     """
 
     model_config = ConfigDict(frozen=False)
@@ -67,12 +212,19 @@ class StatusMessage(BaseModel):
 
     @classmethod
     def from_xml(cls, element: Element) -> "StatusMessage":
-        """Deserializa de elemento XML."""
-        is_encoded = deserialize_bool(get_element_attr(element, "encoded", ""))
-        return cls(
-            value=get_element_text(element, ""),
-            is_encoded=is_encoded,
-        )
+        """
+        Deserializa de elemento XML.
+
+        Como no .NET (``ValueInternal`` aplica ``FromBase64``), o conteúdo é
+        decodificado de Base64 mesmo sem atributo. Um conteúdo que não é
+        uma mensagem em Base64 (texto puro) é mantido como está; com
+        ``encoded="true"`` o valor é mantido codificado (``is_encoded``).
+        """
+        raw = get_element_text(element, "")
+        if deserialize_bool(get_element_attr(element, "encoded", "")):
+            return cls(value=raw, is_encoded=True)
+        decoded = _decode_status_message(raw)
+        return cls(value=raw if decoded is None else decoded, is_encoded=False)
 
 
 class Metadata(BaseModel):
