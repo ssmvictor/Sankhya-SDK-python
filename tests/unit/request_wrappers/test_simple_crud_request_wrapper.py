@@ -378,6 +378,122 @@ class TestInternalContext:
 
 
 # =============================================================================
+# Concurrent Initialization Tests
+# =============================================================================
+
+
+class _OtherThreadRunsFirst:
+    """
+    Lock que simula outra thread executando ``action`` enquanto o chamador
+    espera para entrar na seção crítica (apenas na primeira entrada).
+    """
+
+    def __init__(self, action) -> None:
+        self._lock = threading.Lock()
+        self._action = action
+        self._raced = False
+
+    def __enter__(self) -> "_OtherThreadRunsFirst":
+        if not self._raced:
+            self._raced = True
+            self._action()
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc_info) -> bool:
+        self._lock.release()
+        return False
+
+
+class TestConcurrentInitialization:
+    """
+    initialize() e dispose() concorrentes.
+
+    No .NET a sessão é adquirida uma única vez pelo inicializador estático
+    da classe (SimpleCRUDRequestWrapper.cs:17-21), que o CLR executa uma vez
+    e de forma thread-safe. Aqui initialize() é serializado por um lock de
+    classe: chamadas concorrentes adquirem uma única sessão e nenhuma sessão
+    em uso é liberada.
+    """
+
+    def test_concurrent_initialize_acquires_single_session(self, mock_context):
+        """Oito threads inicializando juntas adquirem uma única sessão."""
+        threads_count = 8
+        start = threading.Barrier(threads_count)
+        acquired: List[uuid.UUID] = []
+        lock_held: List[bool] = []
+        errors: List[BaseException] = []
+
+        def acquire_new_session(request_type: ServiceRequestType) -> uuid.UUID:
+            lock = getattr(SimpleCRUDRequestWrapper, "_lock", None)
+            lock_held.append(lock is not None and lock.locked())
+            token = uuid.uuid4()
+            acquired.append(token)
+            return token
+
+        mock_context.acquire_new_session.side_effect = acquire_new_session
+
+        def run() -> None:
+            try:
+                start.wait(timeout=10)
+                SimpleCRUDRequestWrapper.initialize(mock_context)
+            except BaseException as e:  # pragma: no cover - diagnosticado pelo assert
+                errors.append(e)
+
+        threads = [threading.Thread(target=run) for _ in range(threads_count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert not any(thread.is_alive() for thread in threads)
+        assert errors == []
+        assert len(acquired) == 1
+        assert lock_held == [True]
+        assert SimpleCRUDRequestWrapper._session_token == acquired[0]
+
+        SimpleCRUDRequestWrapper.dispose()
+
+        mock_context.finalize_session.assert_called_once_with(acquired[0])
+
+    def test_initialize_rechecks_state_after_waiting_for_lock(self, mock_context):
+        """
+        Quem esperava o lock enquanto outra thread inicializava não adquire
+        outra sessão nem libera a sessão já adquirida.
+        """
+        other_context = MagicMock()
+        other_context.acquire_new_session.return_value = uuid.uuid4()
+        lock = _OtherThreadRunsFirst(
+            lambda: SimpleCRUDRequestWrapper.initialize(other_context)
+        )
+
+        with patch.object(SimpleCRUDRequestWrapper, "_lock", lock, create=True):
+            SimpleCRUDRequestWrapper.initialize(mock_context)
+
+        mock_context.acquire_new_session.assert_not_called()
+        assert SimpleCRUDRequestWrapper._context is other_context
+        assert (
+            SimpleCRUDRequestWrapper._session_token
+            == other_context.acquire_new_session.return_value
+        )
+        other_context.finalize_session.assert_not_called()
+
+    def test_dispose_during_finalize_does_not_finalize_twice(self, mock_context):
+        """dispose() chamado enquanto outro dispose() finaliza a sessão não a finaliza de novo."""
+        SimpleCRUDRequestWrapper.initialize(mock_context)
+        token = SimpleCRUDRequestWrapper._session_token
+        # Outra thread chama dispose() durante o logout da sessão dedicada
+        mock_context.finalize_session.side_effect = (
+            lambda _token: SimpleCRUDRequestWrapper.dispose()
+        )
+
+        SimpleCRUDRequestWrapper.dispose()
+
+        mock_context.finalize_session.assert_called_once_with(token)
+        assert SimpleCRUDRequestWrapper._initialized is False
+
+
+# =============================================================================
 # Context Manager Tests
 # =============================================================================
 

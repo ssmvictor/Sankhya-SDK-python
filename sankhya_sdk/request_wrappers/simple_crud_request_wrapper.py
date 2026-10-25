@@ -11,6 +11,7 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/RequestWrappers/SimpleCRUDRequestWrap
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from typing import (
     TYPE_CHECKING,
@@ -64,6 +65,7 @@ class SimpleCRUDRequestWrapper:
             (initialize() sem contexto) e, portanto, deve ter sua sessão
             principal encerrada em dispose()
         _initialized: Flag indicando se o wrapper foi inicializado
+        _lock: Lock que serializa initialize() e dispose() entre threads
     
     Example:
         Inicialização e uso básico:
@@ -86,6 +88,7 @@ class SimpleCRUDRequestWrapper:
     _session_token: ClassVar[Optional[uuid.UUID]] = None
     _owns_context: ClassVar[bool] = False
     _initialized: ClassVar[bool] = False
+    _lock: ClassVar[threading.Lock] = threading.Lock()
     
     def __init__(self) -> None:
         """
@@ -137,6 +140,10 @@ class SimpleCRUDRequestWrapper:
         principal também é encerrada em dispose(). Um contexto informado
         pertence a quem o criou, que deve descartá-lo.
         
+        Thread-safe e idempotente: chamadas concorrentes adquirem uma única
+        sessão, como o inicializador estático do .NET
+        (SimpleCRUDRequestWrapper.cs:17-21), executado uma única vez.
+        
         Args:
             context: Contexto Sankhya existente (opcional)
             
@@ -149,38 +156,39 @@ class SimpleCRUDRequestWrapper:
             >>> ctx = SankhyaContext.from_settings()
             >>> SimpleCRUDRequestWrapper.initialize(ctx)
         """
-        if cls._initialized:
-            logger.warning("SimpleCRUDRequestWrapper já inicializado")
-            return
-        
-        if context is not None:
-            # Como no .NET (Context.AcquireNewSession(ServiceRequestType.SimpleCrud)),
-            # o wrapper usa uma sessão dedicada e não a sessão principal do contexto.
-            cls._context = context
-            cls._session_token = context.acquire_new_session(
-                ServiceRequestType.SIMPLE_CRUD
-            )
-            cls._owns_context = False
-        else:
-            # Import local para evitar circular
-            from sankhya_sdk.core.context import SankhyaContext
-            owned_context = SankhyaContext.from_settings()
-            try:
-                session_token = owned_context.acquire_new_session(
+        with cls._lock:
+            if cls._initialized:
+                logger.warning("SimpleCRUDRequestWrapper já inicializado")
+                return
+            
+            if context is not None:
+                # Como no .NET (Context.AcquireNewSession(ServiceRequestType.SimpleCrud)),
+                # o wrapper usa uma sessão dedicada e não a sessão principal do contexto.
+                cls._context = context
+                cls._session_token = context.acquire_new_session(
                     ServiceRequestType.SIMPLE_CRUD
                 )
-            except Exception:
-                # Ninguém mais referencia o contexto criado aqui
-                cls._release_owned_context(owned_context)
-                raise
-            cls._context = owned_context
-            cls._session_token = session_token
-            cls._owns_context = True
-        
-        cls._initialized = True
-        logger.info(
-            f"SimpleCRUDRequestWrapper inicializado: token={cls._session_token}"
-        )
+                cls._owns_context = False
+            else:
+                # Import local para evitar circular
+                from sankhya_sdk.core.context import SankhyaContext
+                owned_context = SankhyaContext.from_settings()
+                try:
+                    session_token = owned_context.acquire_new_session(
+                        ServiceRequestType.SIMPLE_CRUD
+                    )
+                except Exception:
+                    # Ninguém mais referencia o contexto criado aqui
+                    cls._release_owned_context(owned_context)
+                    raise
+                cls._context = owned_context
+                cls._session_token = session_token
+                cls._owns_context = True
+            
+            cls._initialized = True
+            logger.info(
+                f"SimpleCRUDRequestWrapper inicializado: token={cls._session_token}"
+            )
     
     @classmethod
     def dispose(cls) -> None:
@@ -195,22 +203,27 @@ class SimpleCRUDRequestWrapper:
         Example:
             >>> SimpleCRUDRequestWrapper.dispose()
         """
-        if not cls._initialized:
-            return
+        with cls._lock:
+            if not cls._initialized:
+                return
+            
+            context = cls._context
+            session_token = cls._session_token
+            owns_context = cls._owns_context
+            cls._context = None
+            cls._session_token = None
+            cls._owns_context = False
+            cls._initialized = False
         
-        if cls._context and cls._session_token:
+        if context and session_token:
             try:
-                cls._context.finalize_session(cls._session_token)
+                context.finalize_session(session_token)
             except Exception as e:
                 logger.warning(f"Erro ao finalizar sessão: {e}")
         
-        if cls._owns_context and cls._context:
-            cls._release_owned_context(cls._context)
+        if owns_context and context:
+            cls._release_owned_context(context)
         
-        cls._context = None
-        cls._session_token = None
-        cls._owns_context = False
-        cls._initialized = False
         logger.info("SimpleCRUDRequestWrapper descartado")
     
     @staticmethod

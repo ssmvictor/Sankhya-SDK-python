@@ -375,6 +375,137 @@ class TestInternalContext:
         assert KnowServicesRequestWrapper._context is None
 
 
+class _OtherThreadRunsFirst:
+    """
+    Lock que simula outra thread executando ``action`` enquanto o chamador
+    espera para entrar na seção crítica (apenas na primeira entrada).
+    """
+
+    def __init__(self, action) -> None:
+        self._lock = threading.Lock()
+        self._action = action
+        self._raced = False
+
+    def __enter__(self) -> "_OtherThreadRunsFirst":
+        if not self._raced:
+            self._raced = True
+            self._action()
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc_info) -> bool:
+        self._lock.release()
+        return False
+
+
+class TestConcurrentInitialization:
+    """
+    initialize() e dispose() concorrentes.
+
+    No .NET a sessão é adquirida uma única vez pelo inicializador estático
+    da classe (KnowServicesRequestWrapper.cs:22-26), que o CLR executa uma
+    vez e de forma thread-safe. Aqui initialize() é serializado por um lock
+    de classe: chamadas concorrentes sem contexto criam um único contexto e
+    nenhuma sessão em uso é liberada.
+    """
+
+    @staticmethod
+    def _new_context() -> MagicMock:
+        context = MagicMock()
+        context.token = uuid.uuid4()
+        context.acquire_new_session.return_value = uuid.uuid4()
+        return context
+
+    def test_concurrent_initialize_creates_single_context(self):
+        """Oito threads inicializando juntas criam um único contexto e sessão."""
+        threads_count = 8
+        start = threading.Barrier(threads_count)
+        created: List[MagicMock] = []
+        lock_held: List[bool] = []
+        errors: List[BaseException] = []
+
+        def from_settings() -> MagicMock:
+            lock = getattr(KnowServicesRequestWrapper, "_lock", None)
+            lock_held.append(lock is not None and lock.locked())
+            created.append(self._new_context())
+            return created[-1]
+
+        def run() -> None:
+            try:
+                start.wait(timeout=10)
+                KnowServicesRequestWrapper.initialize()
+            except BaseException as e:  # pragma: no cover - diagnosticado pelo assert
+                errors.append(e)
+
+        with patch(
+            "sankhya_sdk.core.context.SankhyaContext.from_settings",
+            side_effect=from_settings,
+        ):
+            threads = [threading.Thread(target=run) for _ in range(threads_count)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+        assert not any(thread.is_alive() for thread in threads)
+        assert errors == []
+        assert len(created) == 1
+        assert lock_held == [True]
+        context = created[0]
+        context.acquire_new_session.assert_called_once_with(
+            ServiceRequestType.KNOW_SERVICES
+        )
+        assert KnowServicesRequestWrapper._context is context
+
+        KnowServicesRequestWrapper.dispose()
+
+        context.finalize_session.assert_called_once_with(
+            context.acquire_new_session.return_value
+        )
+
+    def test_initialize_rechecks_state_after_waiting_for_lock(self, mock_context):
+        """
+        Quem esperava o lock enquanto outra thread inicializava não cria outro
+        contexto nem substitui o contexto já em uso.
+        """
+        lock = _OtherThreadRunsFirst(
+            lambda: KnowServicesRequestWrapper.initialize(mock_context)
+        )
+
+        with patch(
+            "sankhya_sdk.core.context.SankhyaContext.from_settings"
+        ) as from_settings, patch.object(
+            KnowServicesRequestWrapper, "_lock", lock, create=True
+        ):
+            KnowServicesRequestWrapper.initialize()
+
+        from_settings.assert_not_called()
+        assert KnowServicesRequestWrapper._context is mock_context
+        assert KnowServicesRequestWrapper._session_token == mock_context.token
+        mock_context.finalize_session.assert_not_called()
+
+    def test_dispose_during_finalize_does_not_finalize_twice(self):
+        """dispose() chamado enquanto outro dispose() finaliza a sessão não a finaliza de novo."""
+        context = self._new_context()
+        with patch(
+            "sankhya_sdk.core.context.SankhyaContext.from_settings",
+            return_value=context,
+        ):
+            KnowServicesRequestWrapper.initialize()
+        # Outra thread chama dispose() durante o logout da sessão dedicada
+        context.finalize_session.side_effect = (
+            lambda _token: KnowServicesRequestWrapper.dispose()
+        )
+
+        KnowServicesRequestWrapper.dispose()
+
+        context.finalize_session.assert_called_once_with(
+            context.acquire_new_session.return_value
+        )
+        context.wrapper.dispose.assert_called_once_with()
+        assert KnowServicesRequestWrapper._initialized is False
+
+
 # =============================================================================
 # Session Management Tests
 # =============================================================================
