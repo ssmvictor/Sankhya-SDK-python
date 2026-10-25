@@ -146,8 +146,10 @@ class Partner(TransportEntityBase):
     )
     
     # Documentos
+    # Partner.cs: [EntityElement("CGC_CPF", true)] - não é referência inline
     document: Optional[str] = entity_element(
         "CGC_CPF",
+        ignore_inline_reference=True,
         default=None
     )
     

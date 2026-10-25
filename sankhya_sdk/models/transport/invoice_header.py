@@ -190,8 +190,10 @@ class InvoiceHeader(TransportEntityBase):
         default=None
     )
     
+    # InvoiceHeader.cs: [EntityElement("CIF_FOB", true)] - não é referência inline
     freight_type: Optional[FreightType] = entity_element(
         "CIF_FOB",
+        ignore_inline_reference=True,
         default=None
     )
     

@@ -523,3 +523,85 @@ class TestIgnoreInlineReference:
         assert [(e.path, e.fieldset.list) for e in entities[1:]] == [
             ("Cidade", "NOMECID"),
         ]
+
+    def test_partner_document_is_a_regular_field(self):
+        """Partner.cs:721: [EntityElement("CGC_CPF", true)]."""
+        find_request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            find_request, Partner(document="01234567890")
+        )
+
+        data_set = find_request.request_body.data_set
+        assert data_set.literal_criteria.expression == "CGC_CPF = '01234567890'"
+        assert [e.path for e in data_set.entities] == [""]
+        assert "CGC_CPF" in data_set.entities[0].fieldset.list.split(",")
+
+        save_request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            save_request,
+            Partner(code=123, name="Cliente", document="01234567890"),
+        )
+
+        assert save_request.request_body.data_set.data_rows[0].local_fields == {
+            "NOMEPARC": "Cliente",
+            "CGC_CPF": "01234567890",
+        }
+
+    def test_partner_document_on_legacy_crud(self):
+        """crud.find / crud.save tratam CGC_CPF como campo, não como referência."""
+        find_request = ServiceRequest(service=ServiceName.CRUD_FIND)
+
+        ServiceRequestExtensions.resolve_generic(find_request, Partner)
+
+        entity = find_request.request_body.entity
+        assert "CGC_CPF" in [f.name for f in entity.fields]
+        assert not entity.references_fetch
+
+        save_request = ServiceRequest(service=ServiceName.CRUD_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            save_request, Partner(code=1, document="01234567890")
+        )
+
+        assert [
+            (c.name, c.value) for c in save_request.request_body.entity.campos
+        ] == [("CODPARC", "1"), ("CGC_CPF", "01234567890")]
+
+    def test_invoice_header_freight_type_is_a_regular_field(self):
+        """InvoiceHeader.cs:633: [EntityElement("CIF_FOB", true)]."""
+        from sankhya_sdk.enums.freight_type import FreightType
+        from sankhya_sdk.models.transport.invoice_header import InvoiceHeader
+
+        find_request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            find_request, InvoiceHeader(freight_type=FreightType.FREE_ON_BOARD)
+        )
+
+        data_set = find_request.request_body.data_set
+        assert data_set.literal_criteria.expression == "CIF_FOB = 'F'"
+        assert [e.path for e in data_set.entities] == [""]
+        assert "CIF_FOB" in data_set.entities[0].fieldset.list.split(",")
+
+        crud_find_request = ServiceRequest(service=ServiceName.CRUD_FIND)
+
+        ServiceRequestExtensions.resolve_generic(crud_find_request, InvoiceHeader)
+
+        entity = crud_find_request.request_body.entity
+        assert "CIF_FOB" in [f.name for f in entity.fields]
+        assert not entity.references_fetch
+
+        save_request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+
+        ServiceRequestExtensions.resolve_with_entity(
+            save_request,
+            InvoiceHeader(
+                single_number=1,
+                freight_type=FreightType.COST_INSURANCE_FREIGHT,
+            ),
+        )
+
+        data_row = save_request.request_body.data_set.data_rows[0]
+        assert data_row.local_fields == {"CIF_FOB": "C"}

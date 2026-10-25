@@ -238,3 +238,14 @@ class TestInvoiceHeader:
         inv2 = InvoiceHeader(single_number=12345, movement_time=mt)
         
         assert hash(inv1) == hash(inv2)
+
+    def test_freight_type_ignores_inline_reference(self):
+        """InvoiceHeader.cs:633: [EntityElement("CIF_FOB", true)]."""
+        from sankhya_sdk.attributes.reflection import get_field_metadata
+
+        element = get_field_metadata(
+            InvoiceHeader.model_fields["freight_type"]
+        ).element
+
+        assert element.element_name == "CIF_FOB"
+        assert element.ignore_inline_reference is True

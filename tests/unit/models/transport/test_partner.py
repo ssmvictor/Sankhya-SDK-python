@@ -133,3 +133,12 @@ class TestPartner:
         
         assert partner.neighborhood == neighborhood
         assert partner.neighborhood.name == "Centro"
+
+    def test_document_ignores_inline_reference(self):
+        """Partner.cs:721: [EntityElement("CGC_CPF", true)]."""
+        from sankhya_sdk.attributes.reflection import get_field_metadata
+
+        element = get_field_metadata(Partner.model_fields["document"]).element
+
+        assert element.element_name == "CGC_CPF"
+        assert element.ignore_inline_reference is True
