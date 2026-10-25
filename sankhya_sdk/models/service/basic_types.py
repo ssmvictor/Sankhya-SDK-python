@@ -62,7 +62,13 @@ class FieldValue(BaseModel):
 
 
 class Criteria(BaseModel):
-    """Representa um critério de filtragem em um serviço Sankhya."""
+    """
+    Representa um critério de filtragem em um serviço Sankhya.
+
+    Serializado como no .NET (``Criteria.cs``: ``Name`` em
+    ``[XmlAttribute("nome")]`` e ``Value`` em ``[XmlAttribute("valor")]``),
+    por exemplo ``<criterio nome="CODPARC" valor="1"/>``.
+    """
 
     model_config = ConfigDict(frozen=False)
 
@@ -75,15 +81,18 @@ class Criteria(BaseModel):
         if self.name:
             elem.set("nome", self.name)
         if self.value is not None:
-            elem.text = self.value
+            elem.set("valor", self.value)
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "Criteria":
-        """Deserializa de elemento XML."""
+        """Deserializa de elemento XML (atributo ``valor`` ou texto legado)."""
+        value = get_element_attr(element, "valor")
+        if value is None:
+            value = get_element_text(element) or None
         return cls(
             name=get_element_attr(element, "nome"),
-            value=get_element_text(element) or None,
+            value=value,
         )
 
 

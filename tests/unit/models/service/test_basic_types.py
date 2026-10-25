@@ -95,25 +95,51 @@ class TestField:
 
 
 class TestCriteria:
-    """Testes para a classe Criteria."""
+    """
+    Testes para a classe Criteria.
+
+    .NET (Criteria.cs): Name em [XmlAttribute("nome")] e Value em
+    [XmlAttribute("valor")].
+    """
 
     def test_to_xml(self):
         """Testa serialização para XML."""
         crit = Criteria(name="CODPROD", value="123")
         xml = crit.to_xml()
-        
+
         assert xml.tag == "criterio"
         assert xml.get("nome") == "CODPROD"
-        assert xml.text == "123"
+        assert xml.get("valor") == "123"
+        assert xml.text is None
+
+    def test_to_xml_without_value_omits_valor(self):
+        """Como ShouldSerializeValue (.NET), valor só é serializado se definido."""
+        xml = Criteria(name="CODPROD").to_xml()
+
+        assert "valor" not in xml.attrib
+        assert Criteria(name="CODPROD", value="").to_xml().get("valor") == ""
 
     def test_from_xml(self):
-        """Testa deserialização de XML."""
-        xml_str = '<criterio nome="CODPROD">123</criterio>'
+        """Testa deserialização do formato .NET (atributo valor)."""
+        xml_str = '<criterio nome="CODPROD" valor="123"/>'
         elem = etree.fromstring(xml_str)
         crit = Criteria.from_xml(elem)
-        
+
         assert crit.name == "CODPROD"
         assert crit.value == "123"
+
+    def test_from_xml_legacy_text(self):
+        """Testa deserialização do formato legado (valor no texto)."""
+        elem = etree.fromstring('<criterio nome="CODPROD">123</criterio>')
+        crit = Criteria.from_xml(elem)
+
+        assert crit.name == "CODPROD"
+        assert crit.value == "123"
+
+    def test_round_trip(self):
+        original = Criteria(name="NOMEPARC", value="O'Brien & Cia <1>")
+
+        assert Criteria.from_xml(original.to_xml()) == original
 
 
 class TestParameter:

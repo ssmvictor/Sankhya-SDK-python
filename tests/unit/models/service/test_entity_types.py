@@ -250,6 +250,41 @@ class TestEntityCriteria:
             assert [c.name for c in parsed.criteria] == ["CODPARC"]
             assert parsed.field_values == []
 
+    def test_criteria_value_serialized_as_valor_attribute(self):
+        """.NET Criteria.cs: Value em [XmlAttribute("valor")]."""
+        entity = Entity(name="Parceiro", criteria=[Criteria(name="CODPARC", value="1")])
+
+        criterios = entity.to_xml().findall("criterio")
+
+        assert [(c.get("nome"), c.get("valor"), c.text) for c in criterios] == [
+            ("CODPARC", "1", None)
+        ]
+
+    def test_criteria_from_dotnet_format(self):
+        element = etree.fromstring(
+            '<entity name="Parceiro"><criterio nome="CODPARC" valor="1"/></entity>'
+        )
+
+        parsed = Entity.from_xml(element)
+
+        assert [(c.name, c.value) for c in parsed.criteria] == [("CODPARC", "1")]
+
+    def test_crud_find_request_sends_valor_attribute(self):
+        """crud.find por chave (.NET HandleService: Entity.Criteria)."""
+        from sankhya_sdk.helpers.service_request_extensions import (
+            ServiceRequestExtensions,
+        )
+        from sankhya_sdk.models.transport import Partner
+
+        request = ServiceRequest(service=ServiceName.CRUD_FIND)
+        ServiceRequestExtensions.resolve_with_entity(request, Partner(code=1))
+
+        entity = _request_body(request).find("entity")
+        assert [(c.get("nome"), c.get("valor")) for c in entity.findall("criterio")] == [
+            ("CODPARC", "1")
+        ]
+        assert all(c.text is None for c in entity.findall("criterio"))
+
 
 class TestEntityCrudFields:
     """Campos de Entity usados por ServiceRequestExtensions (.NET Entity.cs)."""
