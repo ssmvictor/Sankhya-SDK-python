@@ -169,6 +169,10 @@ class PagedRequestWrapper:
         # Estado interno
         self._results_loaded = 0
         self._items: queue.Queue[EntityDynamicSerialization] = queue.Queue()
+        # Quantidade de itens de cada página, na ordem em que as páginas
+        # entram em _items (como o quantityLoaded do evento
+        # PageLoadedSuccessfully, usado por HandlePageLoaded no .NET)
+        self._page_sizes: queue.Queue[int] = queue.Queue()
         self._all_pages_loaded = threading.Event()
         self._load_error: Optional[Exception] = None
         self._results_lock = threading.Lock()
@@ -381,6 +385,7 @@ class PagedRequestWrapper:
             # Adiciona entidades à fila
             for entity in entities:
                 self._items.put(entity)
+            self._page_sizes.put(quantity_loaded)
             
             # Atualiza contador (thread-safe)
             with self._results_lock:
@@ -534,12 +539,19 @@ class PagedRequestWrapper:
         retorna itens incrementalmente via yield. Suporta callbacks
         de progresso e processamento on-demand.
         
+        Como ``HandlePageLoaded``/``LoadOnDemandData`` no .NET
+        (PagedRequestWrapper.cs:380-452), ``process_data`` recebe cada
+        página carregada (já convertida) antes que qualquer item dela seja
+        entregue; se ``process_data`` lançar exceção, os itens da página não
+        são entregues e a exceção é propagada.
+        
         Args:
             request: Requisição de serviço configurada
             entity_type: Tipo da entidade a retornar
             token: Token UUID da sessão Sankhya
             timeout: Timeout para a operação completa
-            process_data: Callback opcional para processar lotes de dados
+            process_data: Callback opcional chamado com os itens de cada
+                página antes de entregá-los
             max_results: Limite máximo de resultados (-1 = ilimitado)
             on_page_loaded: Callback quando página é carregada
             on_page_error: Callback quando ocorre erro
@@ -592,37 +604,12 @@ class PagedRequestWrapper:
         start_time = time.time()
         
         items_yielded = 0
-        batch: List[T] = []
-        batch_size = 50  # Tamanho do lote para process_data
         
         try:
             while True:
                 try:
-                    # Tenta obter item da fila com timeout curto
-                    item = wrapper._items.get(timeout=0.1)
-                    
-                    # Converte para tipo de entidade
-                    entity = item.convert_to_type(entity_type)
-                    
-                    # Adiciona ao lote se process_data fornecido
-                    if process_data:
-                        batch.append(entity)
-                        if len(batch) >= batch_size:
-                            process_data(batch)
-                            batch = []
-                    
-                    yield entity
-                    items_yielded += 1
-                    
-                    # Verifica max_results
-                    if max_results > 0 and items_yielded >= max_results:
-                        # Comment 4: Process pending batch before breaking due to max_results
-                        if process_data and batch:
-                            process_data(batch)
-                            batch = []
-                        cancel_event.set()
-                        break
-                        
+                    # Aguarda a próxima página carregada com timeout curto
+                    quantity = wrapper._page_sizes.get(timeout=0.1)
                 except queue.Empty:
                     # Comment 1: Check elapsed time against timeout
                     elapsed = time.time() - start_time
@@ -630,15 +617,15 @@ class PagedRequestWrapper:
                         # Timeout exceeded - signal cancellation and stop loader
                         cancel_event.set()
                         wrapper._all_pages_loaded.set()  # Signal to break consumers
-                        # Process any pending batch before raising
-                        if process_data and batch:
-                            process_data(batch)
                         raise TimeoutError(
                             f"Paged request timeout exceeded: {elapsed:.1f}s > {timeout_seconds}s"
                         )
                     
                     # Fila vazia - verifica se carregamento finalizou
                     if wrapper._all_pages_loaded.is_set():
+                        # A última página pode ter chegado depois da espera
+                        if not wrapper._page_sizes.empty():
+                            continue
                         # Comment 2: Check for load error and raise if present
                         if wrapper._load_error:
                             raise PagedRequestException(
@@ -646,9 +633,6 @@ class PagedRequestWrapper:
                                 inner_exception=wrapper._load_error,
                                 request=wrapper._request,
                             )
-                        # Processa último lote se houver
-                        if process_data and batch:
-                            process_data(batch)
                         break
                     
                     # Verifica se thread morreu
@@ -661,7 +645,28 @@ class PagedRequestWrapper:
                                 request=wrapper._request,
                             )
                         break
-                        
+                    continue
+                
+                # Como HandlePageLoaded/LoadOnDemandData (.NET): converte a
+                # página inteira e a processa antes de entregar qualquer item
+                page = [
+                    wrapper._items.get_nowait().convert_to_type(entity_type)
+                    for _ in range(quantity)
+                ]
+                if max_results > 0:
+                    page = page[: max_results - items_yielded]
+                if process_data and page:
+                    process_data(page)
+                
+                for entity in page:
+                    yield entity
+                    items_yielded += 1
+                
+                # Verifica max_results
+                if max_results > 0 and items_yielded >= max_results:
+                    cancel_event.set()
+                    break
+        
         except GeneratorExit:
             # Generator foi fechado prematuramente
             cancel_event.set()
@@ -754,6 +759,7 @@ class PagedRequestWrapper:
         self,
         cancel_event: asyncio.Event,
         items_queue: asyncio.Queue,
+        page_sizes: Optional[asyncio.Queue] = None,
     ) -> None:
         """
         Carrega todas as páginas de forma assíncrona.
@@ -761,6 +767,9 @@ class PagedRequestWrapper:
         Args:
             cancel_event: Evento para sinalizar cancelamento
             items_queue: Fila assíncrona para armazenar itens
+            page_sizes: Fila opcional que recebe a quantidade de itens de
+                cada página depois que eles entram em ``items_queue``
+                (``None`` ao final do carregamento)
         """
         current_page = 1
         
@@ -783,6 +792,8 @@ class PagedRequestWrapper:
                 # Adiciona entidades à fila assíncrona
                 for entity in entities:
                     await items_queue.put(entity)
+                if page_sizes is not None:
+                    await page_sizes.put(len(entities))
                 
                 # Comment 3: Invoke _dispatch_page_processed after page items are enqueued
                 self._dispatch_page_processed(current_page, quantity, total_pages)
@@ -805,6 +816,8 @@ class PagedRequestWrapper:
         finally:
             # Sinaliza fim do carregamento
             await items_queue.put(None)  # Sentinel value
+            if page_sizes is not None:
+                await page_sizes.put(None)
     
     # =========================================================================
     # Public Methods - Async Generator
@@ -829,12 +842,16 @@ class PagedRequestWrapper:
         Carrega páginas de resultados de forma assíncrona enquanto
         retorna itens incrementalmente via async yield.
         
+        Como em get_paged_results, ``process_data`` é aguardado com os itens
+        de cada página antes que qualquer item dela seja entregue.
+        
         Args:
             request: Requisição de serviço configurada
             entity_type: Tipo da entidade a retornar
             token: Token UUID da sessão Sankhya
             timeout: Timeout para a operação completa
-            process_data: Callback async opcional para processar lotes
+            process_data: Callback async opcional chamado com os itens de
+                cada página antes de entregá-los
             max_results: Limite máximo de resultados (-1 = ilimitado)
             on_page_loaded: Callback quando página é carregada
             on_page_error: Callback quando ocorre erro
@@ -869,13 +886,14 @@ class PagedRequestWrapper:
         if on_page_processed:
             wrapper.on_page_processed(on_page_processed)
         
-        # Fila assíncrona e evento de cancelamento
+        # Filas assíncronas (itens e tamanho de cada página) e evento de cancelamento
         items_queue: asyncio.Queue = asyncio.Queue()
+        page_sizes: asyncio.Queue = asyncio.Queue()
         cancel_event = asyncio.Event()
         
         # Inicia task de carregamento
         loader_task = asyncio.create_task(
-            wrapper._load_all_pages_async(cancel_event, items_queue)
+            wrapper._load_all_pages_async(cancel_event, items_queue, page_sizes)
         )
         
         # Comment 1: Track start time for timeout handling
@@ -883,8 +901,6 @@ class PagedRequestWrapper:
         start_time = time.time()
         
         items_yielded = 0
-        batch: List[T] = []
-        batch_size = 50
         
         try:
             while True:
@@ -895,57 +911,17 @@ class PagedRequestWrapper:
                         # Timeout exceeded - signal cancellation and stop loader
                         cancel_event.set()
                         await items_queue.put(None)  # Signal sentinel to break consumers
-                        # Process any pending batch before raising
-                        if process_data and batch:
-                            await process_data(batch)
                         raise TimeoutError(
                             f"Paged request timeout exceeded (async): {elapsed:.1f}s > {timeout_seconds}s"
                         )
                     
-                    # Aguarda item com timeout parcial (máximo 10 segundos)
+                    # Aguarda a próxima página com timeout parcial (máximo 10 segundos)
                     remaining = timeout_seconds - elapsed
                     wait_timeout = min(remaining, 10.0)
-                    item = await asyncio.wait_for(
-                        items_queue.get(),
+                    quantity = await asyncio.wait_for(
+                        page_sizes.get(),
                         timeout=wait_timeout,
                     )
-                    
-                    # Verifica sentinel (fim do carregamento)
-                    if item is None:
-                        # Comment 2: Check for load error and raise if present
-                        if wrapper._load_error:
-                            raise PagedRequestException(
-                                f"Erro durante carregamento: {wrapper._load_error}",
-                                inner_exception=wrapper._load_error,
-                                request=wrapper._request,
-                            )
-                        # Processa último lote
-                        if process_data and batch:
-                            await process_data(batch)
-                        break
-                    
-                    # Converte para tipo de entidade
-                    entity = item.convert_to_type(entity_type)
-                    
-                    # Processa em lotes se callback fornecido
-                    if process_data:
-                        batch.append(entity)
-                        if len(batch) >= batch_size:
-                            await process_data(batch)
-                            batch = []
-                    
-                    yield entity
-                    items_yielded += 1
-                    
-                    # Verifica max_results
-                    if max_results > 0 and items_yielded >= max_results:
-                        # Comment 4: Process pending batch before breaking due to max_results
-                        if process_data and batch:
-                            await process_data(batch)
-                            batch = []
-                        cancel_event.set()
-                        break
-                        
                 except asyncio.TimeoutError:
                     # Verifica se loader ainda está rodando
                     if loader_task.done():
@@ -956,13 +932,41 @@ class PagedRequestWrapper:
                                 inner_exception=wrapper._load_error,
                                 request=wrapper._request,
                             )
-                        # Processa último lote se houver
-                        if process_data and batch:
-                            await process_data(batch)
                         break
                     # Continua aguardando (timeout parcial expirou)
                     continue
-                    
+                
+                # Verifica sentinel (fim do carregamento)
+                if quantity is None:
+                    # Comment 2: Check for load error and raise if present
+                    if wrapper._load_error:
+                        raise PagedRequestException(
+                            f"Erro durante carregamento: {wrapper._load_error}",
+                            inner_exception=wrapper._load_error,
+                            request=wrapper._request,
+                        )
+                    break
+                
+                # Como HandlePageLoaded/LoadOnDemandData (.NET): converte a
+                # página inteira e a processa antes de entregar qualquer item
+                page = [
+                    items_queue.get_nowait().convert_to_type(entity_type)
+                    for _ in range(quantity)
+                ]
+                if max_results > 0:
+                    page = page[: max_results - items_yielded]
+                if process_data and page:
+                    await process_data(page)
+                
+                for entity in page:
+                    yield entity
+                    items_yielded += 1
+                
+                # Verifica max_results
+                if max_results > 0 and items_yielded >= max_results:
+                    cancel_event.set()
+                    break
+        
         except GeneratorExit:
             cancel_event.set()
             raise

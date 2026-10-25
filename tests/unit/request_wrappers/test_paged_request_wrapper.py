@@ -22,6 +22,7 @@ from sankhya_sdk.exceptions import (
     SankhyaException,
     ServiceRequestGeneralException,
 )
+from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerialization
 from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.models.service.basic_types import Field
 from sankhya_sdk.models.service.entity_types import DataSet, Entity
@@ -1059,6 +1060,254 @@ class TestPagedRequestErrorPropagation:
 
         assert isinstance(exc_info.value, SankhyaException)
         assert exc_info.value.request is request
+
+
+class TestPagedRequestProcessData:
+    """
+    Processamento on-demand por página (process_data).
+
+    No .NET (PagedRequestWrapper.cs:380-452) ``HandlePageLoaded`` converte a
+    página inteira e ``LoadOnDemandData`` chama ``processOnDemandData(temp)``
+    antes de adicionar os itens à coleção consumida; se o processamento
+    falhar (``cts.Cancel()``), os itens da página não são entregues.
+    """
+
+    @staticmethod
+    def _request() -> ServiceRequest:
+        return ServiceRequest(
+            service=ServiceName.CRUD_SERVICE_FIND,
+            request_body=RequestBody(data_set=DataSet(root_entity="Bairro")),
+        )
+
+    @staticmethod
+    def _page(first: int, last: int) -> ServiceResponse:
+        return _provider_entities_response(
+            [{"code": i, "name": f"Bairro {i}"} for i in range(first, last + 1)]
+        )
+
+    def test_process_data_runs_before_items_are_yielded(self):
+        """Os itens só chegam ao consumidor depois de processados."""
+        seen: List[str] = []
+        yielded_at_call: List[int] = []
+
+        def process_data(page: List[MockEntity]) -> None:
+            yielded_at_call.append(len(seen))
+            for item in page:
+                item.name = item.name.upper()
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=self._page(1, 10)
+        ):
+            for item in PagedRequestWrapper.get_paged_results(
+                self._request(),
+                MockEntity,
+                uuid.uuid4(),
+                timeout=timedelta(seconds=30),
+                process_data=process_data,
+            ):
+                seen.append(item.name)
+
+        assert seen == [f"BAIRRO {i}" for i in range(1, 11)]
+        assert yielded_at_call == [0]
+
+    def test_process_data_receives_each_page(self):
+        """process_data recebe cada página inteira (150 + 30), não lotes fixos."""
+        seen: List[int] = []
+        calls: List[tuple] = []
+
+        def process_data(page: List[MockEntity]) -> None:
+            calls.append((len(seen), [item.code for item in page]))
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_with_token",
+            side_effect=[self._page(1, 150), self._page(151, 180)],
+        ):
+            for item in PagedRequestWrapper.get_paged_results(
+                self._request(),
+                MockEntity,
+                uuid.uuid4(),
+                timeout=timedelta(seconds=30),
+                process_data=process_data,
+            ):
+                seen.append(item.code)
+
+        assert seen == list(range(1, 181))
+        assert calls == [(0, list(range(1, 151))), (150, list(range(151, 181)))]
+
+    def test_process_data_failure_delivers_no_item_of_the_page(self):
+        """Falha em process_data é propagada sem entregar os itens da página."""
+        seen: List[int] = []
+
+        def process_data(page: List[MockEntity]) -> None:
+            raise RuntimeError("falha no processamento")
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=self._page(1, 10)
+        ):
+            with pytest.raises(RuntimeError, match="falha no processamento"):
+                for item in PagedRequestWrapper.get_paged_results(
+                    self._request(),
+                    MockEntity,
+                    uuid.uuid4(),
+                    timeout=timedelta(seconds=30),
+                    process_data=process_data,
+                ):
+                    seen.append(item.code)
+
+        assert seen == []
+
+    def test_process_data_receives_only_items_within_max_results(self):
+        """Com max_results, process_data recebe só os itens que serão entregues."""
+        seen: List[int] = []
+        calls: List[tuple] = []
+
+        def process_data(page: List[MockEntity]) -> None:
+            calls.append((len(seen), len(page)))
+
+        with patch.object(
+            SankhyaContext, "service_invoker_with_token", return_value=self._page(1, 150)
+        ):
+            for item in PagedRequestWrapper.get_paged_results(
+                self._request(),
+                MockEntity,
+                uuid.uuid4(),
+                timeout=timedelta(seconds=30),
+                process_data=process_data,
+                max_results=20,
+            ):
+                seen.append(item.code)
+
+        assert seen == list(range(1, 21))
+        assert calls == [(0, 20)]
+
+    def test_last_page_enqueued_during_wait_is_delivered(self):
+        """
+        Página enfileirada entre a espera e a verificação de fim é entregue.
+
+        Simula a corrida: a espera pela próxima página expira (queue.Empty)
+        e, nesse intervalo, o carregador enfileira a última página e
+        sinaliza o fim da carga.
+        """
+        rows = [{"code": i, "name": f"Bairro {i}"} for i in (1, 2, 3)]
+
+        class _LoaderFinishesDuringWait(queue.Queue):
+            def __init__(self, wrapper: PagedRequestWrapper) -> None:
+                super().__init__()
+                self._wrapper = wrapper
+                self._raced = False
+
+            def get(self, block: bool = True, timeout: Optional[float] = None) -> Any:
+                if not self._raced:
+                    self._raced = True
+                    for row in rows:
+                        self._wrapper._items.put(EntityDynamicSerialization(dict(row)))
+                    self.put(len(rows))
+                    self._wrapper._all_pages_loaded.set()
+                    raise queue.Empty
+                return super().get(block, timeout)
+
+        original_init = PagedRequestWrapper.__init__
+
+        def init(self, *args: Any, **kwargs: Any) -> None:
+            original_init(self, *args, **kwargs)
+            self._page_sizes = _LoaderFinishesDuringWait(self)
+
+        with patch.object(PagedRequestWrapper, "__init__", init), patch.object(
+            PagedRequestWrapper, "_load_all_pages", lambda self, cancel_event: None
+        ):
+            results = list(
+                PagedRequestWrapper.get_paged_results(
+                    self._request(),
+                    MockEntity,
+                    uuid.uuid4(),
+                    timeout=timedelta(seconds=30),
+                )
+            )
+
+        assert [item.code for item in results] == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_process_data_runs_before_items_are_yielded_async(self):
+        """Versão assíncrona: os itens só chegam depois de processados."""
+        seen: List[str] = []
+        yielded_at_call: List[int] = []
+
+        async def process_data(page: List[MockEntity]) -> None:
+            yielded_at_call.append(len(seen))
+            for item in page:
+                item.name = item.name.upper()
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=self._page(1, 10),
+        ):
+            async for item in PagedRequestWrapper.get_paged_results_async(
+                self._request(),
+                MockEntity,
+                uuid.uuid4(),
+                timeout=timedelta(seconds=30),
+                process_data=process_data,
+            ):
+                seen.append(item.name)
+
+        assert seen == [f"BAIRRO {i}" for i in range(1, 11)]
+        assert yielded_at_call == [0]
+
+    @pytest.mark.asyncio
+    async def test_process_data_receives_each_page_async(self):
+        """Versão assíncrona: process_data recebe cada página inteira."""
+        seen: List[int] = []
+        calls: List[tuple] = []
+
+        async def process_data(page: List[MockEntity]) -> None:
+            calls.append((len(seen), [item.code for item in page]))
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            side_effect=[self._page(1, 150), self._page(151, 180)],
+        ):
+            async for item in PagedRequestWrapper.get_paged_results_async(
+                self._request(),
+                MockEntity,
+                uuid.uuid4(),
+                timeout=timedelta(seconds=30),
+                process_data=process_data,
+            ):
+                seen.append(item.code)
+
+        assert seen == list(range(1, 181))
+        assert calls == [(0, list(range(1, 151))), (150, list(range(151, 181)))]
+
+    @pytest.mark.asyncio
+    async def test_process_data_failure_delivers_no_item_of_the_page_async(self):
+        """Versão assíncrona: falha em process_data não entrega a página."""
+        seen: List[int] = []
+
+        async def process_data(page: List[MockEntity]) -> None:
+            raise RuntimeError("falha no processamento")
+
+        with patch.object(
+            SankhyaContext,
+            "service_invoker_async_with_token",
+            new_callable=AsyncMock,
+            return_value=self._page(1, 10),
+        ):
+            with pytest.raises(RuntimeError, match="falha no processamento"):
+                async for item in PagedRequestWrapper.get_paged_results_async(
+                    self._request(),
+                    MockEntity,
+                    uuid.uuid4(),
+                    timeout=timedelta(seconds=30),
+                    process_data=process_data,
+                ):
+                    seen.append(item.code)
+
+        assert seen == []
 
 
 # =============================================================================
