@@ -561,6 +561,76 @@ class TestSankhyaContextOnDemandDisposal:
             await AsyncOnDemandRequestFactory.finalize_all()
             await AsyncOnDemandRequestFactory.clear()
 
+    @pytest.mark.asyncio
+    async def test_async_exit_cancelled_while_draining_still_disposes(
+        self, mock_wrapper
+    ):
+        """
+        Task cancelada enquanto o ``async with`` drena os wrappers assíncronos.
+
+        Como ``asyncio.wait_for``/``asyncio.timeout`` expirando ou a falha de
+        outra task de um ``TaskGroup``: o ``CancelledError`` propaga, mas a
+        sessão principal ainda é finalizada e o contexto é descartado.
+        """
+        import asyncio
+
+        from sankhya_sdk.enums.service_name import ServiceName
+        from sankhya_sdk.models.transport.partner import Partner
+        from sankhya_sdk.request_wrappers.async_on_demand_request_factory import (
+            AsyncOnDemandRequestFactory,
+        )
+
+        ctx = SankhyaContext(mock_wrapper)
+        calls: list = []
+        session_wrapper = self._session_wrapper(calls)
+        send_started = asyncio.Event()
+        never_set = asyncio.Event()
+
+        async def slow_send(request):
+            # Envio lento: só termina com o cancelamento da task
+            calls.append("send")
+            send_started.set()
+            await never_set.wait()
+
+        session_wrapper.service_invoker_async = slow_send
+        await AsyncOnDemandRequestFactory.clear()
+        try:
+            with patch(
+                "sankhya_sdk.core.context.SankhyaWrapper",
+                return_value=session_wrapper,
+            ):
+                key = await AsyncOnDemandRequestFactory.create_instance(
+                    entity_type=Partner,
+                    service=ServiceName.CRUD_SERVICE_SAVE,
+                    cancel_event=asyncio.Event(),
+                    context=ctx,
+                )
+            on_demand = await AsyncOnDemandRequestFactory.get_instance_by_key(key)
+            # Abaixo do throughput: a entidade fica na fila até a saída
+            await on_demand.add(Partner(name="A"))
+
+            async def body():
+                async with ctx:
+                    pass
+
+            task = asyncio.create_task(body())
+            await send_started.wait()
+            task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+            assert ctx._disposed is True
+            mock_wrapper.dispose.assert_called_once()
+            with SankhyaContext._wrappers_lock:
+                assert ctx.token not in SankhyaContext._wrappers
+            # A sessão on-demand é liberada uma única vez, pelo próprio worker
+            assert calls == ["send", "dispose"]
+            assert len(ctx._on_demand_tokens) == 0
+        finally:
+            await AsyncOnDemandRequestFactory.finalize_all()
+            await AsyncOnDemandRequestFactory.clear()
+
 
 class TestSankhyaContextManager:
     """Tests for context manager protocol."""

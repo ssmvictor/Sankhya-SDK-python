@@ -882,20 +882,28 @@ class SankhyaContext:
             ``AsyncOnDemandRequestFactory.finalize_all()``, que o dispose()
             não consegue aguardar: cada worker assíncrono envia as entidades
             pendentes e só então libera a própria sessão.
-        """
-        if not self._disposed and self._has_on_demand_sessions():
-            # Import local: request_wrappers depende de core
-            from sankhya_sdk.request_wrappers.async_on_demand_request_factory import (
-                AsyncOnDemandRequestFactory,
-            )
 
-            try:
-                await AsyncOnDemandRequestFactory.finalize_all()
-            except Exception as e:
-                logger.warning(
-                    f"Erro ao finalizar on-demand wrappers assíncronos: {e}"
+            O dispose() roda mesmo se a task for cancelada durante essa
+            espera (ex.: ``asyncio.wait_for``/``asyncio.timeout`` expirando
+            ou falha de outra task de um ``TaskGroup``): ``CancelledError``
+            não é ``Exception``, e sem o ``finally`` a sessão principal
+            nunca seria finalizada.
+        """
+        try:
+            if not self._disposed and self._has_on_demand_sessions():
+                # Import local: request_wrappers depende de core
+                from sankhya_sdk.request_wrappers.async_on_demand_request_factory import (
+                    AsyncOnDemandRequestFactory,
                 )
-        self.dispose()
+
+                try:
+                    await AsyncOnDemandRequestFactory.finalize_all()
+                except Exception as e:
+                    logger.warning(
+                        f"Erro ao finalizar on-demand wrappers assíncronos: {e}"
+                    )
+        finally:
+            self.dispose()
 
     # ==========================================================================
     # Factory Methods
