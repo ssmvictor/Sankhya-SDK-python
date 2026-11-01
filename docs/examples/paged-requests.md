@@ -1,62 +1,95 @@
 # Requisições Paginadas
 
-Exemplos de consultas paginadas para grandes volumes de dados.
+Exemplos de consultas paginadas para grandes volumes de dados com o
+`PagedRequestWrapper` (API XML legada).
+
+O `PagedRequestWrapper` é usado pelos métodos de classe
+`get_paged_results` (generator) e `get_paged_results_async` (async
+generator). Eles recebem uma requisição `CRUDServiceProvider.loadRecords` já
+resolvida, o tipo da entidade e o token da sessão que fará as chamadas.
+As páginas são carregadas numa thread separada enquanto os itens, já
+convertidos para o tipo informado, são entregues.
 
 ## Uso Básico
 
 ```python
 from sankhya_sdk import SankhyaContext
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import LiteralCriteria, ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
 from sankhya_sdk.request_wrappers import PagedRequestWrapper
-from sankhya_sdk.transport_entities import Partner
-from dotenv import load_dotenv
 
-load_dotenv()
+# Requisição loadRecords com o critério literal
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+ServiceRequestExtensions.resolve_with_literal_criteria(
+    request, Partner, LiteralCriteria("ATIVO = 'S'")
+)
 
-with SankhyaContext.from_settings() as ctx:
-    paged = PagedRequestWrapper(ctx.wrapper)
-    
-    # Itera sobre todos os parceiros ativos
+ctx = SankhyaContext.from_settings()
+try:
+    # Itera sobre todos os parceiros ativos (sessão principal: ctx.token)
     count = 0
-    for partner in paged.get_paged_results(Partner, "ATIVO = 'S'"):
+    for partner in PagedRequestWrapper.get_paged_results(request, Partner, ctx.token):
         count += 1
-        print(f"{partner.code_partner}: {partner.name}")
-    
+        print(f"{partner.code}: {partner.name}")
+
     print(f"Total: {count} parceiros")
+finally:
+    ctx.dispose()
 ```
+
+Os demais exemplos usam `request` e `ctx` como acima.
 
 ---
 
 ## Configuração
 
-### Parâmetros do Wrapper
+### Montando a Requisição
 
 ```python
-paged = PagedRequestWrapper(
-    wrapper=ctx.wrapper,
-    page_size=100,        # Itens por página
-    max_results=5000,     # Limite total (0 = sem limite)
-    timeout=600,          # Timeout em segundos
-    enable_cache=True     # Cache em memória
-)
-```
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import LiteralCriteria, ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
 
-### Com Opções de Query
+# Todos os registros (sem critério)
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+ServiceRequestExtensions.resolve_generic(request, Partner)
 
-```python
-from sankhya_sdk.helpers import EntityQueryOptions
+# Critério a partir de uma entidade de exemplo (ATIVO = 'S' AND CLIENTE = 'S')
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+ServiceRequestExtensions.resolve_with_entity(request, Partner(is_active=True, is_client=True))
 
-options = EntityQueryOptions(
-    include_fields=["CODPARC", "NOMEPARC", "EMAIL"],
-    order_by="NOMEPARC ASC"
-)
-
-for partner in paged.get_paged_results_with_options(
+# Critério literal montado com a API fluente
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+ServiceRequestExtensions.resolve_with_literal_criteria(
+    request,
     Partner,
-    "ATIVO = 'S'",
-    options
-):
-    process(partner)
+    LiteralCriteria.equals("ATIVO", "S").and_(LiteralCriteria.is_not_null("EMAIL")),
+)
 ```
+
+Para escolher os campos retornados, monte o `DataSet` à mão (veja
+[Queries Avançadas](advanced-queries.md#requisicao-manual)); o wrapper
+preenche `page_number` e `pager_id` a cada página.
+
+### Parâmetros
+
+| Parâmetro | Padrão | Descrição |
+|-----------|--------|-----------|
+| `request` | - | Requisição `loadRecords` resolvida (é alterada a cada página) |
+| `entity_type` | - | Tipo da entidade retornada |
+| `token` | - | Token da sessão (`ctx.token` ou `ctx.acquire_new_session()`) |
+| `timeout` | 5 minutos (`timedelta`) | Tempo total da iteração; excedido, lança `TimeoutError` |
+| `process_data` | `None` | Recebe cada página antes que os itens dela sejam entregues |
+| `max_results` | `-1` (sem limite) | Limite total de itens |
+| `on_page_loaded` / `on_page_error` / `on_page_processed` | `None` | Callbacks de progresso |
+
+O tamanho da página é definido pelo servidor: como no SDK .NET, uma página
+com 150 ou 300 itens indica que há mais; qualquer outra quantidade (ou
+`max_results` atingido) encerra a paginação. Não há cache: cada iteração
+consulta o servidor de novo.
 
 ---
 
@@ -64,71 +97,91 @@ for partner in paged.get_paged_results_with_options(
 
 ### Monitorando Progresso
 
+Os callbacks recebem um `PagedRequestEventArgs` e rodam na thread de
+carregamento; o valor de retorno é ignorado e exceções são apenas
+registradas no log.
+
 ```python
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestWrapper
 from sankhya_sdk.value_objects import PagedRequestEventArgs
 
-def on_page_loaded(args: PagedRequestEventArgs):
+
+def on_page_loaded(args: PagedRequestEventArgs) -> None:
     """Chamado quando uma página é carregada."""
-    print(f"Página {args.current_page}/{args.total_pages}")
-    print(f"  Itens na página: {args.items_in_page}")
-    print(f"  Total processado: {args.total_processed}")
+    print(f"Página {args.current_page}/{args.total_pages or '?'}")
+    print(f"  Itens na página: {args.quantity_loaded}")
+    print(f"  Total carregado: {args.total_loaded}")
 
-def on_page_processed(args: PagedRequestEventArgs):
-    """Chamado quando uma página é processada."""
-    elapsed = args.elapsed_time_ms / 1000
-    print(f"  Processada em {elapsed:.2f}s")
 
-def on_error(args: PagedRequestEventArgs):
-    """Chamado em caso de erro."""
-    print(f"Erro na página {args.current_page}: {args.error}")
-    # Retorne True para continuar, False para parar
-    return True
+def on_page_processed(args: PagedRequestEventArgs) -> None:
+    """Chamado depois que os itens da página entram na fila."""
+    if args.progress_percentage is not None:
+        print(f"  Progresso: {args.progress_percentage:.0f}%")
 
-# Configura callbacks
-paged.on_page_loaded = on_page_loaded
-paged.on_page_processed = on_page_processed
-paged.on_error = on_error
 
-# Executa
-for partner in paged.get_paged_results(Partner, "CODPARC > 0"):
-    process(partner)
+def on_error(args: PagedRequestEventArgs) -> None:
+    """Chamado em caso de erro; a paginação é interrompida."""
+    print(f"Erro na página {args.current_page}: {args.exception}")
+
+
+partners = list(
+    PagedRequestWrapper.get_paged_results(
+        request,
+        Partner,
+        ctx.token,
+        on_page_loaded=on_page_loaded,
+        on_page_processed=on_page_processed,
+        on_page_error=on_error,
+    )
+)
 ```
+
+| Atributo | Descrição |
+|----------|-----------|
+| `entity_type` | Tipo da entidade |
+| `current_page` | Página atual (começa em 1) |
+| `quantity_loaded` | Itens da página |
+| `total_loaded` | Itens carregados até agora |
+| `total_pages` | Total informado pelo servidor (`None` se desconhecido) |
+| `exception` | Erro (em `on_page_error`) |
+| `has_error`, `is_complete`, `progress_percentage` | Propriedades derivadas |
 
 ---
 
 ## Processamento em Lote
 
-### Processar por Lotes
+### Processar por Página
+
+`process_data` recebe cada página já convertida antes que os itens dela
+sejam entregues pelo generator (como o `ProcessData` do .NET). Se
+`process_data` lançar exceção, os itens daquela página não são entregues e a
+exceção é propagada:
 
 ```python
-def process_batch(partners: list[Partner]):
-    """Processa um lote de parceiros."""
-    for partner in partners:
-        # Lógica de processamento
-        update_external_system(partner)
-    
-    return len(partners)
+from typing import List
 
-with SankhyaContext.from_settings() as ctx:
-    paged = PagedRequestWrapper(ctx.wrapper, page_size=50)
-    
-    batch = []
-    processed = 0
-    
-    for partner in paged.get_paged_results(Partner, "ATIVO = 'S'"):
-        batch.append(partner)
-        
-        # Processa a cada 50 itens
-        if len(batch) >= 50:
-            processed += process_batch(batch)
-            print(f"Processados: {processed}")
-            batch = []
-    
-    # Processa últimos itens
-    if batch:
-        processed += process_batch(batch)
-    
-    print(f"Total processado: {processed}")
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestWrapper
+
+processed = 0
+
+
+def process_batch(partners: List[Partner]) -> None:
+    """Processa uma página de parceiros."""
+    global processed
+    for partner in partners:
+        pass  # Lógica de processamento (ex.: enviar a um sistema externo)
+    processed += len(partners)
+    print(f"Processados: {processed}")
+
+
+for partner in PagedRequestWrapper.get_paged_results(
+    request, Partner, ctx.token, process_data=process_batch
+):
+    pass  # Os itens também são entregues aqui, depois de cada página
+
+print(f"Total processado: {processed}")
 ```
 
 ---
@@ -138,117 +191,126 @@ with SankhyaContext.from_settings() as ctx:
 ### Com max_results
 
 ```python
-with SankhyaContext.from_settings() as ctx:
-    paged = PagedRequestWrapper(
-        ctx.wrapper,
-        page_size=100,
-        max_results=500  # Máximo 500 resultados
-    )
-    
-    count = 0
-    for partner in paged.get_paged_results(Partner, "CODPARC > 0"):
-        count += 1
-        print(f"{count}: {partner.name}")
-    
-    print(f"Total: {count}")  # Máximo 500
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestWrapper
+
+count = 0
+for partner in PagedRequestWrapper.get_paged_results(
+    request, Partner, ctx.token, max_results=500  # Máximo 500 resultados
+):
+    count += 1
+    print(f"{count}: {partner.name}")
+
+print(f"Total: {count}")  # Máximo 500
 ```
 
 ### Interrupção Manual
 
+Interromper o `for` (ou fechar o generator) cancela o carregamento das
+próximas páginas:
+
 ```python
-with SankhyaContext.from_settings() as ctx:
-    paged = PagedRequestWrapper(ctx.wrapper)
-    
-    found_target = False
-    
-    for partner in paged.get_paged_results(Partner, "CODPARC > 0"):
-        if partner.name == "ALVO":
-            print(f"Encontrado: {partner.code_partner}")
-            found_target = True
-            break  # Para a iteração
-    
-    if not found_target:
-        print("Alvo não encontrado")
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestWrapper
+
+found_target = False
+
+for partner in PagedRequestWrapper.get_paged_results(request, Partner, ctx.token):
+    if partner.name == "ALVO":
+        print(f"Encontrado: {partner.code}")
+        found_target = True
+        break  # Para a iteração e o carregamento
+
+if not found_target:
+    print("Alvo não encontrado")
 ```
 
 ---
 
 ## Versão Assíncrona
 
+Não existem `AsyncSankhyaContext` nem `AsyncPagedRequestWrapper`: use
+`get_paged_results_async` com `async for`. Nela, `process_data` deve ser uma
+função assíncrona:
+
 ```python
 import asyncio
-from sankhya_sdk import AsyncSankhyaContext
-from sankhya_sdk.request_wrappers import AsyncPagedRequestWrapper
+from typing import List
 
-async def process_partners():
-    async with AsyncSankhyaContext.from_settings() as ctx:
-        paged = AsyncPagedRequestWrapper(ctx.wrapper)
-        
+from sankhya_sdk import SankhyaContext
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import LiteralCriteria, ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestWrapper
+
+
+async def save_page(partners: List[Partner]) -> None:
+    await asyncio.sleep(0)  # ex.: gravação assíncrona em outro sistema
+
+
+async def process_partners() -> None:
+    request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+    ServiceRequestExtensions.resolve_with_literal_criteria(
+        request, Partner, LiteralCriteria("ATIVO = 'S'")
+    )
+
+    ctx = SankhyaContext.from_settings()
+    async with ctx:
         count = 0
-        async for partner in paged.get_paged_results_async(
-            Partner,
-            "ATIVO = 'S'"
+        async for partner in PagedRequestWrapper.get_paged_results_async(
+            request, Partner, ctx.token, process_data=save_page
         ):
             count += 1
-            await process_async(partner)
-        
+
         print(f"Processados: {count}")
+
 
 asyncio.run(process_partners())
 ```
 
 ---
 
-## Cache de Resultados
+## Sessão Dedicada
+
+O token define a sessão usada nas chamadas. Para não disputar a sessão
+principal com outras operações, adquira uma sessão própria e finalize-a ao
+terminar:
 
 ```python
-with SankhyaContext.from_settings() as ctx:
-    paged = PagedRequestWrapper(
-        ctx.wrapper,
-        enable_cache=True  # Habilita cache
-    )
-    
-    # Primeira iteração - carrega da API
-    partners_1 = list(paged.get_paged_results(Partner, "ATIVO = 'S'"))
-    print(f"Primeira: {len(partners_1)} parceiros")
-    
-    # Segunda iteração - usa cache
-    partners_2 = list(paged.get_paged_results(Partner, "ATIVO = 'S'"))
-    print(f"Segunda: {len(partners_2)} parceiros (do cache)")
-    
-    # Limpar cache
-    paged.clear_cache()
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestWrapper
+
+token = ctx.acquire_new_session()  # Login extra
+try:
+    partners = list(PagedRequestWrapper.get_paged_results(request, Partner, token))
+finally:
+    ctx.finalize_session(token)  # Logout
 ```
 
 ---
 
 ## Tratamento de Erros
 
+Uma página que falha interrompe a paginação: o generator lança
+`PagedRequestException` (`sankhya_sdk.request_wrappers`), com a exceção da
+página em `inner_exception`. O wrapper não repete páginas; a única repetição
+é a política de retry do `SankhyaWrapper` (deadlock, timeout, sessão
+expirada...), aplicada a cada requisição antes de a página ser dada como
+falha (veja [Tratamento de Erros](../core-concepts/error-handling.md)).
+
 ```python
-from sankhya_sdk.exceptions import PagedRequestException
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestException, PagedRequestWrapper
 
-def on_error(args):
-    """Handler de erro que tenta recuperar."""
-    print(f"Erro na página {args.current_page}: {args.error}")
-    
-    # Tenta até 3 vezes
-    if args.retry_count < 3:
-        args.should_retry = True
-        args.retry_delay_ms = 1000 * (args.retry_count + 1)
-        return True  # Continuar
-    
-    return False  # Parar
-
-with SankhyaContext.from_settings() as ctx:
-    paged = PagedRequestWrapper(ctx.wrapper)
-    paged.on_error = on_error
-    
-    try:
-        for partner in paged.get_paged_results(Partner, "CODPARC > 0"):
-            process(partner)
-    except PagedRequestException as e:
-        print(f"Falha após retries: {e}")
-        print(f"Última página: {e.page_number}/{e.total_pages}")
+try:
+    for partner in PagedRequestWrapper.get_paged_results(request, Partner, ctx.token):
+        print(partner.name)
+except PagedRequestException as e:
+    page_error = e.inner_exception  # Exceção da página (com .page preenchido)
+    print(f"Falha na página {getattr(page_error, 'page', '?')}: {e}")
+except TimeoutError as e:
+    print(f"Tempo esgotado: {e}")
 ```
 
 ---
@@ -258,27 +320,27 @@ with SankhyaContext.from_settings() as ctx:
 ```python
 import csv
 
-with SankhyaContext.from_settings() as ctx:
-    paged = PagedRequestWrapper(ctx.wrapper, page_size=500)
-    
-    with open("partners.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Código", "Nome", "CNPJ/CPF", "Email"])
-        
-        count = 0
-        for partner in paged.get_paged_results(Partner, "ATIVO = 'S'"):
-            writer.writerow([
-                partner.code_partner,
-                partner.name,
-                partner.cgc_cpf or "",
-                partner.email or ""
-            ])
-            count += 1
-            
-            if count % 1000 == 0:
-                print(f"Exportados: {count}")
-        
-        print(f"Total exportado: {count}")
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestWrapper
+
+with open("partners.csv", "w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["Código", "Nome", "CNPJ/CPF", "Email"])
+
+    count = 0
+    for partner in PagedRequestWrapper.get_paged_results(request, Partner, ctx.token):
+        writer.writerow([
+            partner.code,
+            partner.name,
+            partner.document or "",
+            partner.email_address or "",
+        ])
+        count += 1
+
+        if count % 1000 == 0:
+            print(f"Exportados: {count}")
+
+    print(f"Total exportado: {count}")
 ```
 
 ---
@@ -293,81 +355,87 @@ Exemplo completo de requisições paginadas.
 Demonstra paginação com callbacks, progresso e exportação.
 """
 
-from sankhya_sdk import SankhyaContext
-from sankhya_sdk.request_wrappers import PagedRequestWrapper
-from sankhya_sdk.transport_entities import Partner
-from sankhya_sdk.value_objects import PagedRequestEventArgs
-from sankhya_sdk.exceptions import PagedRequestException
-from dotenv import load_dotenv
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Any, Dict, List
 
-load_dotenv()
+from sankhya_sdk import SankhyaContext
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import LiteralCriteria, ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import PagedRequestException, PagedRequestWrapper
+from sankhya_sdk.value_objects import PagedRequestEventArgs
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class PartnerExporter:
     """Exporta parceiros com paginação."""
-    
-    def __init__(self, context):
+
+    def __init__(self, context: SankhyaContext):
         self.context = context
-        self.paged = PagedRequestWrapper(
-            context.wrapper,
-            page_size=100,
-            timeout=600
-        )
-        self.paged.on_page_loaded = self._on_page_loaded
-        self.paged.on_error = self._on_error
         self.total = 0
         self.errors = 0
-    
-    def _on_page_loaded(self, args: PagedRequestEventArgs):
-        elapsed = args.elapsed_time_ms / 1000
+
+    def _on_page_loaded(self, args: PagedRequestEventArgs) -> None:
         logger.info(
-            f"Página {args.current_page}/{args.total_pages} "
-            f"({args.items_in_page} itens) em {elapsed:.2f}s"
+            f"Página {args.current_page}/{args.total_pages or '?'} "
+            f"({args.quantity_loaded} itens, {args.total_loaded} no total)"
         )
-    
-    def _on_error(self, args: PagedRequestEventArgs):
+
+    def _on_error(self, args: PagedRequestEventArgs) -> None:
         self.errors += 1
-        logger.error(f"Erro página {args.current_page}: {args.error}")
-        return True  # Continuar
-    
-    def export(self, criteria: str, output_file: str):
+        logger.error(f"Erro página {args.current_page}: {args.exception}")
+
+    def export(self, criteria: LiteralCriteria, output_file: str) -> None:
         """Exporta parceiros para JSON."""
-        partners = []
-        
+        request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+        ServiceRequestExtensions.resolve_with_literal_criteria(request, Partner, criteria)
+
+        partners: List[Dict[str, Any]] = []
+
         try:
-            for partner in self.paged.get_paged_results(Partner, criteria):
+            for partner in PagedRequestWrapper.get_paged_results(
+                request,
+                Partner,
+                self.context.token,
+                timeout=timedelta(minutes=10),
+                on_page_loaded=self._on_page_loaded,
+                on_page_error=self._on_error,
+            ):
                 partners.append({
-                    "codigo": partner.code_partner,
+                    "codigo": partner.code,
                     "nome": partner.name,
-                    "cnpj_cpf": partner.cgc_cpf,
-                    "email": partner.email,
-                    "tipo": partner.type_partner,
+                    "cnpj_cpf": partner.document,
+                    "email": partner.email_address,
+                    "tipo": partner.fiscal_type.value if partner.fiscal_type else None,
                 })
                 self.total += 1
         except PagedRequestException as e:
             logger.error(f"Paginação interrompida: {e}")
-        
+
         # Salva resultado
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump({
                 "exported_at": datetime.now().isoformat(),
                 "total": self.total,
                 "errors": self.errors,
-                "partners": partners
+                "partners": partners,
             }, f, indent=2, ensure_ascii=False)
-        
+
         logger.info(f"Exportados {self.total} parceiros para {output_file}")
 
 
-def main():
-    with SankhyaContext.from_settings() as ctx:
+def main() -> None:
+    ctx = SankhyaContext.from_settings()
+    try:
         exporter = PartnerExporter(ctx)
-        exporter.export("ATIVO = 'S'", "partners_export.json")
+        exporter.export(LiteralCriteria("ATIVO = 'S'"), "partners_export.json")
+    finally:
+        ctx.dispose()
 
 
 if __name__ == "__main__":
