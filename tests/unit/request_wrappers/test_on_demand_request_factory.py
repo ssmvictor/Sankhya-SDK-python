@@ -559,3 +559,55 @@ class TestOnDemandRequestFactoryFlushFromWorker:
             assert handler_flush_returned.is_set()
         finally:
             EventBus.unsubscribe(OnDemandRequestFailureEvent, handler)
+
+    def test_flush_all_from_failure_handler_with_two_failing_wrappers(self):
+        """
+        Dois wrappers falhando, com handler que só chama flush_all(), não travam.
+
+        Cada worker, no handler, chama o flush do outro enquanto o lote do
+        outro está em andamento: nenhum dos dois pode aguardar o outro.
+        """
+        from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
+        from sankhya_sdk.models.transport.partner import Partner
+
+        wait_timeout = 10.0
+        wrappers = []
+        for _ in range(2):
+            key = OnDemandRequestFactory.create_instance(
+                entity_type=Partner,
+                service=ServiceName.CRUD_SERVICE_SAVE,
+                cancel_token=threading.Event(),
+                throughput=10,
+            )
+            wrappers.append(OnDemandRequestFactory.get_instance_by_key(key))
+        failures = []
+        handler_lock = threading.Lock()
+
+        def handler(event: OnDemandRequestFailureEvent) -> None:
+            # Sem contexto todo envio falha (ex.: servidor fora do ar)
+            with handler_lock:
+                failures.append(event.entity.name)
+            OnDemandRequestFactory.flush_all()
+
+        EventBus.subscribe(OnDemandRequestFailureEvent, handler)
+        try:
+            wrappers[0].add(Partner(name="A"))
+            wrappers[1].add(Partner(name="B"))
+            flusher = threading.Thread(target=wrappers[0].flush, daemon=True)
+            flusher.start()
+            flusher.join(wait_timeout)
+
+            assert not flusher.is_alive(), "flush() externo travou"
+
+            # O flush pedido pelo handler do primeiro worker envia "B"
+            finalizer = threading.Thread(
+                target=OnDemandRequestFactory.finalize_all, daemon=True
+            )
+            finalizer.start()
+            finalizer.join(wait_timeout)
+
+            assert not finalizer.is_alive(), "finalize_all() travou"
+            assert [w._worker.is_alive() for w in wrappers] == [False, False]
+            assert sorted(failures) == ["A", "B"]
+        finally:
+            EventBus.unsubscribe(OnDemandRequestFailureEvent, handler)

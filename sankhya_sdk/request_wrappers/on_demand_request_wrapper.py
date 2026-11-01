@@ -55,6 +55,15 @@ _MAX_RETRY_COUNT = 3
 # (WaitHandle.WaitAny no .NET): o cancel_token é verificado neste intervalo
 _CANCEL_POLL_INTERVAL_SECONDS = 0.1
 
+# Marca as threads worker de qualquer OnDemandRequestWrapper (ver flush):
+# um worker que aguardasse o lote de outro wrapper poderia travar em ciclo
+_worker_thread_state = threading.local()
+
+
+def _is_on_demand_worker_thread() -> bool:
+    """Indica se a thread atual é a thread worker de um OnDemandRequestWrapper."""
+    return getattr(_worker_thread_state, "is_worker", False)
+
 
 class OnDemandRequestWrapper(Generic[TEntity]):
     """
@@ -228,8 +237,10 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         chamada aguarda o seu próprio alvo: o fim do flush de outra thread
         não a libera antes da hora.
         
-        Na thread worker (ex.: em um handler de OnDemandRequestFailureEvent)
-        o flush é apenas solicitado, sem aguardar.
+        Em uma thread worker, deste ou de outro OnDemandRequestWrapper (ex.:
+        em um handler de OnDemandRequestFailureEvent que chama
+        ``OnDemandRequestFactory.flush_all()``), o flush é apenas
+        solicitado, sem aguardar.
         """
         if self._disposed:
             return
@@ -242,12 +253,18 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         self._flush_event.set()
         self._work_available.set()
         
-        # Chamado na própria thread worker (ex.: handler de
-        # OnDemandRequestFailureEvent): só ela processa a fila, então
-        # aguardar aqui travaria o wrapper para sempre. O pedido fica
-        # registrado e o worker o atende na próxima iteração; no .NET esse
-        # Flush também não bloqueia (OnDemandRequestWrapper.cs:127-141).
-        if threading.current_thread() is self._worker:
+        # Chamado em uma thread worker (ex.: handler de
+        # OnDemandRequestFailureEvent): na própria, só ela processa a fila,
+        # então aguardar aqui travaria o wrapper para sempre; na de outro
+        # wrapper, dois workers que chamassem o flush um do outro (ex.:
+        # flush_all() no handler, com os dois falhando) aguardariam o lote em
+        # andamento um do outro para sempre. O pedido fica registrado e o
+        # worker o atende na próxima iteração; no .NET o Flush também não
+        # aguarda o worker (OnDemandRequestWrapper.cs:127-141).
+        if (
+            threading.current_thread() is self._worker
+            or _is_on_demand_worker_thread()
+        ):
             return
         
         # Aguarda conclusão do flush. Worker já encerrado (ex.: após
@@ -321,6 +338,9 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         Equivalente a ``Process`` do .NET (OnDemandRequestWrapper.cs:144-165):
         processa até que cancelamento ou dispose encontrem a fila vazia.
         """
+        # Marca a thread como worker: flush() chamado nela não aguarda
+        was_worker = _is_on_demand_worker_thread()
+        _worker_thread_state.is_worker = True
         try:
             while True:
                 try:
@@ -334,6 +354,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             with self._flush_cond:
                 self._flush_cond.notify_all()
             self._release_session()
+            _worker_thread_state.is_worker = was_worker
             logger.debug("Worker thread finalizado")
 
     def _release_session(self) -> None:
