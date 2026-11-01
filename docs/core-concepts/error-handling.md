@@ -453,7 +453,16 @@ Quando a resposta tem `status="0"` (`ServiceResponseStatus.ERROR`), o
 `SankhyaWrapper` chama `StatusMessageHelper.process_status_message`, que
 converte a `statusMessage` na exceção correspondente (veja a tabela em
 [Exceções](../api-reference/exceptions.md#como-o-sdk-escolhe-a-excecao)).
-A mensagem original continua acessível pela resposta guardada na exceção:
+
+O servidor envia a `statusMessage` em Base64. Como o SDK .NET, o SDK a
+decodifica ao ler a resposta (UTF-8, ou ISO-8859-1 como alternativa) antes
+de procurar os trechos conhecidos; um texto que não seja Base64 válido é
+mantido como veio. Por isso mensagens reais como deadlock, timeout ou sessão
+expirada viram as exceções específicas, e não
+`ServiceRequestUnexpectedResultException`.
+
+A mensagem original (já decodificada) continua acessível pela resposta
+guardada na exceção:
 
 ```python
 from sankhya_sdk.exceptions import ServiceRequestGeneralException

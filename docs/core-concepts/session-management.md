@@ -210,13 +210,21 @@ graph TD
     com vários contextos, chame `dispose()` só quando nenhum deles for mais
     usado, e use `finalize_session(token)` para liberar sessões individuais.
 
+    Com sessões on-demand, o `dispose()` chama antes
+    `OnDemandRequestFactory.finalize_all()` (como o .NET): cada worker envia
+    o restante da fila e libera a própria sessão antes do logout das demais.
+    Os `AsyncOnDemandRequestWrapper` só são aguardados na saída de
+    `async with ctx:`; fora dele, aguarde
+    `AsyncOnDemandRequestFactory.finalize_all()` antes do `dispose()`.
+
 ### Sessões dos Request Wrappers
 
 | Wrapper | Sessão usada |
 |---------|--------------|
 | `SimpleCRUDRequestWrapper.initialize(ctx)` | Adquire uma sessão dedicada (`ServiceRequestType.SIMPLE_CRUD`, um login extra), finalizada por `SimpleCRUDRequestWrapper.dispose()` |
-| `KnowServicesRequestWrapper.initialize(ctx)` | Usa a sessão principal do contexto (não faz login extra); `dispose()` não a encerra |
-| `KnowServicesRequestWrapper.initialize()` | Cria um contexto e adquire uma sessão própria (`KNOW_SERVICES`), finalizada por `dispose()` |
+| `SimpleCRUDRequestWrapper.initialize()` (ou `with SimpleCRUDRequestWrapper():`) | Cria um contexto próprio e adquire dele a sessão dedicada; `dispose()` encerra as duas sessões, sem afetar outros contextos |
+| `KnowServicesRequestWrapper.initialize(ctx)` | Usa a sessão principal do contexto (não faz login extra); `dispose()` não a encerra. Divergência do .NET, que sempre adquire uma sessão `KnowServices` própria |
+| `KnowServicesRequestWrapper.initialize()` | Cria um contexto próprio e adquire dele uma sessão `KNOW_SERVICES`; `dispose()` encerra as duas sessões |
 | `PagedRequestWrapper.get_paged_results(..., token)` | Usa a sessão do token informado (ex.: `ctx.token`) |
 | `OnDemandRequestFactory.create_instance(..., context=ctx)` | Adquire uma sessão `ON_DEMAND_CRUD` própria, finalizada quando o worker do wrapper termina |
 

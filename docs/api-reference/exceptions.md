@@ -96,7 +96,9 @@ from sankhya_sdk.auth import (
 
 Quando o servidor responde com `status="0"`, o `StatusMessageHelper`
 procura trechos conhecidos na `statusMessage` e lança a exceção
-correspondente (porta do `StatusMessageHelper` do SDK .NET). Alguns exemplos:
+correspondente (porta do `StatusMessageHelper` do SDK .NET). A
+`statusMessage` chega em Base64 e é decodificada antes da busca, como no
+.NET (texto que não é Base64 válido é usado como veio). Alguns exemplos:
 
 | Trecho da mensagem do servidor | Exceção |
 |--------------------------------|---------|
@@ -581,9 +583,10 @@ Classe base para erros HTTP do Gateway.
 
 | Atributo | Tipo | Descrição |
 |----------|------|-----------|
-| `message` | `str` | Mensagem de erro |
 | `status_code` | `int` | Código HTTP |
 | `response_body` | `str` | Corpo da resposta |
+
+Não há atributo `message`: a mensagem é `str(e)`.
 
 #### Uso
 
@@ -593,7 +596,7 @@ from sankhya_sdk.exceptions import SankhyaHttpError
 try:
     result = client.load_records("Parceiro", ["CODPARC"])
 except SankhyaHttpError as e:
-    print(f"HTTP {e.status_code}: {e.message}")
+    print(f"HTTP {e.status_code}: {e}")
     print(f"Resposta: {e.response_body}")
 ```
 
@@ -673,7 +676,7 @@ from sankhya_sdk.exceptions import SankhyaClientError
 try:
     result = client.save_record("Parceiro", {"CAMPO_INVALIDO": "valor"})
 except SankhyaClientError as e:
-    print(f"Erro {e.status_code}: {e.message}")
+    print(f"Erro {e.status_code}: {e}")
 ```
 
 **Quando ocorre**:
