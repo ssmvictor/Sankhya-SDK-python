@@ -27,7 +27,12 @@ class OnDemandRequestFailureEvent:
     
     Attributes:
         entity: A entidade que falhou ao ser processada.
-        is_update: True se a operação era uma atualização, False se era criação.
+        is_update: True se a requisição que falhou era de salvamento
+            (``ServiceName.CRUD_SERVICE_SAVE``, que inclui ou altera o
+            registro); False para qualquer outro serviço, como a remoção
+            (``ServiceName.CRUD_SERVICE_REMOVE``). Como no .NET, os wrappers
+            on-demand publicam ``service == CRUD_SERVICE_SAVE``
+            (OnDemandRequestWrapper.cs:309-315).
         exception: A exceção que causou a falha.
         error_message: Mensagem de erro opcional para contexto adicional.
         retry_count: Número de tentativas que foram feitas.
@@ -55,7 +60,15 @@ class OnDemandRequestFailureEvent:
 
     @property
     def operation_type(self) -> str:
-        """Retorna o tipo de operação como string legível."""
+        """
+        Retorna ``is_update`` como string: ``"update"`` ou ``"create"``.
+
+        ``"update"`` indica falha de salvamento (``CRUD_SERVICE_SAVE``).
+        Apesar do nome, ``"create"`` não indica uma inclusão: é retornado
+        sempre que ``is_update`` é False, ou seja, para qualquer serviço
+        diferente de ``CRUD_SERVICE_SAVE`` (ex.: remoção). Para decidir o
+        tratamento, prefira ``is_update``.
+        """
         return "update" if self.is_update else "create"
 
 
