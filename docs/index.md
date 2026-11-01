@@ -78,25 +78,31 @@ result = client.load_records(
 
 ```python
 from sankhya_sdk import SankhyaContext
+from sankhya_sdk.helpers import EntityQueryOptions
+from sankhya_sdk.models.transport import Partner
 from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
-from sankhya_sdk.transport_entities import Partner
-from dotenv import load_dotenv
 
-load_dotenv()
+# Configuração lida de SANKHYA_URL, SANKHYA_PORT, SANKHYA_USERNAME e
+# SANKHYA_PASSWORD (ambiente ou .env)
+ctx = SankhyaContext.from_settings()
+try:
+    SimpleCRUDRequestWrapper.initialize(ctx)  # sessão dedicada
+    partners = SimpleCRUDRequestWrapper.find_all(
+        Partner(is_active=True), EntityQueryOptions(max_results=10)
+    )
 
-with SankhyaContext.from_settings() as ctx:
-    crud = SimpleCRUDRequestWrapper(ctx.wrapper)
-    partners = crud.find(Partner, "ATIVO = 'S'", max_results=10)
-    
     for partner in partners:
-        print(f"{partner.code_partner}: {partner.name}")
+        print(f"{partner.code}: {partner.name}")
+finally:
+    SimpleCRUDRequestWrapper.dispose()
+    ctx.dispose()
 ```
 
 ## Recursos Principais
 
 | Recurso | Descrição |
-|---------|-----------|\
-| **Operações CRUD** | Find, Insert, Update, Remove com entidades tipadas |
+|---------|-----------|
+| **Operações CRUD** | Find, Update (inclusão e alteração) e Remove com entidades tipadas |
 | **JSON Gateway** | Cliente moderno para API Gateway com DTOs Pydantic |
 | **Paginação** | Consultas paginadas para grandes volumes de dados |
 | **Sessões** | Gerenciamento de múltiplas sessões e multi-threading |

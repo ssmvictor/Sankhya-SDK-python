@@ -21,8 +21,9 @@ Este guia descreve como migrar integrações existentes do padrão XML para o no
 ```python
 from sankhya_sdk.core import SankhyaContext
 
+# Login com SANKHYA_USERNAME / SANKHYA_PASSWORD
 with SankhyaContext.from_settings() as wrapper:
-    # usa username/password
+    print(wrapper.session_id)
 ```
 
 **Depois (JSON Gateway):**
@@ -43,9 +44,15 @@ client = GatewayClient(session)
 
 **Antes:**
 ```python
-request = ServiceRequest(service=ServiceName.CRUD_FIND)
-request.root_entity = "Parceiro"
-request.fields = ["CODPARC", "NOMEPARC"]
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.models.service import DataSet, Entity, Field, LiteralCriteria, ServiceRequest
+
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
+request.request_body.data_set = DataSet(
+    root_entity="Parceiro",
+    entities=[Entity(path="", fields=[Field(name="CODPARC"), Field(name="NOMEPARC")])],
+    literal_criteria=LiteralCriteria(expression="ATIVO = 'S'"),
+)
 response = wrapper.service_invoker(request)
 ```
 
@@ -64,9 +71,17 @@ result = client.load_records(
 
 **Antes:**
 ```python
-request = ServiceRequest(service=ServiceName.CRUD_SAVE)
-# ...configurar entidade...
+from sankhya_sdk.enums import ServiceName
+from sankhya_sdk.helpers import ServiceRequestExtensions
+from sankhya_sdk.models.service import ServiceRequest
+from sankhya_sdk.models.transport import Partner
+
+request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
+ServiceRequestExtensions.resolve_with_entity(
+    request, Partner(name="Novo", code_city=10, is_active=True)
+)
 response = wrapper.service_invoker(request)
+# ou: SimpleCRUDRequestWrapper.update(Partner(...))
 ```
 
 **Depois:**

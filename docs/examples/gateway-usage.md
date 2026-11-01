@@ -365,17 +365,24 @@ def execute_with_retry(client, service, body, max_retries=3):
 ### Antes (SankhyaContext)
 
 ```python
-# Código antigo
+# Código antigo (API XML legada)
 from sankhya_sdk import SankhyaContext
+from sankhya_sdk.helpers import EntityQueryOptions
+from sankhya_sdk.models.transport import Partner
 from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
-from sankhya_sdk.transport_entities import Partner
 
-with SankhyaContext.from_settings() as ctx:
-    crud = SimpleCRUDRequestWrapper(ctx.wrapper)
-    partners = crud.find(Partner, "ATIVO = 'S'", max_results=10)
-    
+ctx = SankhyaContext.from_settings()
+try:
+    SimpleCRUDRequestWrapper.initialize(ctx)
+    partners = SimpleCRUDRequestWrapper.find_all(
+        Partner(is_active=True), EntityQueryOptions(max_results=10)
+    )
+
     for p in partners:
-        print(f"{p.code_partner}: {p.name}")
+        print(f"{p.code}: {p.name}")
+finally:
+    SimpleCRUDRequestWrapper.dispose()
+    ctx.dispose()
 ```
 
 ### Depois (GatewayClient)

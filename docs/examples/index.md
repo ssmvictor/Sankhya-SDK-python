@@ -89,7 +89,7 @@ Exemplos práticos de uso do Sankhya SDK Python.
 |---------|-----------|
 | [DTOs e Validação](gateway-usage.md#usando-dtos) | Validação com Pydantic |
 | [Paginação](paged-requests.md) | Grandes volumes |
-| [Filtros complexos](advanced-queries.md#filtros-compostos) | FilterExpression |
+| [Filtros complexos](advanced-queries.md#filtros-compostos) | LiteralCriteria |
 | [Tratamento de erros](error-handling.md) | Exceções e retry |
 
 ### Avançado

@@ -306,11 +306,11 @@ from sankhya_sdk.exceptions import SankhyaHttpError, SankhyaAuthError
 try:
     response = client.load_records("Parceiro", ["CODPARC"])
     
+except AuthNetworkError as e:  # subclasse de AuthError: vem antes
+    print(f"Erro de rede: {e.message}")
+    
 except AuthError as e:
     print(f"Erro de autenticacao: {e.message}")
-    
-except AuthNetworkError as e:
-    print(f"Erro de rede: {e.message}")
     
 except SankhyaAuthError:
     print("Token expirado ou invalido")
