@@ -1,232 +1,156 @@
 # Validações
 
-Documentação do sistema de validação de entidades.
+Documentação das validações da API XML legada.
 
 ## Visão Geral
 
-O SDK inclui um sistema de validação para garantir integridade dos dados antes de enviar à API:
+O SDK valida em três níveis:
+
+| Nível | Onde | O que valida |
+|-------|------|--------------|
+| Valores da entidade | Pydantic, na criação e na atribuição | Tipos e limites (`entity_custom_data(max_length=...)`) |
+| Estrutura do tipo de entidade | `EntityValidator` | Se a classe segue as regras do SDK (`@entity`, base, campos) |
+| Mensagens de erro do servidor | `EntityValidation` | Padrões regex para interpretar a `statusMessage` |
 
 ```python
-from sankhya_sdk.validations import EntityValidator, EntityValidation
+from sankhya_sdk.validations import EntityValidation, EntityValidator
+```
+
+Não existem `ValidationResult`, `validate(entity)` nem regras de campos
+obrigatórios por operação: os dados são validados pelo Pydantic, e o
+servidor valida as regras de negócio (os erros viram exceções, veja
+[Exceções](exceptions.md)).
+
+---
+
+## Validação de Valores (Pydantic)
+
+As entidades de transporte (`sankhya_sdk.models.transport`) são modelos
+Pydantic com `validate_assignment`: tipos inválidos e limites de tamanho
+lançam `pydantic.ValidationError` (subclasse de `ValueError`) antes de
+qualquer requisição.
+
+```python
+from pydantic import ValidationError
+
+from sankhya_sdk.models.transport import Partner
+
+try:
+    # COMPLEMENTO aceita no máximo 30 caracteres
+    Partner(name="Cliente", address_complement="x" * 40)
+except ValidationError as e:
+    print(f"Inválido: {e.errors()[0]['msg']}")
+
+partner = Partner(code=1)
+try:
+    partner.code = "não é número"  # Também validado na atribuição
+except ValidationError as e:
+    print(f"Inválido: {e.errors()[0]['type']}")
 ```
 
 ---
 
 ## EntityValidator
 
-Validador principal de entidades.
+Valida a **estrutura de classes** de entidade (porta do `EntityValidator` do
+.NET), útil em testes de entidades customizadas. Não valida valores de uma
+instância.
 
-### Uso Básico
+| Método | Descrição |
+|--------|-----------|
+| `validate_entity(entity_type)` | Valida uma classe; lança `EntityValidationError` (ou subclasse) se inválida |
+| `validate_entities(module)` | Valida as classes de entidade definidas no módulo; retorna os nomes validados |
+| `implements_equality(entity_type)` | Se a classe define `__eq__` e `__hash__` |
+
+Regras verificadas:
+
+| Regra | Exceção |
+|-------|---------|
+| Construtor sem parâmetros obrigatórios | `MissingConstructorError` |
+| Decorador `@entity` | `MissingEntityAttributeError` |
+| Herança de `TransportEntityBase` | `MissingBaseClassError` |
+| `__eq__` e `__hash__` | `MissingEqualityMethodsError` |
+| Campos com metadados válidos (elemento, referência ou ignorado) | `InvalidPropertyAttributeError` |
+| Método de serialização | `MissingSerializeMethodError` |
+
+Todas derivam de `EntityValidationError` (`sankhya_sdk.validations`), que
+tem o atributo `entity_type`.
 
 ```python
+from typing import Optional
+
+from sankhya_sdk.attributes import entity, entity_element, entity_key
+from sankhya_sdk.models.transport.base import TransportEntityBase
+from sankhya_sdk.validations import EntityValidationError, EntityValidator
+
+
+@entity("MinhaEntidade")
+class MinhaEntidade(TransportEntityBase):
+    code: Optional[int] = entity_key(entity_element("CODIGO", default=None))
+    name: Optional[str] = entity_element("NOME", default=None)
+
+
+class SemDecorador(TransportEntityBase):
+    code: Optional[int] = entity_key(entity_element("CODIGO", default=None))
+
+
+EntityValidator.validate_entity(MinhaEntidade)  # OK, sem exceção
+
+try:
+    EntityValidator.validate_entity(SemDecorador)
+except EntityValidationError as e:
+    print(f"{type(e).__name__}: {e}")
+    # MissingEntityAttributeError: Validation error for entity 'SemDecorador': ...
+```
+
+Para validar todas as entidades de um módulo (ex.: num teste):
+
+```python
+import sankhya_sdk.models.transport.partner as partner_module
 from sankhya_sdk.validations import EntityValidator
-from sankhya_sdk.transport_entities import Partner
 
-validator = EntityValidator()
-
-partner = Partner()
-partner.name = "Cliente"  # Faltando código (chave)
-
-result = validator.validate(partner)
-
-if not result.is_valid:
-    for error in result.errors:
-        print(f"Campo: {error.field}")
-        print(f"Erro: {error.message}")
-```
-
-### Métodos
-
-#### `validate(entity) -> ValidationResult`
-
-Valida uma entidade.
-
-```python
-result = validator.validate(partner)
-```
-
-#### `validate_many(entities) -> list[ValidationResult]`
-
-Valida múltiplas entidades.
-
-```python
-results = validator.validate_many(partners)
-for i, result in enumerate(results):
-    if not result.is_valid:
-        print(f"Entidade {i}: {result.errors}")
-```
-
-#### `validate_for_operation(entity, operation) -> ValidationResult`
-
-Valida para operação específica.
-
-```python
-from sankhya_sdk.enums import OperationType
-
-# Insert requer mais campos que Update
-result = validator.validate_for_operation(partner, OperationType.INSERT)
-```
-
-### Regras de Validação
-
-| Regra | Descrição |
-|-------|-----------|
-| Campos obrigatórios | Verifica se campos `required=True` estão preenchidos |
-| Tipos de dados | Verifica se tipos estão corretos |
-| Tamanho máximo | Verifica `max_length` em strings |
-| Chaves | Verifica se chaves estão preenchidas (para update/delete) |
-| Referências | Valida referências entre entidades |
-
----
-
-## ValidationResult
-
-Resultado de uma validação.
-
-### Atributos
-
-| Atributo | Tipo | Descrição |
-|----------|------|-----------|
-| `is_valid` | `bool` | Se validação passou |
-| `errors` | `list[EntityValidation]` | Lista de erros |
-| `warnings` | `list[EntityValidation]` | Lista de avisos |
-
-### Métodos
-
-#### `raise_if_invalid() -> None`
-
-Lança exceção se inválido.
-
-```python
-result = validator.validate(partner)
-result.raise_if_invalid()  # Lança OperationException se inválido
-```
-
-#### `to_dict() -> dict`
-
-Converte para dicionário.
-
-```python
-data = result.to_dict()
-# {"is_valid": False, "errors": [...], "warnings": [...]}
+print(EntityValidator.validate_entities(partner_module))  # ['Partner']
 ```
 
 ---
 
 ## EntityValidation
 
-Representa um erro ou aviso de validação.
+Padrões regex (pré-compilados) para interpretar mensagens de erro do
+servidor, usados pelo `StatusMessageHelper` (porta do `EntityValidation` do
+.NET). Cada padrão tem um método `match_*` que retorna um `re.Match` (ou
+`None`) com grupos nomeados.
 
-### Atributos
+| Método | Mensagem reconhecida | Grupos |
+|--------|----------------------|--------|
+| `match_property_value_error` | `erro ao obter valor da propriedade 'X'` | `propertyName` |
+| `match_property_name_error` | `Descritor do campo 'X' inválido` | `propertyName` |
+| `match_property_name_invalid` | `Nome de coluna 'X' inválido` | `propertyName` |
+| `match_property_name_association` | `O identificador de várias partes "E.X" não pôde ser associado` | `entity`, `propertyName` |
+| `match_property_not_found` | `Campo não existe: E->X` | `entity`, `propertyName` |
+| `match_property_width_error` | `Propriedade 'X' com largura acima do limite: (40 > 30)` | `propertyName`, `currentWidth`, `widthAllowed` |
+| `match_foreign_key_restriction` | conflito com restrição `FOREIGN KEY` | `constraintName`, ... |
+| `match_missing_attribute` | `É necessário informar o atributo 'X'` | `attributeName` |
+| `match_missing_relation` | `Relacionamento: 'R' não encontrado em: 'E'` | `missingRelation`, `entity` |
+| `match_business_rule_restriction` | `A regra "R" não permitiu a operação.` | `ruleName`, `errorMessage` |
+| `match_duplicated_document` | `CNPJ/CPF já existente para o parceiro: 'N'` | `name` |
+| `match_full_transaction_logs` | `Log de transações do banco de dados 'D' cheio` | `database` |
+| `match_reference_first_level` / `match_reference_second_level` | Nomes de campo de referência (`ENTIDADE_CAMPO`) | `entity`, `field` (e `parentEntity`) |
 
-| Atributo | Tipo | Descrição |
-|----------|------|-----------|
-| `field` | `str` | Nome do campo |
-| `message` | `str` | Mensagem de erro |
-| `severity` | `str` | Severidade (ERROR/WARNING) |
-| `code` | `str \| None` | Código do erro |
-
-### Factory Methods
+Os padrões também estão disponíveis como atributos
+(`EntityValidation.PROPERTY_WIDTH_ERROR_PATTERN`, ...).
 
 ```python
 from sankhya_sdk.validations import EntityValidation
 
-# Erro de campo obrigatório
-error = EntityValidation.required_field("NOMEPARC", "Nome do parceiro é obrigatório")
+error_text = "Propriedade 'COMPLEMENTO' com largura acima do limite: (40 > 30)"
 
-# Erro de tipo
-error = EntityValidation.invalid_type("CODPARC", "int", "str")
-
-# Erro de tamanho
-error = EntityValidation.max_length_exceeded("DESCRICAO", 100, 150)
-
-# Erro customizado
-error = EntityValidation.custom("VALOR", "Valor não pode ser negativo")
-```
-
----
-
-## Validações Customizadas
-
-### Em Entidades
-
-Implemente o método `validate` na entidade:
-
-```python
-from sankhya_sdk.transport_entities import EntityBase
-from sankhya_sdk.validations import EntityValidation
-
-class MinhaEntidade(EntityBase):
-    @entity_key("ID")
-    id: int
-    
-    @entity_element("VALOR")
-    valor: float
-    
-    @entity_element("DATA_INICIO")
-    data_inicio: date
-    
-    @entity_element("DATA_FIM")
-    data_fim: date
-    
-    def validate(self) -> list[EntityValidation]:
-        """Validações customizadas."""
-        errors = super().validate()
-        
-        # Validação de negócio
-        if self.valor < 0:
-            errors.append(EntityValidation.custom(
-                "VALOR",
-                "Valor não pode ser negativo"
-            ))
-        
-        # Validação de intervalo de datas
-        if self.data_fim < self.data_inicio:
-            errors.append(EntityValidation.custom(
-                "DATA_FIM",
-                "Data fim não pode ser anterior à data início"
-            ))
-        
-        return errors
-```
-
-### Com Validator Customizado
-
-```python
-from sankhya_sdk.validations import EntityValidator, EntityValidation
-
-class MeuValidator(EntityValidator):
-    """Validator com regras adicionais."""
-    
-    def validate(self, entity) -> ValidationResult:
-        # Validação padrão
-        result = super().validate(entity)
-        
-        # Regras adicionais
-        if isinstance(entity, Partner):
-            self._validate_partner_rules(entity, result)
-        
-        return result
-    
-    def _validate_partner_rules(self, partner: Partner, result: ValidationResult):
-        # Validação de CNPJ/CPF
-        if partner.cgc_cpf and not self._is_valid_cpf_cnpj(partner.cgc_cpf):
-            result.errors.append(EntityValidation.custom(
-                "CGC_CPF",
-                "CPF/CNPJ inválido"
-            ))
-        
-        # Email obrigatório para clientes
-        if partner.type_partner == "C" and not partner.email:
-            result.warnings.append(EntityValidation.custom(
-                "EMAIL",
-                "Email recomendado para clientes",
-                severity="WARNING"
-            ))
-    
-    def _is_valid_cpf_cnpj(self, value: str) -> bool:
-        # Implementação de validação
-        return len(value) in [11, 14]
+match = EntityValidation.match_property_width_error(error_text)
+if match:
+    print(
+        f"{match['propertyName']}: {match['currentWidth']} caracteres "
+        f"(máximo {match['widthAllowed']})"
+    )
 ```
 
 ---
@@ -236,70 +160,64 @@ class MeuValidator(EntityValidator):
 ### Validar Antes de Persistir
 
 ```python
-def save_partner(crud: SimpleCRUDRequestWrapper, partner: Partner):
-    """Salva parceiro com validação."""
-    validator = EntityValidator()
-    result = validator.validate(partner)
-    
-    if not result.is_valid:
-        raise ValueError(f"Parceiro inválido: {result.errors}")
-    
-    if result.warnings:
-        for warning in result.warnings:
-            logging.warning(f"Aviso: {warning.message}")
-    
-    return crud.insert(partner)
+from pydantic import ValidationError
+
+from sankhya_sdk.exceptions import ServiceRequestGeneralException
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
+
+
+def save_partner(data: dict) -> Partner | None:
+    """Cria o parceiro validando os dados antes da requisição."""
+    try:
+        partner = Partner(**data)
+    except ValidationError as e:
+        print(f"Parceiro inválido: {e.errors()}")
+        return None
+
+    try:
+        return SimpleCRUDRequestWrapper.update(partner)
+    except ServiceRequestGeneralException as e:
+        # Regras de negócio do servidor (ex.: CNPJ/CPF duplicado)
+        print(f"Recusado pelo servidor: {e}")
+        return None
+
+
+created = save_partner({"name": "Novo Cliente", "is_client": True})
 ```
 
 ### Validar em Lote
 
 ```python
-def save_partners_batch(crud, partners: list[Partner]):
-    """Salva parceiros em lote com validação."""
-    validator = EntityValidator()
-    
-    valid_partners = []
-    invalid_partners = []
-    
-    for partner in partners:
-        result = validator.validate(partner)
-        if result.is_valid:
-            valid_partners.append(partner)
-        else:
-            invalid_partners.append((partner, result.errors))
-    
-    # Processa válidos
-    for partner in valid_partners:
-        crud.insert(partner)
-    
-    # Reporta inválidos
-    if invalid_partners:
-        for partner, errors in invalid_partners:
-            logging.error(f"Parceiro {partner.name}: {errors}")
-    
-    return len(valid_partners), len(invalid_partners)
-```
+from typing import List, Tuple
 
----
+from pydantic import ValidationError
 
-## Patterns de Erro
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
 
-### Padrões de Mensagem
 
-O SDK usa padrões regex para identificar tipos de erro:
+def save_partners_batch(rows: List[dict]) -> Tuple[int, int]:
+    """Valida todas as linhas e envia apenas as válidas."""
+    valid: List[Partner] = []
+    invalid: List[Tuple[dict, str]] = []
 
-```python
-from sankhya_sdk.validations import EntityValidation
+    for row in rows:
+        try:
+            valid.append(Partner(**row))
+        except ValidationError as e:
+            invalid.append((row, str(e)))
 
-# Verifica se é erro de propriedade ausente
-if EntityValidation.match_property_name_association(error_text):
-    # Erro de referência/associação
-    pass
+    for partner in valid:
+        SimpleCRUDRequestWrapper.update(partner)
 
-# Verifica se é erro de nome inválido
-if EntityValidation.match_property_name_invalid(error_text):
-    # Erro de nome de propriedade
-    pass
+    for row, error in invalid:
+        print(f"Parceiro {row.get('name')}: {error}")
+
+    return len(valid), len(invalid)
+
+
+print(save_partners_batch([{"name": "A"}, {"name": "B", "address_complement": "x" * 40}]))
 ```
 
 ---
@@ -309,30 +227,32 @@ if EntityValidation.match_property_name_invalid(error_text):
 ### Exemplo Web
 
 ```python
-from flask import request, jsonify
+from flask import Flask, jsonify, request
+from pydantic import ValidationError
 
-@app.route('/api/partners', methods=['POST'])
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
+
+app = Flask(__name__)  # SimpleCRUDRequestWrapper.initialize(ctx) na inicialização
+
+
+@app.route("/api/partners", methods=["POST"])
 def create_partner():
-    data = request.json
-    
-    partner = Partner()
-    partner.name = data.get('name')
-    partner.cgc_cpf = data.get('cgc_cpf')
-    
-    validator = EntityValidator()
-    result = validator.validate(partner)
-    
-    if not result.is_valid:
+    data = request.json or {}
+
+    try:
+        partner = Partner(name=data.get("name"), document=data.get("document"))
+    except ValidationError as e:
         return jsonify({
-            'success': False,
-            'errors': [
-                {'field': e.field, 'message': e.message}
-                for e in result.errors
-            ]
+            "success": False,
+            "errors": [
+                {"field": ".".join(map(str, err["loc"])), "message": err["msg"]}
+                for err in e.errors()
+            ],
         }), 400
-    
-    crud.insert(partner)
-    return jsonify({'success': True, 'id': partner.code_partner})
+
+    created = SimpleCRUDRequestWrapper.update(partner)
+    return jsonify({"success": True, "id": created.code})
 ```
 
 ## Próximos Passos
