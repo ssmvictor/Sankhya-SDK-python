@@ -1,134 +1,117 @@
 # Sistema de Entidades
 
-Este documento explica o sistema de entidades do SDK, incluindo decoradores, serialização XML e criação de entidades customizadas.
+Este documento explica o sistema de entidades da API XML legada: o
+decorador `@entity`, os metadados de campo, a serialização XML e a criação
+de entidades customizadas.
 
 ## Visão Geral
 
-O SDK usa um sistema de decoradores para mapear classes Python para entidades da API Sankhya:
+As entidades são modelos Pydantic que herdam de `TransportEntityBase`
+(`sankhya_sdk.models.transport`). O decorador `@entity` define o nome da
+entidade no Sankhya, e cada campo declara seus metadados com funções que
+retornam um `pydantic.Field` (não são decoradores de método):
 
 ```mermaid
 graph LR
-    A[Classe Python] --> B["@entity"]
-    B --> C["@entity_key"]
-    B --> D["@entity_element"]
-    C --> E[Entidade Serializada]
+    A[Classe Pydantic] --> B["@entity('Parceiro')"]
+    A --> C["entity_key(entity_element('CODPARC'))"]
+    A --> D["entity_element('NOMEPARC')"]
+    A --> R["entity_reference()"]
+    C --> E[ServiceRequestExtensions]
     D --> E
-    E --> F[XML para API]
+    R --> E
+    E --> F[XML para a API]
 ```
 
-## Decoradores Principais
+## Metadados
 
 ### @entity
 
-Define uma classe como entidade da API:
+Define o nome da entidade na API (`rootEntity`). Só pode ser aplicado a
+subclasses de `pydantic.BaseModel`:
 
 ```python
-from sankhya_sdk.attributes import entity
+from typing import Optional
 
-@entity("Parceiro", "TGFPAR")
-class Partner:
-    """
-    Args:
-        name: Nome lógico da entidade na API
-        table_name: Nome da tabela no banco de dados
-    """
-    pass
-```
+from sankhya_sdk.attributes import entity, entity_element, entity_key
+from sankhya_sdk.models.transport import TransportEntityBase
 
-**Parâmetros:**
-
-| Parâmetro | Tipo | Obrigatório | Descrição |
-|-----------|------|-------------|-----------|
-| `name` | str | Sim | Nome lógico da entidade |
-| `table_name` | str | Não | Nome da tabela no banco |
-
-### @entity_key
-
-Define o(s) campo(s) chave da entidade:
-
-```python
-from sankhya_sdk.attributes import entity, entity_key
 
 @entity("Parceiro")
-class Partner:
-    @entity_key("CODPARC")
-    code_partner: int
+class MeuParceiro(TransportEntityBase):
+    code: Optional[int] = entity_key(entity_element("CODPARC", default=None))
 ```
 
-**Parâmetros:**
+| Parâmetro | Tipo | Descrição |
+|-----------|------|-----------|
+| `name` | `str` | Nome da entidade no Sankhya (ex.: `"Parceiro"`, `"AD_CONTATO"`) |
 
-| Parâmetro | Tipo | Obrigatório | Descrição |
-|-----------|------|-------------|-----------|
-| `element_name` | str | Sim | Nome do campo na API |
-| `auto_generated` | bool | Não | Se é gerado automaticamente |
+### Funções de Campo
 
-### @entity_element
-
-Define campos regulares da entidade:
+| Função | Descrição |
+|--------|-----------|
+| `entity_element(element_name, ignore_inline_reference=False, **kwargs)` | Campo com o nome do elemento na API; `kwargs` vão para o `pydantic.Field` (ex.: `default=None`) |
+| `entity_key(field)` | Marca o campo como chave primária: `entity_key(entity_element("CODPARC", default=None))` |
+| `entity_reference(custom_relation_name=None, **kwargs)` | Referência a outra entidade (`<entity path="...">` nas buscas); o nome da relação é o da entidade referenciada ou `custom_relation_name` |
+| `entity_ignore(**kwargs)` | Campo fora da API: não é enviado nem buscado e fica fora de `model_dump()` |
+| `entity_custom_data(max_length=None, field=...)` | Limite de tamanho validado na criação e na atribuição |
 
 ```python
-from sankhya_sdk.attributes import entity, entity_key, entity_element
+from typing import Optional
 
-@entity("Parceiro")
-class Partner:
-    @entity_key("CODPARC")
-    code_partner: int
-    
-    @entity_element("NOMEPARC")
-    name: str
-    
-    @entity_element("CGC_CPF", required=False)
-    cgc_cpf: str | None = None
+from sankhya_sdk.attributes import (
+    entity,
+    entity_custom_data,
+    entity_element,
+    entity_ignore,
+    entity_key,
+    entity_reference,
+)
+from sankhya_sdk.models.transport import Partner, TransportEntityBase
+
+
+@entity("AD_CONTATO")
+class Contato(TransportEntityBase):
+    id_contato: Optional[int] = entity_key(entity_element("IDCONTATO", default=None))
+    code_partner: Optional[int] = entity_element("CODPARC", default=None)
+    nome: Optional[str] = entity_custom_data(
+        max_length=60, field=entity_element("NOME", default=None)
+    )
+    email: Optional[str] = entity_element("EMAIL", default=None)
+
+    # Referência para a entidade Parceiro
+    parceiro: Optional[Partner] = entity_reference(default=None)
+
+    # Só existe no Python
+    observacao_local: Optional[str] = entity_ignore(default=None)
 ```
 
-**Parâmetros:**
-
-| Parâmetro | Tipo | Obrigatório | Descrição |
-|-----------|------|-------------|-----------|
-| `element_name` | str | Sim | Nome do campo na API |
-| `required` | bool | Não | Se é obrigatório (default: True) |
-| `read_only` | bool | Não | Apenas leitura |
-| `max_length` | int | Não | Tamanho máximo |
+!!! warning "Elementos com `_` são referências inline"
+    Como no SDK .NET, um nome de elemento no formato `ENTIDADE_CAMPO` é
+    tratado como referência inline (campo `CAMPO` da entidade `ENTIDADE`),
+    exceto quando começa com `AD` (campos customizados `AD_*`). Para um
+    campo comum com `_` no nome (ex.: `CGC_CPF` do `Partner`), use
+    `entity_element("CGC_CPF", ignore_inline_reference=True, default=None)`.
 
 ## Entidades Pré-definidas
 
-O SDK inclui entidades prontas para uso:
-
-### Partner (Parceiro)
-
-```python
-from sankhya_sdk.transport_entities import Partner
-
-partner = Partner()
-partner.code_partner = 1
-partner.name = "Cliente LTDA"
-partner.cgc_cpf = "12345678000199"
-partner.type_partner = "C"  # Cliente
-```
-
-### Product (Produto)
+O SDK inclui entidades prontas: `Partner`, `Product`, `InvoiceHeader`,
+`Address`, `City`, `State`, `Region`, `Neighborhood`, `PartnerComplement`,
+`Seller`, `ProductCost`, `CodeBars`, `ProductSuggestedSale` e `ServiceFile`
+(campos em [Modelos](../api-reference/models.md#campos)).
 
 ```python
-from sankhya_sdk.transport_entities import Product
+from datetime import datetime
 
-product = Product()
-product.code_product = 100
-product.description = "Produto Exemplo"
-product.unit = "UN"
-product.active = True
-```
+from sankhya_sdk.models.transport import InvoiceHeader, Partner, Product
 
-### InvoiceHeader (Cabeçalho de Nota Fiscal)
+partner = Partner(code=1, name="Cliente LTDA", document="12345678000199", is_client=True)
 
-```python
-from sankhya_sdk.transport_entities import InvoiceHeader
-from datetime import date
+product = Product(code=100, name="Produto Exemplo", code_volume="UN", is_active=True)
 
-header = InvoiceHeader()
-header.single_number = 12345
-header.code_partner = 1
-header.movement_date = date.today()
-header.code_company = 1
+header = InvoiceHeader(
+    single_number=12345, code_partner=1, code_company=1, date_traded=datetime.now()
+)
 ```
 
 ## Criando Entidades Customizadas
@@ -136,127 +119,116 @@ header.code_company = 1
 ### Exemplo Básico
 
 ```python
-from sankhya_sdk.attributes import entity, entity_key, entity_element
-from sankhya_sdk.transport_entities import EntityBase
+from decimal import Decimal
+from typing import Optional
 
-@entity("MeuCampo", "AD_MEUCAMPO")
-class MinhaEntidade(EntityBase):
-    """Entidade customizada para tabela AD_MEUCAMPO."""
-    
-    @entity_key("IDCAMPO")
-    id_campo: int
-    
-    @entity_element("DESCRICAO")
-    descricao: str
-    
-    @entity_element("VALOR", required=False)
-    valor: float = 0.0
-    
-    @entity_element("ATIVO", required=False)
-    ativo: bool = True
+from sankhya_sdk.attributes import entity, entity_element, entity_key
+from sankhya_sdk.models.transport import TransportEntityBase
+
+
+@entity("AD_MEUCAMPO")
+class MinhaEntidade(TransportEntityBase):
+    """Entidade customizada para a tabela AD_MEUCAMPO."""
+
+    id_campo: Optional[int] = entity_key(entity_element("IDCAMPO", default=None))
+    descricao: Optional[str] = entity_element("DESCRICAO", default=None)
+    valor: Optional[Decimal] = entity_element("VALOR", default=None)
+    ativo: Optional[bool] = entity_element("ATIVO", default=None)
+
+
+item = MinhaEntidade(id_campo=1, descricao="Teste", valor=Decimal("10.50"), ativo=True)
+print(item.to_xml_string())
+# <AD_MEUCAMPO><IDCAMPO>1</IDCAMPO><DESCRICAO>Teste</DESCRICAO><VALOR>10.50</VALOR><ATIVO>S</ATIVO></AD_MEUCAMPO>
 ```
 
-### Exemplo com Referências
-
-```python
-from sankhya_sdk.attributes import entity, entity_key, entity_element, entity_reference
-from sankhya_sdk.transport_entities import EntityBase, Partner
-
-@entity("Contato", "AD_CONTATO")
-class Contato(EntityBase):
-    @entity_key("IDCONTATO")
-    id_contato: int
-    
-    @entity_element("CODPARC")
-    code_partner: int
-    
-    @entity_element("NOME")
-    nome: str
-    
-    @entity_element("EMAIL", required=False)
-    email: str | None = None
-    
-    # Referência para entidade Partner
-    @entity_reference("Parceiro", foreign_key="CODPARC")
-    parceiro: Partner | None = None
-```
+Use `Optional[...]` com `default=None`: o construtor sem argumentos é exigido
+pelo `EntityValidator`, e só os campos atribuídos são enviados ao servidor.
 
 ### Diagrama de Herança
 
 ```mermaid
 classDiagram
+    class BaseModel
     class EntityBase {
         <<abstract>>
+    }
+    class TransportEntityBase {
         +to_xml() Element
-        +from_xml(xml) Self
-        +validate() ValidationResult
-        +get_key_values() dict
+        +to_xml_string() str
+        +from_xml(element) Self
+        +from_xml_string(xml) Self
+        +get_modified_fields() dict
+        +should_serialize_field(name) bool
     }
-    
     class Partner {
-        +code_partner: int
+        +code: int
         +name: str
-        +cgc_cpf: str
-        +type_partner: str
+        +document: str
+        +fiscal_type: FiscalPersonType
     }
-    
     class Product {
-        +code_product: int
-        +description: str
-        +unit: str
-        +active: bool
+        +code: int
+        +name: str
+        +code_volume: str
+        +is_active: bool
     }
-    
     class MinhaEntidade {
         +id_campo: int
         +descricao: str
-        +valor: float
+        +valor: Decimal
     }
-    
-    EntityBase <|-- Partner
-    EntityBase <|-- Product
-    EntityBase <|-- MinhaEntidade
+
+    BaseModel <|-- EntityBase
+    EntityBase <|-- TransportEntityBase
+    TransportEntityBase <|-- Partner
+    TransportEntityBase <|-- Product
+    TransportEntityBase <|-- MinhaEntidade
 ```
 
 ## Serialização XML
 
 ### Entidade para XML
 
+`to_xml_string()` gera o elemento da entidade com os campos atribuídos
+(o XML das requisições é montado pelo `ServiceRequestExtensions`):
+
 ```python
-from sankhya_sdk.transport_entities import Partner
+from sankhya_sdk.models.transport import Partner
 
-partner = Partner()
-partner.code_partner = 1
-partner.name = "Cliente LTDA"
+partner = Partner(code=1, name="Cliente LTDA", is_active=True)
 
-xml = partner.to_xml()
-print(xml)
-```
-
-**Saída XML:**
-
-```xml
-<entity>
-    <field name="CODPARC">1</field>
-    <field name="NOMEPARC">Cliente LTDA</field>
-</entity>
+print(partner.to_xml_string())
+# <Parceiro><CODPARC>1</CODPARC><NOMEPARC>Cliente LTDA</NOMEPARC><ATIVO>S</ATIVO></Parceiro>
 ```
 
 ### XML para Entidade
 
 ```python
-from sankhya_sdk.transport_entities import Partner
+from sankhya_sdk.models.transport import Partner
 
-xml_string = """
-<entity>
-    <field name="CODPARC">1</field>
-    <field name="NOMEPARC">Cliente LTDA</field>
-    <field name="CGC_CPF">12345678000199</field>
-</entity>
-"""
+xml_string = (
+    "<Parceiro><CODPARC>1</CODPARC><NOMEPARC>Cliente LTDA</NOMEPARC>"
+    "<CGC_CPF>12345678000199</CGC_CPF></Parceiro>"
+)
 
-partner = Partner.from_xml(xml_string)
-print(partner.name)  # "Cliente LTDA"
+partner = Partner.from_xml_string(xml_string)
+print(partner.name)  # Cliente LTDA
+```
+
+### Respostas do Servidor
+
+As respostas trazem as entidades como `EntityDynamic`, com os valores em
+**texto bruto** (como no .NET). Os wrappers convertem para o tipo pedido com
+`EntityDynamicSerialization.convert_to_type`; ao montar requisições à mão,
+faça o mesmo:
+
+```python
+from sankhya_sdk.helpers import EntityDynamicSerialization
+from sankhya_sdk.models.transport import Partner
+
+fields = {"CODPARC": "1", "NOMEPARC": "Cliente LTDA", "ATIVO": "S"}
+partner = EntityDynamicSerialization(fields).convert_to_type(Partner)
+print(partner.code + 1, partner.is_active)  # 2 True
 ```
 
 ### Fluxo de Serialização
@@ -264,221 +236,178 @@ print(partner.name)  # "Cliente LTDA"
 ```mermaid
 flowchart TD
     subgraph "Python → API"
-        A[Objeto Python] --> B[EntityDynamicSerialization]
-        B --> C[Gera XML]
-        C --> D[ServiceRequest]
+        A[Entidade] --> B[ServiceRequestExtensions.resolve_*]
+        B --> C[ServiceRequest]
+        C --> D[XML]
         D --> E[API Sankhya]
     end
-    
+
     subgraph "API → Python"
         F[API Sankhya] --> G[ServiceResponse XML]
-        G --> H[EntityDynamicSerialization]
-        H --> I[Deserializa]
-        I --> J[Objeto Python]
+        G --> H["EntityDynamic (texto bruto)"]
+        H --> I[EntityDynamicSerialization.convert_to_type]
+        I --> J[Entidade tipada]
     end
 ```
 
 ## Tipos de Dados Suportados
 
-| Tipo Python | Tipo Sankhya | Serialização |
-|-------------|--------------|--------------|
-| `int` | Integer | Numérico |
-| `float` | Decimal | Numérico com ponto |
-| `str` | String | Texto |
-| `bool` | Boolean | "S"/"N" ou "1"/"0" |
-| `date` | Date | "dd/MM/yyyy" |
-| `datetime` | DateTime | "dd/MM/yyyy HH:mm:ss" |
-| `time` | Time | "HH:mm:ss" |
-| `timedelta` | Duration | Segundos |
-| `Decimal` | BigDecimal | Numérico preciso |
+| Tipo Python | Serialização |
+|-------------|--------------|
+| `int`, `float`, `Decimal` | `str(valor)` |
+| `str` | Texto |
+| `bool` | `"S"` / `"N"` |
+| `datetime` | `"dd/MM/yyyy HH:mm:ss"` |
+| `timedelta` | `"HHMMSS"` (ex.: `HRMOV`) |
+| Enums (`MetadataEnum`) | `internal_value` (ex.: `FiscalPersonType.CORPORATION` → `"J"`) |
 
-### Exemplo com Tipos Complexos
-
-```python
-from datetime import date, datetime, time
-from decimal import Decimal
-from sankhya_sdk.attributes import entity, entity_key, entity_element
-
-@entity("Lancamento")
-class Lancamento(EntityBase):
-    @entity_key("NUMLANCAMENTO")
-    numero: int
-    
-    @entity_element("DATALANCAMENTO")
-    data: date
-    
-    @entity_element("DTHORALANCAMENTO")
-    data_hora: datetime
-    
-    @entity_element("HORAENTRADA")
-    hora_entrada: time
-    
-    @entity_element("VALOR")
-    valor: Decimal
-    
-    @entity_element("ATIVO")
-    ativo: bool
-```
+`date` não tem formatação própria (vira `str(date)`, no formato ISO): use
+`datetime` nos campos de data.
 
 ## Validações
 
-### Validador de Entidade
+Os valores são validados pelo Pydantic na criação e na atribuição (tipos e
+`entity_custom_data(max_length=...)`); o `EntityValidator` valida a
+estrutura da classe. Veja [Validações](../api-reference/validations.md).
 
 ```python
+from pydantic import ValidationError
+
+from sankhya_sdk.models.transport import Partner
 from sankhya_sdk.validations import EntityValidator
 
-partner = Partner()
-partner.name = "Cliente"  # Faltando código (chave)
+EntityValidator.validate_entity(Partner)  # Estrutura da classe: OK
 
-validator = EntityValidator()
-result = validator.validate(partner)
-
-if not result.is_valid:
-    for error in result.errors:
-        print(f"Erro: {error.message}")
+try:
+    Partner(name="Cliente", address_complement="x" * 40)  # COMPLEMENTO: máximo 30
+except ValidationError as e:
+    print(f"Erro: {e.errors()[0]['msg']}")
 ```
 
-### Validações Customizadas
+Regras de negócio adicionais podem ser escritas com os validadores do
+Pydantic:
 
 ```python
-from sankhya_sdk.validations import EntityValidation
+from decimal import Decimal
+from typing import Optional
 
-class MinhaEntidade(EntityBase):
-    @entity_key("ID")
-    id: int
-    
-    @entity_element("VALOR")
-    valor: float
-    
-    def validate(self) -> list[EntityValidation]:
-        errors = super().validate()
-        
-        if self.valor < 0:
-            errors.append(EntityValidation(
-                field="valor",
-                message="Valor não pode ser negativo"
-            ))
-        
-        return errors
-```
+from pydantic import field_validator
 
-### Fluxo de Validação
+from sankhya_sdk.attributes import entity, entity_element, entity_key
+from sankhya_sdk.models.transport import TransportEntityBase
 
-```mermaid
-flowchart TD
-    A[Entidade] --> B{Campos Obrigatórios?}
-    B -->|Não| C[Erro: Campo obrigatório]
-    B -->|Sim| D{Tipos Corretos?}
-    D -->|Não| E[Erro: Tipo inválido]
-    D -->|Sim| F{Validações Custom?}
-    F -->|Erro| G[Erro de Negócio]
-    F -->|OK| H[Entidade Válida]
+
+@entity("AD_LANCAMENTO")
+class Lancamento(TransportEntityBase):
+    id: Optional[int] = entity_key(entity_element("ID", default=None))
+    valor: Optional[Decimal] = entity_element("VALOR", default=None)
+
+    @field_validator("valor")
+    @classmethod
+    def valor_nao_negativo(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None and v < 0:
+            raise ValueError("Valor não pode ser negativo")
+        return v
 ```
 
 ## Metadados de Entidade
 
-### Acessando Metadados
-
 ```python
-from sankhya_sdk.attributes import get_entity_metadata
+from sankhya_sdk.attributes import get_entity_name
+from sankhya_sdk.attributes.reflection import get_field_metadata
+from sankhya_sdk.models.transport import Partner
 
-metadata = get_entity_metadata(Partner)
+print(get_entity_name(Partner))  # Parceiro
 
-print(f"Nome: {metadata.entity_name}")
-print(f"Tabela: {metadata.table_name}")
-print(f"Chaves: {metadata.key_fields}")
-print(f"Campos: {metadata.element_fields}")
+metadata = get_field_metadata(Partner.model_fields["code"])
+print(metadata.is_key, metadata.element.element_name)  # True CODPARC
+
+keys = [
+    name for name, field in Partner.model_fields.items()
+    if get_field_metadata(field).is_key
+]
+print(keys)  # ['code']
 ```
 
-### Estrutura de Metadados
-
-```mermaid
-classDiagram
-    class EntityMetadata {
-        +entity_name: str
-        +table_name: str
-        +key_fields: list[FieldMetadata]
-        +element_fields: list[FieldMetadata]
-        +reference_fields: list[ReferenceMetadata]
-        +get_field(name) FieldMetadata
-    }
-    
-    class FieldMetadata {
-        +name: str
-        +element_name: str
-        +python_type: type
-        +required: bool
-        +read_only: bool
-        +max_length: int
-    }
-    
-    class ReferenceMetadata {
-        +name: str
-        +entity_type: type
-        +foreign_key: str
-        +lazy_load: bool
-    }
-    
-    EntityMetadata --> FieldMetadata
-    EntityMetadata --> ReferenceMetadata
-```
+`EntityFieldMetadata` tem `element` (`element_name`,
+`ignore_inline_reference`), `reference` (`custom_relation_name`),
+`custom_data` (`max_length`), `is_key` e `is_ignored`.
 
 ## Boas Práticas
 
 ### 1. Use Nomes Descritivos
 
 ```python
+from typing import Optional
+
+from sankhya_sdk.attributes import entity_element
+
 # ✅ Bom
-@entity_element("NOMEPARC")
-name: str
+name: Optional[str] = entity_element("NOMEPARC", default=None)
 
 # ❌ Evitar
-@entity_element("NOMEPARC")
-np: str
+np: Optional[str] = entity_element("NOMEPARC", default=None)
 ```
 
 ### 2. Documente Entidades Customizadas
 
 ```python
-@entity("Contato", "AD_CONTATO")
-class Contato(EntityBase):
+from typing import Optional
+
+from sankhya_sdk.attributes import entity, entity_element, entity_key
+from sankhya_sdk.models.transport import TransportEntityBase
+
+
+@entity("AD_CONTATO")
+class Contato(TransportEntityBase):
     """
     Entidade de contatos de parceiros.
-    
+
     Tabela: AD_CONTATO (customizada)
-    
+
     Attributes:
         id_contato: Identificador único
         code_partner: Código do parceiro relacionado
         nome: Nome do contato
         email: E-mail do contato (opcional)
     """
-    ...
+
+    id_contato: Optional[int] = entity_key(entity_element("IDCONTATO", default=None))
+    code_partner: Optional[int] = entity_element("CODPARC", default=None)
+    nome: Optional[str] = entity_element("NOME", default=None)
+    email: Optional[str] = entity_element("EMAIL", default=None)
 ```
 
-### 3. Use Valores Default Apropriados
+### 3. Envie Apenas o Que Mudou
+
+Só os campos atribuídos vão para o `saveRecord`: para alterar um campo, crie
+a entidade com a chave e o campo novo, sem buscar o registro antes.
 
 ```python
-@entity_element("ATIVO", required=False)
-ativo: bool = True  # Default sensato
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
 
-@entity_element("VALOR", required=False)
-valor: Decimal = Decimal("0.00")  # Tipo correto
+SimpleCRUDRequestWrapper.update(Partner(code=1, is_active=False))
 ```
 
 ### 4. Valide Antes de Persistir
 
 ```python
-from sankhya_sdk.validations import EntityValidator
+from pydantic import ValidationError
 
-def save_entity(entity: EntityBase):
-    validator = EntityValidator()
-    result = validator.validate(entity)
-    
-    if not result.is_valid:
-        raise ValueError(f"Entidade inválida: {result.errors}")
-    
-    return crud.insert(entity)
+from sankhya_sdk.models.transport import Partner
+from sankhya_sdk.request_wrappers import SimpleCRUDRequestWrapper
+
+
+def save_partner(data: dict) -> Partner:
+    try:
+        partner = Partner(**data)
+    except ValidationError as e:
+        raise ValueError(f"Entidade inválida: {e.errors()}") from e
+    return SimpleCRUDRequestWrapper.update(partner)
+
+
+save_partner({"name": "Novo Cliente"})
 ```
 
 ## Próximos Passos
