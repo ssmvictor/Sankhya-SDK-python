@@ -152,9 +152,9 @@ Base dos erros de requisição de serviço da stack XML.
 |----------|------|-----------|
 | `request` | `ServiceRequest \| None` | Requisição que falhou |
 | `response` | `ServiceResponse \| None` | Resposta do servidor, quando disponível |
-| `request_xml` / `response_xml` | `str \| None` | XML da requisição/resposta, quando disponível |
+| `request_xml` / `response_xml` | `None` | Existem por paridade com o .NET, mas nesta versão sempre retornam `None` |
 
-A mensagem é `str(e)` e a causa, quando houver, fica em `e.__cause__`.
+A mensagem é `str(e)` e a causa, quando houver, fica em `e.__cause__`. Para registrar o XML enviado, use `e.request.to_xml_string()`; para a mensagem do servidor, `e.response.status_message_text`.
 
 ### Uso
 
