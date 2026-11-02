@@ -1,19 +1,18 @@
-import pytest
 from typing import Optional
+
 from pydantic import BaseModel, Field
+
 from sankhya_sdk.attributes.decorators import (
     entity,
-    entity_key,
-    entity_element,
-    entity_reference,
-    entity_ignore,
     entity_custom_data,
+    entity_element,
+    entity_ignore,
+    entity_key,
 )
 from sankhya_sdk.attributes.metadata import (
-    EntityMetadata,
-    EntityElementMetadata,
-    EntityReferenceMetadata,
     EntityCustomDataMetadata,
+    EntityElementMetadata,
+    EntityMetadata,
 )
 
 

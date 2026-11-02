@@ -12,18 +12,18 @@ from typing import Any, Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import ConfigDict, Field as PydanticField
+from pydantic import ConfigDict
+from pydantic import Field as PydanticField
 
 from sankhya_sdk.models.base import EntityBase
-from .xml_serialization import (
-    create_xml_element,
-    get_element_attr,
-    get_element_text,
-    to_base64,
-    from_base64,
-    deserialize_optional_int,
-)
+
 from .constants import SankhyaConstants
+from .xml_serialization import (
+    deserialize_optional_int,
+    from_base64,
+    get_element_attr,
+    to_base64,
+)
 
 
 def _parse_pk_element(element: Element) -> list[dict[str, Any]]:
@@ -72,56 +72,56 @@ class ResponseBody(EntityBase):
 
     # Campos de identificação de usuário
     code_user_logged_in: Optional[int] = PydanticField(
-        default=None, 
+        default=None,
         alias="codUsuLogado"
     )
     code_user: Optional[int] = PydanticField(default=None, alias="idusu")
     _code_user_internal: Optional[str] = None  # Valor Base64 interno
-    
+
     # Campos de sessão
     call_id: Optional[str] = PydanticField(default=None, alias="callID")
     jsession_id: Optional[str] = PydanticField(default=None, alias="jsessionid")
-    
+
     # Campos de entidades CRUD
     crud_service_entities: Optional[Any] = PydanticField(
-        default=None, 
+        default=None,
         alias="entidades"
     )
     crud_service_provider_entities: Optional[Any] = PydanticField(
-        default=None, 
+        default=None,
         alias="entities"
     )
-    
+
     # Campos de notas fiscais
     invoice_accompaniments: Optional[Any] = PydanticField(
-        default=None, 
+        default=None,
         alias="acompanhamentosNotas"
     )
     invoices: Optional[Any] = PydanticField(default=None, alias="notas")
     cancellation_result: Optional[Any] = PydanticField(
-        default=None, 
+        default=None,
         alias="resultadoCancelamento"
     )
-    
+
     # Campos de usuários e sessões
     users: Optional[Any] = PydanticField(default=None, alias="usuarios")
     sessions: Optional[Any] = PydanticField(default=None, alias="SESSIONS")
-    
+
     # Campos de avisos e mensagens
     warnings: Optional[Any] = PydanticField(default=None, alias="avisos")
     messages: Optional[Any] = PydanticField(default=None, alias="mensagens")
-    
+
     # Campos de chaves
     key: Optional[Any] = PydanticField(default=None, alias="chave")
     primary_key: Optional[Any] = PydanticField(default=None, alias="pk")
-    
+
     # Campos de eventos e liberações
     client_events: Optional[Any] = PydanticField(default=None, alias="clientEvents")
     releases: Optional[Any] = PydanticField(default=None, alias="liberacoes")
-    
+
     # Campo de mensagem de desvincular remessa
     message_unlink_shipping: Optional[Any] = PydanticField(
-        default=None, 
+        default=None,
         alias="msgDesvincularRemessa"
     )
 
@@ -170,24 +170,24 @@ class ResponseBody(EntityBase):
             Elemento XML representando o corpo da resposta
         """
         elem = etree.Element(SankhyaConstants.RESPONSE_BODY)
-        
+
         # Elementos de identificação/sessão (conforme .NET contract)
         if self.code_user_logged_in is not None:
             cul_elem = etree.SubElement(elem, SankhyaConstants.CODE_USER_LOGGED_ID)
             cul_elem.text = str(self.code_user_logged_in)
-        
+
         # idusu é serializado como elemento com valor Base64
         if self.code_user is not None:
             idusu_elem = etree.SubElement(elem, SankhyaConstants.CODE_USER)
             idusu_elem.text = to_base64(str(self.code_user))
-        
+
         if self.call_id:
             call_elem = etree.SubElement(elem, SankhyaConstants.CALL_ID)
             call_elem.text = self.call_id
         if self.jsession_id:
             jsess_elem = etree.SubElement(elem, SankhyaConstants.JSESSION_ID)
             jsess_elem.text = self.jsession_id
-        
+
         # Elementos complexos
         complex_fields = {
             "crud_service_entities": SankhyaConstants.ENTITIES_PT_BR,
@@ -205,17 +205,17 @@ class ResponseBody(EntityBase):
             "releases": SankhyaConstants.RELEASES,
             "message_unlink_shipping": SankhyaConstants.MESSAGE_UNLINK_SHIPPING,
         }
-        
+
         for field_name, xml_tag in complex_fields.items():
             value = getattr(self, field_name)
             if value is None:
                 continue
-            
+
             if hasattr(value, "to_xml"):
                 child = value.to_xml()
                 child.tag = xml_tag
                 elem.append(child)
-        
+
         return elem
 
     @classmethod
@@ -230,14 +230,13 @@ class ResponseBody(EntityBase):
             Instância de ResponseBody
         """
         from .entity_types import CrudServiceEntities, CrudServiceProviderEntities
-        from .invoice_types import Invoices, InvoiceAccompaniments, CancellationResult
-        from .metadata_types import Key, Warnings
-        from .user_types import Users, SessionsResponse, Releases, MessageUnlinkShipping
         from .event_types import ClientEvents, Messages
-        from .metadata_types import Key, Warnings, Pager
-        
+        from .invoice_types import CancellationResult, InvoiceAccompaniments, Invoices
+        from .metadata_types import Key, Pager, Warnings
+        from .user_types import MessageUnlinkShipping, Releases, SessionsResponse, Users
+
         instance = cls()
-        
+
         # codUsuLogado: elemento primeiro, fallback para atributo
         cul_elem = element.find(SankhyaConstants.CODE_USER_LOGGED_ID)
         if cul_elem is not None and cul_elem.text:
@@ -246,7 +245,7 @@ class ResponseBody(EntityBase):
             instance.code_user_logged_in = deserialize_optional_int(
                 get_element_attr(element, SankhyaConstants.CODE_USER_LOGGED_ID)
             )
-        
+
         # idusu: tenta Base64 primeiro, fallback para inteiro simples
         idusu_elem = element.find(SankhyaConstants.CODE_USER)
         idusu_raw = None
@@ -254,7 +253,7 @@ class ResponseBody(EntityBase):
             idusu_raw = idusu_elem.text
         else:
             idusu_raw = get_element_attr(element, SankhyaConstants.CODE_USER)
-        
+
         if idusu_raw:
             instance._code_user_internal = idusu_raw
             # Tenta decodificar Base64 primeiro
@@ -275,25 +274,25 @@ class ResponseBody(EntityBase):
                     instance.code_user = int(idusu_raw)
                 except ValueError:
                     instance.code_user = None
-        
+
         # callID: elemento primeiro, fallback para atributo
         call_elem = element.find(SankhyaConstants.CALL_ID)
         if call_elem is not None and call_elem.text:
             instance.call_id = call_elem.text
         else:
             instance.call_id = get_element_attr(element, SankhyaConstants.CALL_ID)
-        
+
         # jsessionid: elemento primeiro, fallback para atributo
         jsess_elem = element.find(SankhyaConstants.JSESSION_ID)
         if jsess_elem is not None and jsess_elem.text:
             instance.jsession_id = jsess_elem.text
         else:
             instance.jsession_id = get_element_attr(element, SankhyaConstants.JSESSION_ID)
-        
+
         # Processa elementos filhos
         for child in element:
             tag = child.tag
-            
+
             if tag == SankhyaConstants.ENTITIES_PT_BR:
                 instance.crud_service_entities = CrudServiceEntities.from_xml(child)
             elif tag == SankhyaConstants.ENTITIES_EN:
@@ -327,5 +326,5 @@ class ResponseBody(EntityBase):
                 instance.message_unlink_shipping = MessageUnlinkShipping.from_xml(child)
             elif tag == "pager":
                 instance.pager = Pager.from_xml(child)
-        
+
         return instance

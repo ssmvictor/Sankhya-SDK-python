@@ -13,7 +13,7 @@ Tabela Sankhya: TGFPRO
 from __future__ import annotations
 
 import os
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -33,7 +33,7 @@ SANKHYA_X_TOKEN = os.getenv("SANKHYA_TOKEN")
 def _create_client():
     """Cria e retorna um GatewayClient autenticado."""
     from sankhya_sdk.auth.oauth_client import OAuthClient
-    from sankhya_sdk.http import SankhyaSession, GatewayClient
+    from sankhya_sdk.http import GatewayClient, SankhyaSession
 
     oauth = OAuthClient(
         base_url=SANKHYA_AUTH_BASE_URL,

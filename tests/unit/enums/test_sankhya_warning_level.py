@@ -1,4 +1,5 @@
 import pytest
+
 from sankhya_sdk.enums import SankhyaWarningLevel
 
 

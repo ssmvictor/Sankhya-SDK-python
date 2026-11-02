@@ -3,8 +3,9 @@
 Testes unitários para status_message_helper.py
 """
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock
 
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import (
@@ -39,11 +40,11 @@ from sankhya_sdk.exceptions import (
 )
 from sankhya_sdk.helpers import status_message_helper
 from sankhya_sdk.helpers.status_message_helper import (
-    StatusMessageHelper,
-    PROPERTY_VALUE_ERROR_PATTERN,
     PROPERTY_NAME_ERROR_PATTERN,
+    PROPERTY_VALUE_ERROR_PATTERN,
     REFERENCE_FIELDS_FIRST_LEVEL_PATTERN,
     REFERENCE_FIELDS_SECOND_LEVEL_PATTERN,
+    StatusMessageHelper,
 )
 from sankhya_sdk.models.service.basic_types import LiteralCriteria
 from sankhya_sdk.models.service.entity_types import DataSet, Entity
@@ -91,7 +92,7 @@ class TestStatusMessageHelper:
     ):
         """Não deve lançar exceção se não houver status_message."""
         mock_response.status_message = None
-        
+
         # Não deve lançar exceção
         StatusMessageHelper.process_status_message(
             mock_service, mock_request, mock_response
@@ -534,7 +535,7 @@ class TestRegexPatterns:
         """Testa padrão de referência primeiro nível."""
         text = "Parceiro_NomeParceiro"
         match = REFERENCE_FIELDS_FIRST_LEVEL_PATTERN.match(text)
-        
+
         assert match is not None
         assert match.group("entity") == "Parceiro"
         assert match.group("field") == "NomeParceiro"
@@ -543,7 +544,7 @@ class TestRegexPatterns:
         """Testa padrão de referência segundo nível."""
         text = "Produto_Familia_Descricao"
         match = REFERENCE_FIELDS_SECOND_LEVEL_PATTERN.match(text)
-        
+
         assert match is not None
         assert match.group("parentEntity") == "Produto"
         assert match.group("entity") == "Familia"
@@ -553,12 +554,12 @@ class TestRegexPatterns:
         """Padrão primeiro nível não deve casar com campo simples."""
         text = "CODPARC"
         match = REFERENCE_FIELDS_FIRST_LEVEL_PATTERN.match(text)
-        
+
         assert match is None
 
     def test_second_level_pattern_no_match_for_first_level(self):
         """Padrão segundo nível não deve casar com primeiro nível."""
         text = "Parceiro_Nome"
         match = REFERENCE_FIELDS_SECOND_LEVEL_PATTERN.match(text)
-        
+
         assert match is None

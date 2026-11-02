@@ -11,21 +11,21 @@ from __future__ import annotations
 
 import inspect
 from types import ModuleType
-from typing import Any, Type, List
+from typing import Any, List, Type
 
 from pydantic.fields import FieldInfo
 
+from ..attributes.reflection import get_field_metadata
+from ..models.transport.base import TransportEntityBase
 from .exceptions import (
     EntityValidationError,
+    InvalidPropertyAttributeError,
+    MissingBaseClassError,
     MissingConstructorError,
     MissingEntityAttributeError,
-    MissingBaseClassError,
     MissingEqualityMethodsError,
-    InvalidPropertyAttributeError,
     MissingSerializeMethodError,
 )
-from ..attributes.reflection import get_entity_name, get_field_metadata
-from ..models.transport.base import TransportEntityBase
 
 
 class EntityValidator:

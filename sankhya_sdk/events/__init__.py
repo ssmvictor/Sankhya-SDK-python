@@ -13,7 +13,6 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable, Dict, List, Protocol, Type, TypeVar, runtime_checkable
 
-
 TEvent = TypeVar("TEvent")
 
 
@@ -121,11 +120,11 @@ class EventBus:
         instance = cls.get_instance()
         event_type = type(event)
         handlers: List[Callable[[Any], None]] = []
-        
+
         with cls._lock:
             if event_type in instance._handlers:
                 handlers = instance._handlers[event_type].copy()
-        
+
         for handler in handlers:
             try:
                 handler(event)
@@ -167,7 +166,6 @@ class EventBus:
 
 # Re-export for convenience
 from .on_demand_request_failure_event import OnDemandRequestFailureEvent
-
 
 __all__ = [
     "TEvent",

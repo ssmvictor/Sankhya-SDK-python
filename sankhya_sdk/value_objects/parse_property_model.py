@@ -1,6 +1,8 @@
 from typing import Optional
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.fields import FieldInfo
+
 from sankhya_sdk.attributes.metadata import EntityCustomDataMetadata
 from sankhya_sdk.attributes.reflection import get_field_metadata
 

@@ -28,7 +28,7 @@ class IFilterExpression(Protocol):
         >>> isinstance(filter, IFilterExpression)
         True
     """
-    
+
     def build_expression(self) -> str:
         """
         Constrói e retorna a expressão de filtro como string.
@@ -62,7 +62,7 @@ class LiteralCriteria:
         >>> criteria.build_expression()
         'CODPARC = 123'
     """
-    
+
     def __init__(self, expression: str = "") -> None:
         """
         Inicializa um critério literal.
@@ -71,12 +71,12 @@ class LiteralCriteria:
             expression: A expressão de filtro SQL-like
         """
         self._expression = expression
-    
+
     @property
     def expression(self) -> str:
         """Retorna a expressão atual."""
         return self._expression
-    
+
     def build_expression(self) -> str:
         """
         Constrói e retorna a expressão de filtro.
@@ -85,11 +85,11 @@ class LiteralCriteria:
             String contendo a expressão de filtro SQL-like
         """
         return self._expression
-    
+
     # =========================================================================
     # Factory Methods - Operators
     # =========================================================================
-    
+
     @classmethod
     def equals(cls, field: str, value: Union[str, int, float]) -> "LiteralCriteria":
         """
@@ -108,7 +108,7 @@ class LiteralCriteria:
         """
         str_value = cls._format_value(value)
         return cls(f"{field} = {str_value}")
-    
+
     @classmethod
     def not_equals(cls, field: str, value: Union[str, int, float]) -> "LiteralCriteria":
         """
@@ -123,7 +123,7 @@ class LiteralCriteria:
         """
         str_value = cls._format_value(value)
         return cls(f"{field} <> {str_value}")
-    
+
     @classmethod
     def greater_than(cls, field: str, value: Union[int, float]) -> "LiteralCriteria":
         """
@@ -137,7 +137,7 @@ class LiteralCriteria:
             Novo LiteralCriteria com a expressão '>'
         """
         return cls(f"{field} > {value}")
-    
+
     @classmethod
     def greater_or_equal(cls, field: str, value: Union[int, float]) -> "LiteralCriteria":
         """
@@ -151,7 +151,7 @@ class LiteralCriteria:
             Novo LiteralCriteria com a expressão '>='
         """
         return cls(f"{field} >= {value}")
-    
+
     @classmethod
     def less_than(cls, field: str, value: Union[int, float]) -> "LiteralCriteria":
         """
@@ -165,7 +165,7 @@ class LiteralCriteria:
             Novo LiteralCriteria com a expressão '<'
         """
         return cls(f"{field} < {value}")
-    
+
     @classmethod
     def less_or_equal(cls, field: str, value: Union[int, float]) -> "LiteralCriteria":
         """
@@ -179,7 +179,7 @@ class LiteralCriteria:
             Novo LiteralCriteria com a expressão '<='
         """
         return cls(f"{field} <= {value}")
-    
+
     @classmethod
     def like(cls, field: str, pattern: str) -> "LiteralCriteria":
         """
@@ -197,7 +197,7 @@ class LiteralCriteria:
             "NOMEPARC LIKE '%NOME%'"
         """
         return cls(f"{field} LIKE '{pattern}'")
-    
+
     @classmethod
     def in_(cls, field: str, values: List[Union[str, int, float]]) -> "LiteralCriteria":
         """
@@ -217,7 +217,7 @@ class LiteralCriteria:
         formatted = [cls._format_value(v) for v in values]
         values_str = ", ".join(formatted)
         return cls(f"{field} IN ({values_str})")
-    
+
     @classmethod
     def between(
         cls, field: str, start: Union[int, float], end: Union[int, float]
@@ -234,7 +234,7 @@ class LiteralCriteria:
             Novo LiteralCriteria com a expressão 'BETWEEN'
         """
         return cls(f"{field} BETWEEN {start} AND {end}")
-    
+
     @classmethod
     def is_null(cls, field: str) -> "LiteralCriteria":
         """
@@ -247,7 +247,7 @@ class LiteralCriteria:
             Novo LiteralCriteria com a expressão 'IS NULL'
         """
         return cls(f"{field} IS NULL")
-    
+
     @classmethod
     def is_not_null(cls, field: str) -> "LiteralCriteria":
         """
@@ -260,11 +260,11 @@ class LiteralCriteria:
             Novo LiteralCriteria com a expressão 'IS NOT NULL'
         """
         return cls(f"{field} IS NOT NULL")
-    
+
     # =========================================================================
     # Combinators
     # =========================================================================
-    
+
     def and_(self, other: "LiteralCriteria") -> "LiteralCriteria":
         """
         Combina com outro critério usando AND.
@@ -282,7 +282,7 @@ class LiteralCriteria:
             "CODPARC = 1 AND ATIVO = 'S'"
         """
         return LiteralCriteria(f"{self._expression} AND {other._expression}")
-    
+
     def or_(self, other: "LiteralCriteria") -> "LiteralCriteria":
         """
         Combina com outro critério usando OR.
@@ -294,7 +294,7 @@ class LiteralCriteria:
             Novo LiteralCriteria com as expressões combinadas
         """
         return LiteralCriteria(f"({self._expression}) OR ({other._expression})")
-    
+
     def not_(self) -> "LiteralCriteria":
         """
         Nega o critério atual.
@@ -303,11 +303,11 @@ class LiteralCriteria:
             Novo LiteralCriteria com a expressão negada
         """
         return LiteralCriteria(f"NOT ({self._expression})")
-    
+
     # =========================================================================
     # Helpers
     # =========================================================================
-    
+
     @staticmethod
     def _format_value(value: Union[str, int, float]) -> str:
         """
@@ -324,21 +324,21 @@ class LiteralCriteria:
             escaped = value.replace("'", "''")
             return f"'{escaped}'"
         return str(value)
-    
+
     def __str__(self) -> str:
         """Representação string."""
         return self._expression
-    
+
     def __repr__(self) -> str:
         """Representação para debug."""
         return f"LiteralCriteria('{self._expression}')"
-    
+
     def __eq__(self, other: object) -> bool:
         """Comparação de igualdade."""
         if not isinstance(other, LiteralCriteria):
             return False
         return self._expression == other._expression
-    
+
     def __hash__(self) -> int:
         """Hash para uso em dicionários."""
         return hash(self._expression)

@@ -1,9 +1,10 @@
 import logging
-import requests
-from typing import Optional, Any, Dict
+from typing import Any, Dict, Optional
 
+import requests
+
+from sankhya_sdk.auth.exceptions import AuthError, AuthNetworkError
 from sankhya_sdk.auth.oauth_client import OAuthClient
-from sankhya_sdk.auth.exceptions import TokenExpiredError, AuthError, AuthNetworkError
 
 logger = logging.getLogger(__name__)
 
@@ -37,34 +38,34 @@ class SankhyaSession:
         Performs one retry if a 401 occurs, forcing a token refresh.
         """
         full_url = self._build_url(url)
-        
+
         # Inject token
         self._ensure_auth_header(kwargs)
 
         try:
             response = self._session.request(method, full_url, **kwargs)
-            
+
             if response.status_code == 401:
                 logger.info("Received 401 Unauthorized. Attempting to refresh token.")
                 try:
                     # Attempt to refresh the token using the client
                     new_token = self.oauth_client.refresh_token()
-                    
+
                     # Update header with new token
                     headers = kwargs.get("headers", {})
                     headers["Authorization"] = f"Bearer {new_token}"
                     kwargs["headers"] = headers
-                    
+
                     # Retry the request
                     logger.info("Retrying request with new token.")
                     response = self._session.request(method, full_url, **kwargs)
-                    
+
                 except (AuthError, AuthNetworkError) as e:
                     logger.error(f"Failed to refresh token during retry: {e}")
-                    # Allow the original 401 or the new error to bubble up? 
+                    # Allow the original 401 or the new error to bubble up?
                     # Usually better to let the user know auth failed.
                     raise e
-            
+
             return response
 
         except requests.RequestException as e:
@@ -99,7 +100,7 @@ class SankhyaSession:
                 # Log warning but allow request to proceed
                 # (will likely fail with 401, triggering retry logic)
                 logger.warning(f"Failed to obtain valid token: {e}")
-        
+
         request_kwargs["headers"] = headers
 
     def _build_url(self, url: str) -> str:

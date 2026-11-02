@@ -1,43 +1,34 @@
 """Unit tests for DTOs."""
 
-import pytest
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
+from sankhya_sdk.models.dtos.movimento import MovimentoDTO, StatusFinanceiro, TipoTitulo
+from sankhya_sdk.models.dtos.nota import NotaCabecalhoDTO, NotaDTO, NotaItemDTO, TipoOperacao
 from sankhya_sdk.models.dtos.parceiro import (
-    ParceiroDTO,
     ParceiroCreateDTO,
-    ParceiroListDTO,
-    TipoPessoa
-)
-from sankhya_sdk.models.dtos.nota import (
-    NotaCabecalhoDTO,
-    NotaItemDTO,
-    NotaDTO,
-    TipoOperacao
-)
-from sankhya_sdk.models.dtos.movimento import (
-    MovimentoDTO,
-    TipoTitulo,
-    StatusFinanceiro
+    ParceiroDTO,
+    TipoPessoa,
 )
 
 
 class TestParceiroDTO:
     """Tests for ParceiroDTO."""
-    
+
     def test_create_with_required_fields(self):
         parceiro = ParceiroDTO(nome="Test Partner")
         assert parceiro.nome == "Test Partner"
         assert parceiro.ativo == "S"
         assert parceiro.tipo_pessoa == TipoPessoa.JURIDICA
-    
+
     def test_field_aliases(self):
         data = {"NOMEPARC": "Test", "TIPPESSOA": "F", "ATIVO": "S"}
         parceiro = ParceiroDTO.model_validate(data)
         assert parceiro.nome == "Test"
         assert parceiro.tipo_pessoa == TipoPessoa.FISICA
-    
+
     def test_export_with_aliases(self):
         parceiro = ParceiroDTO(nome="Test", tipo_pessoa=TipoPessoa.FISICA)
         exported = parceiro.model_dump(by_alias=True, exclude_none=True)
@@ -47,11 +38,11 @@ class TestParceiroDTO:
 
 class TestParceiroCreateDTO:
     """Tests for ParceiroCreateDTO."""
-    
+
     def test_required_fields(self):
         with pytest.raises(ValueError):
             ParceiroCreateDTO()
-    
+
     def test_valid_create(self):
         dto = ParceiroCreateDTO(nome="New Partner", codigo_cidade=10)
         assert dto.nome == "New Partner"
@@ -60,7 +51,7 @@ class TestParceiroCreateDTO:
 
 class TestNotaCabecalhoDTO:
     """Tests for NotaCabecalhoDTO."""
-    
+
     def test_create_with_required_fields(self):
         nota = NotaCabecalhoDTO(
             codigo_parceiro=1,
@@ -69,7 +60,7 @@ class TestNotaCabecalhoDTO:
         )
         assert nota.codigo_parceiro == 1
         assert nota.tipo_operacao == TipoOperacao.SAIDA
-    
+
     def test_field_aliases(self):
         data = {
             "CODPARC": 123,
@@ -84,7 +75,7 @@ class TestNotaCabecalhoDTO:
 
 class TestNotaItemDTO:
     """Tests for NotaItemDTO."""
-    
+
     def test_create_item(self):
         item = NotaItemDTO(
             numero_unico=1,
@@ -98,7 +89,7 @@ class TestNotaItemDTO:
 
 class TestNotaDTO:
     """Tests for NotaDTO."""
-    
+
     def test_nota_with_items(self):
         cabecalho = NotaCabecalhoDTO(
             codigo_parceiro=1,
@@ -122,14 +113,14 @@ class TestNotaDTO:
             )
         ]
         nota = NotaDTO(cabecalho=cabecalho, itens=itens)
-        
+
         assert nota.quantidade_itens == 2
         assert nota.valor_total_itens == Decimal("50")
 
 
 class TestMovimentoDTO:
     """Tests for MovimentoDTO."""
-    
+
     def test_create_movimento(self):
         mov = MovimentoDTO(
             tipo_titulo=TipoTitulo.RECEBER,
@@ -141,7 +132,7 @@ class TestMovimentoDTO:
         )
         assert mov.tipo_titulo == TipoTitulo.RECEBER
         assert mov.valor_desdobramento == Decimal("100")
-    
+
     def test_status_aberto(self):
         mov = MovimentoDTO(
             tipo_titulo=TipoTitulo.PAGAR,
@@ -153,7 +144,7 @@ class TestMovimentoDTO:
             baixado="N"
         )
         assert mov.status == StatusFinanceiro.ABERTO
-    
+
     def test_status_baixado(self):
         mov = MovimentoDTO(
             tipo_titulo=TipoTitulo.PAGAR,
@@ -165,7 +156,7 @@ class TestMovimentoDTO:
             baixado="S"
         )
         assert mov.status == StatusFinanceiro.BAIXADO
-    
+
     def test_valor_em_aberto(self):
         mov = MovimentoDTO(
             tipo_titulo=TipoTitulo.RECEBER,

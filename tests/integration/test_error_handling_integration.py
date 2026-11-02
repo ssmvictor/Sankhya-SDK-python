@@ -36,7 +36,6 @@ from .conftest import (
     simple_crud_session,
 )
 
-
 # Tentativas totais de uma requisição que falha sempre: 1 + retries
 MAX_ATTEMPTS = 1 + MAX_RETRY_COUNT
 

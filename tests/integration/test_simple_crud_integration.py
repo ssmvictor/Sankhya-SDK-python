@@ -47,7 +47,6 @@ from .conftest import (
     simple_crud_session,
 )
 
-
 FIND = ServiceName.CRUD_SERVICE_FIND
 SAVE = ServiceName.CRUD_SERVICE_SAVE
 REMOVE = ServiceName.CRUD_SERVICE_REMOVE
@@ -76,26 +75,26 @@ class TestSimpleCRUDFind:
             ])),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             # Sessão principal + sessão dedicada do SimpleCRUD
             assert server.logins == 2
-            
+
             # Buscar parceiro por código
             search = Partner(code=123)
             result = SimpleCRUDRequestWrapper.try_find(search)
-        
+
         # Verificar resultado (o servidor retornou exatamente um registro)
         assert result is not None
         assert result.code == 123
         assert result.name == "Cliente Encontrado"
-        
+
         # loadRecords na entidade Parceiro com o critério da chave preenchida
         assert server.calls == [FIND.internal_value]
         (body,) = server.bodies(FIND)
         assert _data_set_root_entity(body) == "Parceiro"
         assert find_criteria(body) == "CODPARC = 123"
-        
+
         # As duas sessões são encerradas no dispose
         assert server.logouts == 2
 
@@ -110,17 +109,17 @@ class TestSimpleCRUDFind:
             ], total_records=3)),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             # Buscar todos os parceiros ativos
             search = Partner()  # Sem filtros específicos
             results = SimpleCRUDRequestWrapper.find_all(search)
-        
+
         assert len(results) == 3
         assert results[0].code == 1
         assert results[1].code == 2
         assert results[2].code == 3
-        
+
         # Sem campos preenchidos o critério vai vazio (<criteria/>), como no
         # .NET (EntityResolverResult.LiteralCriteria sempre instanciado)
         (body,) = server.bodies(FIND)
@@ -135,11 +134,11 @@ class TestSimpleCRUDFind:
             http_response(200, create_success_response([])),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             search = Partner(code=99999)
             result = SimpleCRUDRequestWrapper.try_find(search)
-        
+
         assert result is None
         (body,) = server.bodies(FIND)
         assert find_criteria(body) == "CODPARC = 99999"
@@ -158,16 +157,16 @@ class TestSimpleCRUDCreate:
             ])),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             # Sem chave primária: saveRecord cria o registro
             new_partner = Partner(name="Novo Parceiro")
             result = SimpleCRUDRequestWrapper.update(new_partner)
-        
+
         # O servidor deve ter atribuído o código
         assert result.code == 1000
         assert result.name == "Novo Parceiro"
-        
+
         # saveRecord sem chave, com o nome nos campos locais
         assert server.calls == [SAVE.internal_value]
         (body,) = server.bodies(SAVE)
@@ -185,14 +184,14 @@ class TestSimpleCRUDCreate:
             ])),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             new_product = Product(name="Produto Novo", code_volume="UN")
             result = SimpleCRUDRequestWrapper.update(new_product)
-        
+
         assert result.code == 500
         assert result.name == "Produto Novo"
-        
+
         (body,) = server.bodies(SAVE)
         assert _data_set_root_entity(body) == "Produto"
         keys, local_fields = save_data_row(body)
@@ -213,14 +212,14 @@ class TestSimpleCRUDUpdate:
             ])),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             partner = Partner(code=123, name="Nome Atualizado")
             result = SimpleCRUDRequestWrapper.update(partner)
-        
+
         assert result.code == 123
         assert result.name == "Nome Atualizado"
-        
+
         # A chave vai em dataRow/key e os demais campos em localFields
         (body,) = server.bodies(SAVE)
         assert _data_set_root_entity(body) == "Parceiro"
@@ -242,12 +241,12 @@ class TestSimpleCRUDDelete:
             ),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             partner = Partner(code=123)
             # Não deve lançar exceção
             SimpleCRUDRequestWrapper.remove(partner)
-        
+
         # removeRecord: <entity rootEntity="Parceiro"><id><CODPARC>123</CODPARC></id>
         assert server.calls == [REMOVE.internal_value]
         (body,) = server.bodies(REMOVE)
@@ -271,13 +270,13 @@ class TestSimpleCRUDErrorHandling:
             ),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             partner = Partner(code=1, name="Duplicado")
-            
+
             with pytest.raises(SankhyaException) as exc_info:
                 SimpleCRUDRequestWrapper.update(partner)
-        
+
         assert "Chave primária duplicada" in str(exc_info.value)
         assert server.calls_to(SAVE) == 1
 
@@ -293,14 +292,14 @@ class TestSimpleCRUDErrorHandling:
             ),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             # Tentar deletar parceiro que tem dependências
             partner = Partner(code=1)
-            
+
             with pytest.raises(SankhyaException) as exc_info:
                 SimpleCRUDRequestWrapper.remove(partner)
-        
+
         assert "Violação de chave estrangeira" in str(exc_info.value)
         assert server.calls_to(REMOVE) == 1
 
@@ -316,14 +315,14 @@ class TestSimpleCRUDErrorHandling:
             ),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             # Parceiro sem nome
             partner = Partner(code=0)
-            
+
             with pytest.raises(SankhyaException) as exc_info:
                 SimpleCRUDRequestWrapper.update(partner)
-        
+
         assert "NOMEPARC" in str(exc_info.value)
         assert server.calls_to(SAVE) == 1
 
@@ -336,23 +335,23 @@ class TestSimpleCRUDWithCriteria:
     def test_find_with_literal_criteria(self, mock_session_class):
         """Busca com critérios SQL literais."""
         from sankhya_sdk.helpers.filter_expression import LiteralCriteria
-        
+
         server = FakeSankhyaServer([
             http_response(200, create_success_response([
                 {"CODPARC": "42", "NOMEPARC": "Parceiro Específico"}
             ])),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             criteria = LiteralCriteria.equals("CODPARC", 42)
             result = SimpleCRUDRequestWrapper.try_find_with_criteria(
                 Partner, criteria
             )
-        
+
         assert result is not None
         assert result.code == 42
-        
+
         # O critério literal vai em dataSet/criteria (Resolve<T>(ILiteralCriteria))
         (body,) = server.bodies(FIND)
         assert _data_set_root_entity(body) == "Parceiro"
@@ -377,18 +376,18 @@ class TestSimpleCRUDBulkOperations:
             for i in range(1, 4)
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             created = []
             for i in range(1, 4):
                 partner = Partner(name=f"Parceiro {i}")
                 result = SimpleCRUDRequestWrapper.update(partner)
                 created.append(result)
-        
+
         assert len(created) == 3
         for i, p in enumerate(created, 1):
             assert p.code == i
-        
+
         # Um saveRecord por parceiro, cada um com o seu nome
         bodies = server.bodies(SAVE)
         assert [save_data_row(body)[1] for body in bodies] == [
@@ -429,11 +428,11 @@ class TestSimpleCRUDResponseParsing:
                 "</responseBody></serviceResponse>"
             ).encode("utf-8")
         )
-        
+
         result = SimpleCRUDRequestWrapper._process_find_response(
             response, Partner, optional=True
         )
-        
+
         assert result is not None
         assert result.code == 123
         assert result.name == "Cliente Encontrado"

@@ -15,7 +15,6 @@ from decimal import Decimal
 from typing import (
     Any,
     Dict,
-    Generic,
     List,
     Optional,
     Type,
@@ -32,7 +31,7 @@ T = TypeVar("T")
 
 class Metadata:
     """Representa metadados de campos."""
-    
+
     def __init__(self, fields: Optional[List[Dict[str, str]]] = None):
         self.fields = fields or []
 
@@ -155,8 +154,8 @@ class EntityDynamicSerialization:
 
         instance = entity_type()
         instance, _ = self._parse_entity(
-            instance, 
-            entity_type, 
+            instance,
+            entity_type,
             ReferenceLevel.FIFTH,
         )
         return instance
@@ -185,10 +184,10 @@ class EntityDynamicSerialization:
         """
         current_int = self._level_to_int(current_level)
         max_int = self._level_to_int(max_inner_level)
-        
+
         if current_int >= max_int:
             return None, False
-        
+
         has_fields_set = False
         # print(f"DEBUG: Parsing entity {entity_type.__name__}, fields: {list(entity_type.model_fields.keys())}")
         for field_name, field_info in entity_type.model_fields.items():
@@ -202,7 +201,7 @@ class EntityDynamicSerialization:
             )
             if field_set:
                 has_fields_set = True
-        
+
         return instance, has_fields_set
 
     def _parse_property(
@@ -229,22 +228,21 @@ class EntityDynamicSerialization:
             True se um valor foi definido, False caso contrário
         """
         from sankhya_sdk.attributes.reflection import (
-            get_entity_name,
             get_field_metadata,
         )
-        
+
         metadata = get_field_metadata(field_info)
-        
+
         # Verifica se deve ignorar
         if metadata.is_ignored:
             return False
-        
+
         property_name = metadata.element_name or field_name
-        
+
         # Adiciona prefixo se existir
         if prefix:
             property_name = f"{prefix}_{property_name}"
-        
+
         # Verifica se é referência
         if metadata.is_reference:
             return self._parse_entity_reference(
@@ -256,16 +254,16 @@ class EntityDynamicSerialization:
                 field_info,
                 metadata,
             )
-        
+
         # Busca valor no dicionário
         value = self._get_value_from_dict(property_name)
         # print(f"DEBUG: Checking property '{property_name}' for field '{field_name}'")
         # if property_name == "CODPARC":
         #      print(f"DEBUG: FOUND CODPARC check! Value: {value}")
-        
+
         if value is None:
             return False
-        
+
         # Converte e define o valor
         converted_value = self._convert_value(value, field_info)
         # if property_name == "CODPARC":
@@ -278,7 +276,7 @@ class EntityDynamicSerialization:
             except (ValueError, TypeError):
                 # print(f"DEBUG: Error setting {field_name}: {e}")
                 pass
-        
+
         return False
 
     def _parse_entity_reference(
@@ -307,32 +305,32 @@ class EntityDynamicSerialization:
             True se a referência foi definida, False caso contrário
         """
         from sankhya_sdk.attributes.reflection import get_entity_name
-        
+
         # Obtém tipo interno e verifica se é lista
         inner_type, is_list = self._get_inner_type_with_list_check(field_info)
         if inner_type is None:
             return False
-        
+
         # Campos de referência do tipo lista não são suportados na
         # conversão dinâmica de dados flat. Seria necessário aceitar
         # múltiplos prefixos (e.g., Ref_0_, Ref_1_) ou uma lista de dicionários.
         if is_list:
             return False
-        
+
         # Determina prefixo da referência
         custom_name = metadata.custom_relation_name
         if custom_name:
             ref_prefix = custom_name
         else:
             ref_prefix = get_entity_name(inner_type)
-        
+
         if prefix:
             ref_prefix = f"{prefix}_{ref_prefix}"
-        
+
         # Incrementa nível
         current_int = self._level_to_int(current_level)
         inner_level = self._int_to_level(current_int + 1)
-        
+
         # Parse recursivo
         inner_instance = inner_type()
         ref_value, has_fields = self._parse_entity(
@@ -342,7 +340,7 @@ class EntityDynamicSerialization:
             ref_prefix,
             inner_level,
         )
-        
+
         # Só atribui a referência se houver campos efetivamente preenchidos
         if ref_value is not None and has_fields:
             try:
@@ -350,7 +348,7 @@ class EntityDynamicSerialization:
                 return True
             except (ValueError, TypeError):
                 pass
-        
+
         return False
 
     def _get_value_from_dict(self, property_name: str) -> Optional[Any]:
@@ -365,11 +363,11 @@ class EntityDynamicSerialization:
         """
         if property_name in self._dictionary:
             return self._dictionary[property_name]
-        
+
         upper_name = property_name.upper()
         if upper_name in self._dictionary:
             return self._dictionary[upper_name]
-        
+
         return None
 
     def _convert_value(self, value: Any, field_info: Any) -> Any:
@@ -385,9 +383,9 @@ class EntityDynamicSerialization:
         """
         if value is None:
             return None
-        
+
         annotation = field_info.annotation
-        
+
         # Remove Optional/Union
         origin = get_origin(annotation)
         if origin is not None:
@@ -396,28 +394,28 @@ class EntityDynamicSerialization:
                 if arg is not type(None):
                     annotation = arg
                     break
-        
+
         str_value = str(value)
-        
+
         try:
             if annotation is str:
                 return str_value
-            
+
             elif annotation is int:
                 return int(float(str_value))
-            
+
             elif annotation is float:
                 return float(str_value)
-            
+
             elif annotation is Decimal:
                 return Decimal(str_value)
-            
+
             elif annotation is bool:
                 return self._convert_to_bool(str_value)
-            
+
             elif annotation is datetime:
                 return self._convert_to_datetime(str_value)
-            
+
             elif self._is_transport_type(annotation):
                 # Enums com valor interno (ex.: "F" -> FiscalPersonType) e
                 # horários HHMMSS: mesma conversão da camada de transporte
@@ -428,7 +426,7 @@ class EntityDynamicSerialization:
             else:
                 # Tenta conversão direta
                 return annotation(str_value) if callable(annotation) else str_value
-        
+
         except (ValueError, TypeError):
             return None
 
@@ -464,8 +462,8 @@ class EntityDynamicSerialization:
         Returns:
             Valor boolean
         """
-        from sankhya_sdk.models.service.xml_serialization import deserialize_bool
         from sankhya_sdk.models.service.constants import SankhyaConstants
+        from sankhya_sdk.models.service.xml_serialization import deserialize_bool
 
         return deserialize_bool(value, SankhyaConstants.BOOL_FORMAT_S_N)
 
@@ -487,13 +485,13 @@ class EntityDynamicSerialization:
             "%Y-%m-%dT%H:%M:%S",
             "%Y-%m-%dT%H:%M:%S.%f",
         ]
-        
+
         for fmt in formats:
             try:
                 return datetime.strptime(value, fmt)
             except ValueError:
                 continue
-        
+
         raise ValueError(f"Invalid date format: {value}")
 
     def _get_inner_type(self, field_info: Any) -> Optional[Type]:
@@ -508,7 +506,7 @@ class EntityDynamicSerialization:
         """
         inner_type, _ = self._get_inner_type_with_list_check(field_info)
         return inner_type
-    
+
     def _get_inner_type_with_list_check(self, field_info: Any) -> tuple[Optional[Type], bool]:
         """
         Obtém o tipo interno de uma anotação e verifica se é uma lista.
@@ -521,7 +519,7 @@ class EntityDynamicSerialization:
         """
         annotation = field_info.annotation
         origin = get_origin(annotation)
-        
+
         if origin is not None:
             # Verifica se é uma lista diretamente
             if origin is list:
@@ -529,7 +527,7 @@ class EntityDynamicSerialization:
                 if args:
                     return args[0], True
                 return None, True
-            
+
             # Handle Optional[T] ou Union[T, None]
             args = get_args(annotation)
             for arg in args:
@@ -542,7 +540,7 @@ class EntityDynamicSerialization:
                             return inner_args[0], True
                         return None, True
                     return arg, False
-        
+
         return annotation, False
 
     def change_keys(self, new_keys: Metadata) -> None:
@@ -562,12 +560,12 @@ class EntityDynamicSerialization:
         """
         if new_keys is None:
             return
-        
+
         if len(new_keys.fields) != len(self._dictionary):
             raise ValueError(
                 f"Key count mismatch: {len(new_keys.fields)} vs {len(self._dictionary)}"
             )
-        
+
         missing_keys = [
             f"f{index}"
             for index in range(len(new_keys.fields))
@@ -581,12 +579,12 @@ class EntityDynamicSerialization:
             )
 
         new_dict = {}
-        
+
         for index, field in enumerate(new_keys.fields):
             old_key = f"f{index}"
             value = self._dictionary[old_key]
             new_dict[field.get("name", old_key)] = value
-        
+
         self._dictionary = new_dict
 
     @staticmethod

@@ -31,7 +31,6 @@ from sankhya_sdk.request_wrappers.interfaces import IOnDemandRequestWrapper
 from sankhya_sdk.request_wrappers.on_demand_request_wrapper import OnDemandRequestWrapper
 from sankhya_sdk.value_objects.on_demand_request_instance import OnDemandRequestInstance
 
-
 logger = logging.getLogger(__name__)
 
 # TypeVar para entidades genéricas
@@ -105,7 +104,7 @@ class OnDemandRequestFactory:
             session_token = context.acquire_new_session(
                 ServiceRequestType.ON_DEMAND_CRUD
             )
-        
+
         # Cria wrapper; a sessão dedicada passa a pertencer a ele e é
         # finalizada quando o worker termina, como no .NET
         # (OnDemandRequestWrapper.cs:144-165)
@@ -123,10 +122,10 @@ class OnDemandRequestFactory:
             if context and session_token:
                 context.detach_on_demand_request_wrapper(session_token)
             raise
-        
+
         # Gera chave única
         key = uuid4()
-        
+
         # Cria instância de registro
         instance = OnDemandRequestInstance(
             key=key,
@@ -135,17 +134,17 @@ class OnDemandRequestFactory:
             instance=wrapper,
             is_async=False,
         )
-        
+
         # Registra com lock
         with cls._lock:
             cls._instances[key] = instance
-        
+
         logger.info(
             f"OnDemandRequestWrapper criado: key={key}, "
             f"entity_type={entity_type.__name__}, "
             f"service={service.name}"
         )
-        
+
         return key
 
     @classmethod
@@ -213,7 +212,7 @@ class OnDemandRequestFactory:
         """
         with cls._lock:
             instance = cls._instances.get(key)
-        
+
         if instance and not instance.is_async:
             instance.instance.flush()
             logger.debug(f"Flush executado: key={key}")
@@ -231,13 +230,13 @@ class OnDemandRequestFactory:
                 inst for inst in cls._instances.values()
                 if not inst.is_async
             ]
-        
+
         for instance in instances:
             try:
                 instance.instance.flush()
             except Exception as e:
                 logger.warning(f"Erro ao fazer flush: {e}")
-        
+
         logger.debug(f"Flush executado em {len(instances)} instâncias")
 
     @classmethod
@@ -253,7 +252,7 @@ class OnDemandRequestFactory:
         """
         with cls._lock:
             instance = cls._instances.pop(key, None)
-        
+
         if instance and not instance.is_async:
             try:
                 instance.instance.dispose()
@@ -276,13 +275,13 @@ class OnDemandRequestFactory:
                 if not inst.is_async
             ]
             sync_instances = [cls._instances.pop(key) for key in sync_keys]
-        
+
         for instance in sync_instances:
             try:
                 instance.instance.dispose()
             except Exception as e:
                 logger.warning(f"Erro ao finalizar instância: {e}")
-        
+
         logger.info(f"Finalizadas {len(sync_instances)} instâncias síncronas")
 
     @classmethod

@@ -7,21 +7,21 @@ Testa serialização/deserialização XML de classes básicas.
 import pytest
 from lxml import etree
 
+from sankhya_sdk.enums.parameter_type import ParameterType
 from sankhya_sdk.models.service.basic_types import (
-    FieldValue,
-    Field,
     Criteria,
-    Parameter,
+    DataRow,
+    Field,
+    FieldValue,
     LiteralCriteria,
     LiteralCriteriaSql,
-    DataRow,
-    ReferenceFetch,
-    Prop,
+    Parameter,
     Path,
     Paths,
+    Prop,
+    ReferenceFetch,
 )
 from sankhya_sdk.models.service.entity_types import Entity
-from sankhya_sdk.enums.parameter_type import ParameterType
 
 
 class TestFieldValue:
@@ -31,7 +31,7 @@ class TestFieldValue:
         """Testa serialização para XML."""
         fv = FieldValue(name="CODPROD", value="123")
         xml = fv.to_xml()
-        
+
         assert xml.tag == "campo"
         assert xml.get("nome") == "CODPROD"
         assert xml.text == "123"
@@ -41,7 +41,7 @@ class TestFieldValue:
         xml_str = '<campo nome="CODPROD">123</campo>'
         elem = etree.fromstring(xml_str)
         fv = FieldValue.from_xml(elem)
-        
+
         assert fv.name == "CODPROD"
         assert fv.value == "123"
 
@@ -49,14 +49,14 @@ class TestFieldValue:
         """Testa igualdade case-insensitive."""
         fv1 = FieldValue(name="CODPROD", value="123")
         fv2 = FieldValue(name="codprod", value="456")
-        
+
         assert fv1 == fv2
 
     def test_hash(self):
         """Testa hash case-insensitive."""
         fv1 = FieldValue(name="CODPROD", value="123")
         fv2 = FieldValue(name="codprod", value="456")
-        
+
         assert hash(fv1) == hash(fv2)
 
 
@@ -67,7 +67,7 @@ class TestField:
         """Testa serialização básica para XML."""
         field = Field(name="CODPROD")
         xml = field.to_xml()
-        
+
         assert xml.tag == "field"
         assert xml.get("name") == "CODPROD"
         assert xml.get("list") is None
@@ -76,7 +76,7 @@ class TestField:
         """Testa serialização com todos os atributos."""
         field = Field(name="DESCRPROD", list="Lista", except_=True, value="Produto")
         xml = field.to_xml()
-        
+
         assert xml.get("name") == "DESCRPROD"
         assert xml.get("list") == "Lista"
         assert xml.get("except") == "true"
@@ -87,7 +87,7 @@ class TestField:
         xml_str = '<field name="CODPROD" list="Lista" except="true">Valor</field>'
         elem = etree.fromstring(xml_str)
         field = Field.from_xml(elem)
-        
+
         assert field.name == "CODPROD"
         assert field.list == "Lista"
         assert field.except_ is True
@@ -300,7 +300,7 @@ class TestDataRow:
         """Testa serialização para XML."""
         row = DataRow(fields={"CODPROD": "123", "DESCRPROD": "Produto"})
         xml = row.to_xml()
-        
+
         assert xml.tag == "row"
         assert xml.find("CODPROD").text == "123"
         assert xml.find("DESCRPROD").text == "Produto"
@@ -315,7 +315,7 @@ class TestDataRow:
         """
         elem = etree.fromstring(xml_str)
         row = DataRow.from_xml(elem)
-        
+
         assert row["id"] == "1"
         assert row["CODPROD"] == "123"
         assert row["DESCRPROD"] == "Produto"
@@ -323,10 +323,10 @@ class TestDataRow:
     def test_dict_access(self):
         """Testa acesso como dicionário."""
         row = DataRow(fields={"CODPROD": "123"})
-        
+
         assert row["CODPROD"] == "123"
         assert row.get("INEXISTENTE", "default") == "default"
-        
+
         row["NOVO"] = "valor"
         assert row["NOVO"] == "valor"
 
@@ -397,7 +397,7 @@ class TestProp:
         """Testa serialização para XML."""
         prop = Prop(name="config", value="valor")
         xml = prop.to_xml()
-        
+
         assert xml.tag == "prop"
         assert xml.get("name") == "config"
         assert xml.text == "valor"
@@ -407,7 +407,7 @@ class TestProp:
         xml_str = '<prop name="config">valor</prop>'
         elem = etree.fromstring(xml_str)
         prop = Prop.from_xml(elem)
-        
+
         assert prop.name == "config"
         assert prop.value == "valor"
 
@@ -419,7 +419,7 @@ class TestPath:
         """Testa serialização para XML."""
         path = Path(value="/caminho/arquivo.pdf", type="pdf")
         xml = path.to_xml()
-        
+
         assert xml.tag == "path"
         assert xml.get("type") == "pdf"
         assert xml.text == "/caminho/arquivo.pdf"
@@ -429,7 +429,7 @@ class TestPath:
         xml_str = '<path type="pdf">/caminho/arquivo.pdf</path>'
         elem = etree.fromstring(xml_str)
         path = Path.from_xml(elem)
-        
+
         assert path.value == "/caminho/arquivo.pdf"
         assert path.type == "pdf"
 
@@ -444,7 +444,7 @@ class TestPaths:
             Path(value="/caminho2.pdf"),
         ])
         xml = paths.to_xml()
-        
+
         assert xml.tag == "paths"
         assert len(xml.findall("path")) == 2
 
@@ -458,6 +458,6 @@ class TestPaths:
         """
         elem = etree.fromstring(xml_str)
         paths = Paths.from_xml(elem)
-        
+
         assert len(paths.items) == 2
         assert paths.items[0].value == "/caminho1.pdf"

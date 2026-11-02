@@ -9,30 +9,27 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Transport/
 
 from __future__ import annotations
 
-from abc import abstractmethod
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Optional, Type, TypeVar, get_origin, get_args
+from typing import Any, Dict, Optional, Type, TypeVar, get_args, get_origin
 
 from lxml import etree
 from lxml.etree import Element
 
+from ...attributes.reflection import (
+    get_entity_name,
+    get_field_metadata,
+)
+from ...enums._metadata import MetadataEnum
 from ..base import EntityBase
 from ..service.xml_serialization import (
     XmlSerializableBase,
     create_xml_element,
-    get_element_text,
-    deserialize_optional_int,
-    serialize_bool,
     deserialize_bool,
+    deserialize_optional_int,
+    get_element_text,
+    serialize_bool,
 )
-from ...attributes.reflection import (
-    get_entity_name,
-    get_field_metadata,
-    get_element_name,
-)
-from ...attributes.metadata import EntityFieldMetadata
-from ...enums._metadata import MetadataEnum
 
 T = TypeVar("T", bound="TransportEntityBase")
 
@@ -69,21 +66,21 @@ def deserialize_datetime(value: Optional[str]) -> Optional[datetime]:
     """
     if not value or not value.strip():
         return None
-    
+
     value = value.strip()
-    
+
     # Tenta formato longo primeiro
     try:
         return datetime.strptime(value, SANKHYA_DATE_FORMAT)
     except ValueError:
         pass
-    
+
     # Tenta formato curto
     try:
         return datetime.strptime(value, SANKHYA_DATE_FORMAT_SHORT)
     except ValueError:
         pass
-    
+
     # Tenta formatos ISO
     try:
         return datetime.fromisoformat(value)
@@ -104,7 +101,7 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
         - Suporte a relacionamentos (entity_reference)
         - Validação de campos customizada
     """
-    
+
     def to_xml(self) -> Element:
         """
         Serializa a entidade para um elemento XML.
@@ -119,20 +116,20 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
         """
         entity_name = get_entity_name(type(self))
         root = etree.Element(entity_name)
-        
+
         for field_name, field_info in self.model_fields.items():
             # Verifica se deve serializar o campo
             if not self.should_serialize_field(field_name):
                 continue
-            
+
             metadata = get_field_metadata(field_info)
-            
+
             # Ignora campos marcados com entity_ignore
             if metadata.is_ignored:
                 continue
-            
+
             value = getattr(self, field_name)
-            
+
             # Trata entidades relacionadas (entity_reference)
             if metadata.reference is not None:
                 if value is not None and isinstance(value, TransportEntityBase):
@@ -148,25 +145,25 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
                         # repetir <Entidade><Entidade>), simétrico ao from_xml.
                         root.append(value.to_xml())
                 continue
-            
+
             # Trata campos de lista (coleções)
             if isinstance(value, list):
                 for item in value:
                     if isinstance(item, TransportEntityBase):
                         root.append(item.to_xml())
                 continue
-            
+
             # Obtém nome do elemento XML
             element_name = metadata.element.element_name if metadata.element else field_name.upper()
-            
+
             # Serializa o valor
             serialized_value = self._serialize_value(value, field_name)
-            
+
             if serialized_value is not None:
                 create_xml_element(element_name, serialized_value, parent=root)
-        
+
         return root
-    
+
     def _serialize_value(self, value: Any, field_name: str) -> Optional[str]:
         """
         Serializa um valor para string XML.
@@ -180,31 +177,31 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
         """
         if value is None:
             return None
-        
+
         if isinstance(value, bool):
             return serialize_bool(value, "S|N")
-        
+
         if isinstance(value, MetadataEnum):
             return value.internal_value
-        
+
         if isinstance(value, datetime):
             return serialize_datetime(value)
-        
+
         if isinstance(value, timedelta):
             total_seconds = int(value.total_seconds())
             hours = total_seconds // 3600
             minutes = (total_seconds % 3600) // 60
             seconds = total_seconds % 60
             return f"{hours:02d}{minutes:02d}{seconds:02d}"
-        
+
         if isinstance(value, Decimal):
             return str(value)
-        
+
         if isinstance(value, (int, float)):
             return str(value)
-        
+
         return str(value)
-    
+
     @classmethod
     def from_xml(cls: Type[T], element: Element) -> T:
         """
@@ -217,14 +214,14 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
             Instância da entidade preenchida com dados do XML
         """
         kwargs: Dict[str, Any] = {}
-        
+
         for field_name, field_info in cls.model_fields.items():
             metadata = get_field_metadata(field_info)
-            
+
             # Ignora campos marcados com entity_ignore
             if metadata.is_ignored:
                 continue
-            
+
             # Obtém o tipo do campo já resolvido pelo pydantic (inclusive forward
             # references resolvidas via model_rebuild). Usar get_type_hints com um
             # globalns substituto descartava os imports do módulo da entidade
@@ -233,7 +230,7 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
             field_type = field_info.annotation if field_info.annotation is not None else str
             origin = get_origin(field_type)
             args = get_args(field_type)
-            
+
             # Para Optional[X], obtém o tipo X
             if origin is type(None) or (args and type(None) in args):
                 # É Optional
@@ -242,7 +239,7 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
                 )
             else:
                 inner_type = field_type if not origin else origin
-            
+
             # Trata entidades relacionadas (entity_reference)
             if metadata.reference is not None:
                 # Procura elemento filho pelo nome customizado ou nome da entidade
@@ -258,7 +255,7 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
                         else:
                             kwargs[field_name] = inner_type.from_xml(ref_element)
                 continue
-            
+
             # Trata campos de lista (coleções)
             origin = get_origin(field_type)
             if origin is list:
@@ -273,24 +270,24 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
                         if items:
                             kwargs[field_name] = items
                 continue
-            
+
             # Obtém nome do elemento XML
             element_name = metadata.element.element_name if metadata.element else field_name.upper()
-            
+
             # Busca o elemento filho
             child_element = element.find(element_name)
-            
+
             if child_element is not None:
                 text_value = get_element_text(child_element)
-                
+
                 if text_value:
                     # Deserializa baseado no tipo
                     deserialized = cls._deserialize_value(text_value, inner_type)
                     if deserialized is not None:
                         kwargs[field_name] = deserialized
-        
+
         return cls(**kwargs)
-    
+
     @classmethod
     def _deserialize_value(cls, value: str, target_type: type) -> Any:
         """
@@ -305,11 +302,11 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
         """
         if not value:
             return None
-        
+
         # Boolean
         if target_type is bool:
             return deserialize_bool(value, "S|N")
-        
+
         # MetadataEnum - check if target_type inherits from MetadataEnum
         try:
             if isinstance(target_type, type) and issubclass(target_type, MetadataEnum):
@@ -323,29 +320,29 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
                 return None
         except TypeError:
             pass
-        
+
         # Integer
         if target_type is int:
             return deserialize_optional_int(value)
-        
+
         # Float
         if target_type is float:
             try:
                 return float(value)
             except ValueError:
                 return None
-        
+
         # Decimal
         if target_type is Decimal:
             try:
                 return Decimal(value)
             except (ValueError, InvalidOperation):
                 return None
-        
+
         # Datetime
         if target_type is datetime:
             return deserialize_datetime(value)
-        
+
         # timedelta (HHMMSS format)
         if target_type is timedelta:
             if len(value) == 6:
@@ -357,10 +354,10 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
                 except ValueError:
                     return None
             return None
-        
+
         # String por padrão
         return value
-    
+
     def __eq__(self, other: object) -> bool:
         """
         Compara duas entidades.
@@ -370,9 +367,9 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
         """
         if not isinstance(other, type(self)):
             return False
-        
+
         return self._compare_fields(other)
-    
+
     def _compare_fields(self, other: "TransportEntityBase") -> bool:
         """
         Compara campos entre duas entidades.
@@ -382,16 +379,16 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
         for field_name in self.model_fields:
             self_value = getattr(self, field_name)
             other_value = getattr(other, field_name)
-            
+
             # Comparação case-insensitive para strings
             if isinstance(self_value, str) and isinstance(other_value, str):
                 if self_value.lower() != other_value.lower():
                     return False
             elif self_value != other_value:
                 return False
-        
+
         return True
-    
+
     def __hash__(self) -> int:
         """
         Calcula hash da entidade.
@@ -399,19 +396,19 @@ class TransportEntityBase(EntityBase, XmlSerializableBase):
         Usa campos imutáveis (chave primária) para o cálculo.
         """
         hash_values = []
-        
+
         for field_name, field_info in self.model_fields.items():
             metadata = get_field_metadata(field_info)
-            
+
             if metadata.is_key:
                 value = getattr(self, field_name)
                 if isinstance(value, str):
                     hash_values.append(value.lower())
                 else:
                     hash_values.append(value)
-        
+
         # Se não houver chaves, usa o id do objeto
         if not hash_values:
             return id(self)
-        
+
         return hash(tuple(hash_values))

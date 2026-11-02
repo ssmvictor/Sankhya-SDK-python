@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-from unittest.mock import MagicMock
-import pytest
+from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import (
     ConfirmInvoiceException,
-    NoItemsConfirmInvoiceException,
     InvalidServiceQueryOptionsException,
     MissingSerializerHelperEntityException,
+    NoItemsConfirmInvoiceException,
     OpenFileException,
 )
-from sankhya_sdk.enums.service_name import ServiceName
+
 
 def test_confirm_invoice_exception() -> None:
     exc: ConfirmInvoiceException = ConfirmInvoiceException(123)

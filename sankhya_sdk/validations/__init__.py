@@ -22,11 +22,11 @@ from typing import Any
 from .entity_validation import EntityValidation
 from .exceptions import (
     EntityValidationError,
+    InvalidPropertyAttributeError,
+    MissingBaseClassError,
     MissingConstructorError,
     MissingEntityAttributeError,
-    MissingBaseClassError,
     MissingEqualityMethodsError,
-    InvalidPropertyAttributeError,
     MissingSerializeMethodError,
 )
 

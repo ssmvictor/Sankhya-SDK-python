@@ -12,12 +12,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from .base import TransportEntityBase
 from ...attributes.decorators import (
     entity,
-    entity_key,
     entity_element,
+    entity_key,
 )
+from .base import TransportEntityBase
 
 
 @entity("Custo")
@@ -37,41 +37,41 @@ class ProductCost(TransportEntityBase):
         sequence: Sequência (chave primária - SEQUENCIA)
         cost_replacement: Custo de reposição (CUSREP)
     """
-    
+
     code_product: int = entity_key(
         entity_element("CODPROD", default=0)
     )
-    
+
     code_company: Optional[int] = entity_element(
         "CODEMP",
         default=None
     )
-    
+
     date: Optional[datetime] = entity_key(
         entity_element("DTATUAL", default=None)
     )
-    
+
     code_local: Optional[int] = entity_key(
         entity_element("CODLOCAL", default=None)
     )
-    
+
     control: Optional[str] = entity_key(
         entity_element("CONTROLE", default=None)
     )
-    
+
     single_number: Optional[int] = entity_key(
         entity_element("NUNOTA", default=None)
     )
-    
+
     sequence: Optional[int] = entity_key(
         entity_element("SEQUENCIA", default=None)
     )
-    
+
     cost_replacement: Optional[Decimal] = entity_element(
         "CUSREP",
         default=None
     )
-    
+
     @staticmethod
     def _compare_optional_str_ci(a: Optional[str], b: Optional[str]) -> bool:
         """Compara duas strings opcionais de forma case-insensitive."""
@@ -80,20 +80,20 @@ class ProductCost(TransportEntityBase):
         if a is None or b is None:
             return False
         return a.lower() == b.lower()
-    
+
     def __eq__(self, other: object) -> bool:
         """
         Compara duas instâncias de ProductCost.
         """
         if other is None:
             return False
-        
+
         if self is other:
             return True
-        
+
         if not isinstance(other, ProductCost):
             return False
-        
+
         return (
             self.code_product == other.code_product
             and ("code_product" in self._fields_set) == (
@@ -126,7 +126,7 @@ class ProductCost(TransportEntityBase):
                 "cost_replacement" in other._fields_set
             )
         )
-    
+
     def __hash__(self) -> int:
         """
         Calcula hash da entidade.
@@ -135,32 +135,32 @@ class ProductCost(TransportEntityBase):
         """
         hash_code = self.code_product
         hash_code = (hash_code * 397) ^ hash("code_product" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_company or 0)
         hash_code = (hash_code * 397) ^ hash("code_company" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (hash(self.date) if self.date else 0)
         hash_code = (hash_code * 397) ^ hash("date" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_local or 0)
         hash_code = (hash_code * 397) ^ hash("code_local" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.control.lower()) if self.control else 0
         )
         hash_code = (hash_code * 397) ^ hash("control" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.single_number or 0)
         hash_code = (hash_code * 397) ^ hash("single_number" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.sequence or 0)
         hash_code = (hash_code * 397) ^ hash("sequence" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.cost_replacement) if self.cost_replacement else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "cost_replacement" in self._fields_set
         )
-        
+
         return hash_code

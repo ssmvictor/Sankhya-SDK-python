@@ -4,6 +4,15 @@ This module contains all the custom exceptions used by the Sankhya SDK.
 """
 
 from .base import IXmlServiceException, SankhyaException, ServiceRequestGeneralException
+from .http import (
+    SankhyaAuthError,
+    SankhyaClientError,
+    SankhyaForbiddenError,
+    SankhyaHttpError,
+    SankhyaNotFoundError,
+    SankhyaServerError,
+    raise_for_status,
+)
 from .intermediate import (
     ServiceRequestInvalidOperationException,
     ServiceRequestTemporarilyException,
@@ -59,15 +68,6 @@ from .simple import (
     ServiceRequestInvalidAuthorizationException,
     ServiceRequestInvalidCredentialsException,
     TooInnerLevelsException,
-)
-from .http import (
-    SankhyaHttpError,
-    SankhyaAuthError,
-    SankhyaForbiddenError,
-    SankhyaNotFoundError,
-    SankhyaClientError,
-    SankhyaServerError,
-    raise_for_status,
 )
 
 __all__ = [

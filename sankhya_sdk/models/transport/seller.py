@@ -11,16 +11,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from .base import TransportEntityBase
-from ..service.xml_serialization import serialize_bool, deserialize_bool
 from ...attributes.decorators import (
     entity,
-    entity_key,
     entity_element,
-    entity_reference,
-    entity_ignore,
+    entity_key,
 )
 from ...enums import SellerType
+from ..service.xml_serialization import deserialize_bool, serialize_bool
+from .base import TransportEntityBase
 
 # Forward reference para evitar import circular
 if TYPE_CHECKING:
@@ -49,48 +47,48 @@ class Seller(TransportEntityBase):
         type_internal: Tipo de vendedor como string (TIPVEND)
         date_changed: Data de alteração (DTALTER)
     """
-    
+
     code: int = entity_key(
         entity_element("CODVEND", default=0)
     )
-    
+
     code_user: Optional[int] = entity_element(
         "CODUSU",
         default=None
     )
-    
+
     code_partner: Optional[int] = entity_element(
         "CODPARC",
         default=None
     )
-    
+
     # Campo interno para serialização - NÃO usar diretamente
     is_active_internal: Optional[str] = entity_element(
         "ATIVO",
         default=None
     )
-    
+
     nickname: Optional[str] = entity_element(
         "APELIDO",
         default=None
     )
-    
+
     email: Optional[str] = entity_element(
         "EMAIL",
         default=None
     )
-    
+
     # Campo interno para tipo - NÃO usar diretamente
     type_internal: Optional[str] = entity_element(
         "TIPVEND",
         default=None
     )
-    
+
     date_changed: Optional[datetime] = entity_element(
         "DTALTER",
         default=None
     )
-    
+
     @property
     def is_active(self) -> bool:
         """
@@ -101,7 +99,7 @@ class Seller(TransportEntityBase):
         if self.is_active_internal is None:
             return False
         return deserialize_bool(self.is_active_internal, "S|N")
-    
+
     @is_active.setter
     def is_active(self, value: bool) -> None:
         """
@@ -110,7 +108,7 @@ class Seller(TransportEntityBase):
         Converte o booleano para "S" ou "N" e armazena em is_active_internal.
         """
         self.is_active_internal = serialize_bool(value, "S|N")
-    
+
     @property
     def type(self) -> SellerType:
         """
@@ -125,7 +123,7 @@ class Seller(TransportEntityBase):
             if member.internal_value == self.type_internal:
                 return member
         return SellerType.NONE
-    
+
     @type.setter
     def type(self, value: SellerType) -> None:
         """
@@ -134,20 +132,20 @@ class Seller(TransportEntityBase):
         Converte o enum para o valor interno e armazena em type_internal.
         """
         self.type_internal = value.internal_value
-    
+
     def __eq__(self, other: object) -> bool:
         """
         Compara duas instâncias de Seller.
         """
         if other is None:
             return False
-        
+
         if self is other:
             return True
-        
+
         if not isinstance(other, Seller):
             return False
-        
+
         return (
             self.code == other.code
             and ("code" in self._fields_set) == ("code" in other._fields_set)
@@ -174,7 +172,7 @@ class Seller(TransportEntityBase):
                 "date_changed" in other._fields_set
             )
         )
-    
+
     @staticmethod
     def _compare_optional_str_ci(a: Optional[str], b: Optional[str]) -> bool:
         """Compara duas strings opcionais de forma case-insensitive."""
@@ -183,7 +181,7 @@ class Seller(TransportEntityBase):
         if a is None or b is None:
             return False
         return a.lower() == b.lower()
-    
+
     def __hash__(self) -> int:
         """
         Calcula hash da entidade.
@@ -192,35 +190,35 @@ class Seller(TransportEntityBase):
         """
         hash_code = self.code
         hash_code = (hash_code * 397) ^ hash("code" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_user or 0)
         hash_code = (hash_code * 397) ^ hash("code_user" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_partner or 0)
         hash_code = (hash_code * 397) ^ hash("code_partner" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ hash(self.is_active)
         hash_code = (hash_code * 397) ^ hash(
             "is_active_internal" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.nickname.lower()) if self.nickname else 0
         )
         hash_code = (hash_code * 397) ^ hash("nickname" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.email.lower()) if self.email else 0
         )
         hash_code = (hash_code * 397) ^ hash("email" in self._fields_set)
-        
+
         # Use the ordinal value of the enum for hash
         hash_code = (hash_code * 397) ^ hash(self.type.name)
         hash_code = (hash_code * 397) ^ hash("type_internal" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.date_changed) if self.date_changed else 0
         )
         hash_code = (hash_code * 397) ^ hash("date_changed" in self._fields_set)
-        
+
         return hash_code

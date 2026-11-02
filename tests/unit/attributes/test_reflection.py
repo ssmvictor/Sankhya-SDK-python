@@ -1,10 +1,10 @@
 from pydantic import BaseModel
-from sankhya_sdk.attributes.decorators import entity, entity_key, entity_element
+
+from sankhya_sdk.attributes.decorators import entity, entity_element, entity_key
 from sankhya_sdk.attributes.reflection import (
+    extract_keys,
     get_entity_name,
     get_field_metadata,
-    is_entity_key,
-    extract_keys,
 )
 from sankhya_sdk.models.base import EntityBase
 

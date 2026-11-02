@@ -6,8 +6,8 @@ with automatic module selection (MGE/MGECOM) and JSON output.
 """
 
 import logging
-from typing import Any, Dict, Optional, List
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from sankhya_sdk.http.session import SankhyaSession
 

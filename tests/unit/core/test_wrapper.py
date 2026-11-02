@@ -3,10 +3,10 @@
 Unit tests for the SankhyaWrapper and related components.
 """
 
-from unittest.mock import MagicMock, Mock, call, patch
 import threading
+from unittest.mock import Mock, call, patch
+
 import pytest
-import requests
 
 from sankhya_sdk.core.constants import (
     DEFAULT_TIMEOUT,
@@ -20,14 +20,12 @@ from sankhya_sdk.core.types import ServiceAttribute, ServiceFile, SessionInfo
 from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.service_environment import ServiceEnvironment
 from sankhya_sdk.enums.service_name import ServiceName
-from sankhya_sdk.enums.service_request_type import ServiceRequestType
 from sankhya_sdk.exceptions import (
     ServiceRequestCanceledQueryException,
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
     ServiceRequestFileNotFoundException,
     ServiceRequestInaccessibleException,
-    ServiceRequestInvalidAuthorizationException,
     ServiceRequestPropertyValueException,
     ServiceRequestTimeoutException,
     ServiceRequestUnavailableException,

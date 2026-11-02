@@ -6,7 +6,7 @@ Este módulo contém dataclasses e tipos utilizados internamente
 pelo SankhyaWrapper.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 

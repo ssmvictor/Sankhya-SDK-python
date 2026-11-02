@@ -12,15 +12,16 @@ from typing import Any, Dict, List, Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import BaseModel, ConfigDict, Field as PydanticField
+from pydantic import BaseModel, ConfigDict
+from pydantic import Field as PydanticField
 
 from .xml_serialization import (
     create_xml_element,
+    deserialize_bool,
+    deserialize_optional_int,
     get_element_attr,
     get_element_text,
     serialize_bool,
-    deserialize_bool,
-    deserialize_optional_int,
 )
 
 
@@ -47,7 +48,7 @@ class User(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("usuario")
-        
+
         if self.user_id is not None:
             elem.set("idusu", str(self.user_id))
         if self.code:
@@ -64,11 +65,11 @@ class User(BaseModel):
             create_xml_element("departamento", self.department, parent=elem)
         if self.last_login:
             create_xml_element("ultimoLogin", self.last_login, parent=elem)
-        
+
         for key, value in self.extra_data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -76,11 +77,11 @@ class User(BaseModel):
         """Deserializa de elemento XML."""
         extra_data: Dict[str, Any] = {}
         known_elements = {"nomeUsu", "email", "departamento", "ultimoLogin"}
-        
+
         for child in element:
             if child.tag not in known_elements:
                 extra_data[child.tag] = get_element_text(child)
-        
+
         return cls(
             user_id=deserialize_optional_int(get_element_attr(element, "idusu")),
             code=get_element_attr(element, "codusu"),
@@ -153,7 +154,7 @@ class SessionInfo(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("SESSION")
-        
+
         if self.session_id:
             elem.set("ID", self.session_id)
         if self.creation_time:
@@ -187,7 +188,7 @@ class SessionInfo(BaseModel):
             elem.set("ultimaAtividade", self.last_activity)
         if self.application:
             elem.set("aplicacao", self.application)
-        
+
         return elem
 
     @classmethod
@@ -243,13 +244,13 @@ class SessionsResponse(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("SESSIONS")
-        
+
         if self.total is not None:
             elem.set("total", str(self.total))
-        
+
         for session in self.sessions:
             elem.append(session.to_xml())
-        
+
         return elem
 
     @classmethod
@@ -260,7 +261,7 @@ class SessionsResponse(BaseModel):
             for child in element
             if child.tag in ("SESSION", "sessao")
         ]
-        
+
         return cls(
             sessions=sessions,
             total=deserialize_optional_int(get_element_attr(element, "total")),
@@ -294,7 +295,7 @@ class Release(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("liberacao")
-        
+
         if self.code:
             elem.set("codigo", self.code)
         if self.sequence is not None:
@@ -321,11 +322,11 @@ class Release(BaseModel):
             create_xml_element("dtAprovacao", self.approval_date, parent=elem)
         if self.observation:
             create_xml_element("observacao", self.observation, parent=elem)
-        
+
         for key, value in self.extra_data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -336,11 +337,11 @@ class Release(BaseModel):
             "idSolicitante", "nomeSolicitante", "dtSolicitacao",
             "idAprovador", "nomeAprovador", "dtAprovacao", "observacao"
         }
-        
+
         for child in element:
             if child.tag not in known_elements:
                 extra_data[child.tag] = get_element_text(child)
-        
+
         return cls(
             code=get_element_attr(element, "codigo"),
             sequence=deserialize_optional_int(get_element_attr(element, "sequencia")),
@@ -402,7 +403,7 @@ class MessageUnlinkShipping(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("msgDesvincularRemessa")
-        
+
         if self.code:
             elem.set("codigo", self.code)
         elem.set("sucesso", serialize_bool(self.success))
@@ -412,7 +413,7 @@ class MessageUnlinkShipping(BaseModel):
             elem.set("numRemessa", str(self.shipping_number))
         if self.message:
             elem.text = self.message
-        
+
         return elem
 
     @classmethod
@@ -451,7 +452,7 @@ class LowData(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("dadosBaixa")
-        
+
         if self.type:
             elem.set("tipo", self.type)
         if self.date:
@@ -468,28 +469,28 @@ class LowData(BaseModel):
             create_xml_element("contaBanco", self.bank_account, parent=elem)
         if self.history:
             create_xml_element("historico", self.history, parent=elem)
-        
+
         for key, value in self.data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "LowData":
         """Deserializa de elemento XML."""
         from .xml_serialization import deserialize_optional_float
-        
+
         data: Dict[str, Any] = {}
         known_elements = {
-            "dtBaixa", "vlrBaixa", "vlrDesconto", 
+            "dtBaixa", "vlrBaixa", "vlrDesconto",
             "vlrJuros", "vlrMulta", "contaBanco", "historico"
         }
-        
+
         for child in element:
             if child.tag not in known_elements:
                 data[child.tag] = get_element_text(child)
-        
+
         return cls(
             type=get_element_attr(element, "tipo"),
             date=get_element_text(element.find("dtBaixa")),

@@ -34,7 +34,7 @@ class EntityQueryOptions(BaseModel):
         >>> options.timeout
         datetime.timedelta(seconds=1800)
     """
-    
+
     model_config = ConfigDict(
         validate_assignment=True,
         extra="forbid",
@@ -100,8 +100,8 @@ class EntityQueryOptions(BaseModel):
         return self.model_copy(update={"max_results": max_results})
 
     def with_references(
-        self, 
-        include: bool = True, 
+        self,
+        include: bool = True,
         max_depth: Optional[int] = None
     ) -> "EntityQueryOptions":
         """

@@ -33,7 +33,6 @@ from sankhya_sdk.request_wrappers.async_on_demand_request_wrapper import (
 from sankhya_sdk.request_wrappers.interfaces import IAsyncOnDemandRequestWrapper
 from sankhya_sdk.value_objects.on_demand_request_instance import OnDemandRequestInstance
 
-
 logger = logging.getLogger(__name__)
 
 # TypeVar para entidades genéricas
@@ -116,7 +115,7 @@ class AsyncOnDemandRequestFactory:
                 context.acquire_new_session,
                 ServiceRequestType.ON_DEMAND_CRUD,
             )
-        
+
         # Cria wrapper; a sessão dedicada passa a pertencer a ele e é
         # finalizada quando o worker termina, como no .NET
         # (OnDemandRequestWrapper.cs:144-165)
@@ -130,7 +129,7 @@ class AsyncOnDemandRequestFactory:
                 session_token=session_token,
                 owns_session=session_token is not None,
             )
-            
+
             # Inicia worker task
             await wrapper.start()
         except Exception:
@@ -139,10 +138,10 @@ class AsyncOnDemandRequestFactory:
                     context.detach_on_demand_request_wrapper, session_token
                 )
             raise
-        
+
         # Gera chave única
         key = uuid4()
-        
+
         # Cria instância de registro
         instance = OnDemandRequestInstance(
             key=key,
@@ -151,17 +150,17 @@ class AsyncOnDemandRequestFactory:
             instance=wrapper,
             is_async=True,
         )
-        
+
         # Registra com lock
         async with cls._get_lock():
             cls._instances[key] = instance
-        
+
         logger.info(
             f"AsyncOnDemandRequestWrapper criado: key={key}, "
             f"entity_type={entity_type.__name__}, "
             f"service={service.name}"
         )
-        
+
         return key
 
     @classmethod
@@ -219,7 +218,7 @@ class AsyncOnDemandRequestFactory:
         """
         async with cls._get_lock():
             instance = cls._instances.get(key)
-        
+
         if instance and instance.is_async:
             await instance.instance.flush()  # type: ignore
             logger.debug(f"Flush executado: key={key}")
@@ -232,13 +231,13 @@ class AsyncOnDemandRequestFactory:
                 inst for inst in cls._instances.values()
                 if inst.is_async
             ]
-        
+
         for instance in instances:
             try:
                 await instance.instance.flush()  # type: ignore
             except Exception as e:
                 logger.warning(f"Erro ao fazer flush: {e}")
-        
+
         logger.debug(f"Flush executado em {len(instances)} instâncias assíncronas")
 
     @classmethod
@@ -251,7 +250,7 @@ class AsyncOnDemandRequestFactory:
         """
         async with cls._get_lock():
             instance = cls._instances.pop(key, None)
-        
+
         if instance and instance.is_async:
             try:
                 await instance.instance.dispose()  # type: ignore
@@ -269,13 +268,13 @@ class AsyncOnDemandRequestFactory:
                 if inst.is_async
             ]
             async_instances = [cls._instances.pop(key) for key in async_keys]
-        
+
         for instance in async_instances:
             try:
                 await instance.instance.dispose()  # type: ignore
             except Exception as e:
                 logger.warning(f"Erro ao finalizar instância: {e}")
-        
+
         logger.info(f"Finalizadas {len(async_instances)} instâncias assíncronas")
 
     @classmethod

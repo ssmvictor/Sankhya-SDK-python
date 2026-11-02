@@ -3,7 +3,7 @@
 
 import pytest
 
-from sankhya_sdk.enums import ServiceName, ServiceType
+from sankhya_sdk.enums import ServiceName
 from sankhya_sdk.exceptions import (
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,

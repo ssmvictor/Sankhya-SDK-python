@@ -18,8 +18,8 @@ from sankhya_sdk.models.base import EntityBase
 
 if TYPE_CHECKING:
     from sankhya_sdk.request_wrappers.interfaces import (
-        IOnDemandRequestWrapper,
         IAsyncOnDemandRequestWrapper,
+        IOnDemandRequestWrapper,
     )
 
 

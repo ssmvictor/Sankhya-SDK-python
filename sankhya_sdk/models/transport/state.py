@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .base import TransportEntityBase
 from ...attributes.decorators import (
     entity,
-    entity_key,
     entity_element,
+    entity_key,
 )
+from .base import TransportEntityBase
 
 
 @entity("UnidadeFederativa")
@@ -38,69 +38,69 @@ class State(TransportEntityBase):
         code_product: Código de produto GNRE (CODPRODGNRE)
         agreement_protocol: Protocolo de convênio (PROTOCOLOCONVENIO)
     """
-    
+
     code: int = entity_key(
         entity_element("CODUF", default=0)
     )
-    
+
     initials: Optional[str] = entity_element(
         "UF",
         default=None
     )
-    
+
     name: Optional[str] = entity_element(
         "DESCRICAO",
         default=None
     )
-    
+
     code_country: Optional[int] = entity_element(
         "CODPAIS",
         default=None
     )
-    
+
     code_partner_secretary_of_state_revenue: Optional[int] = entity_element(
         "CODPARCSECRECEST",
         default=None
     )
-    
+
     code_ibge: Optional[int] = entity_element(
         "CODIBGE",
         default=None
     )
-    
+
     code_revenue: Optional[int] = entity_element(
         "CODSTGNRE",
         default=None
     )
-    
+
     code_revenue_detailing: Optional[int] = entity_element(
         "CODDETGNRE",
         default=None
     )
-    
+
     code_product: Optional[int] = entity_element(
         "CODPRODGNRE",
         default=None
     )
-    
+
     agreement_protocol: Optional[str] = entity_element(
         "PROTOCOLOCONVENIO",
         default=None
     )
-    
+
     def __eq__(self, other: object) -> bool:
         """
         Compara duas instâncias de State.
         """
         if other is None:
             return False
-        
+
         if self is other:
             return True
-        
+
         if not isinstance(other, State):
             return False
-        
+
         return (
             self.code == other.code
             and ("code" in self._fields_set) == ("code" in other._fields_set)
@@ -129,7 +129,7 @@ class State(TransportEntityBase):
                 "agreement_protocol" in other._fields_set
             )
         )
-    
+
     def __hash__(self) -> int:
         """
         Calcula hash da entidade.
@@ -138,46 +138,46 @@ class State(TransportEntityBase):
         """
         hash_code = self.code
         hash_code = (hash_code * 397) ^ hash("code" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.initials) if self.initials else 0
         )
         hash_code = (hash_code * 397) ^ hash("initials" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.name) if self.name else 0
         )
         hash_code = (hash_code * 397) ^ hash("name" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_country or 0)
         hash_code = (hash_code * 397) ^ hash("code_country" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             self.code_partner_secretary_of_state_revenue or 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "code_partner_secretary_of_state_revenue" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (self.code_ibge or 0)
         hash_code = (hash_code * 397) ^ hash("code_ibge" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_revenue or 0)
         hash_code = (hash_code * 397) ^ hash("code_revenue" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_revenue_detailing or 0)
         hash_code = (hash_code * 397) ^ hash(
             "code_revenue_detailing" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (self.code_product or 0)
         hash_code = (hash_code * 397) ^ hash("code_product" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.agreement_protocol) if self.agreement_protocol else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "agreement_protocol" in self._fields_set
         )
-        
+
         return hash_code

@@ -12,12 +12,14 @@ from typing import Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import ConfigDict, Field as PydanticField
+from pydantic import ConfigDict
+from pydantic import Field as PydanticField
 
-from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.enums.service_name import ServiceName
-from .request_body import RequestBody
+from sankhya_sdk.models.base import EntityBase
+
 from .constants import SankhyaConstants
+from .request_body import RequestBody
 
 
 class ServiceRequest(EntityBase):
@@ -56,8 +58,8 @@ class ServiceRequest(EntityBase):
     )
 
     def __init__(
-        self, 
-        service: ServiceName = ServiceName.TEST, 
+        self,
+        service: ServiceName = ServiceName.TEST,
         request_body: Optional[RequestBody] = None,
         **data
     ):
@@ -88,14 +90,14 @@ class ServiceRequest(EntityBase):
             </serviceRequest>
         """
         elem = etree.Element(SankhyaConstants.SERVICE_REQUEST)
-        
+
         # Define o atributo serviceName usando o internal_value do enum
         elem.set(SankhyaConstants.SERVICE_NAME, self.service.internal_value)
-        
+
         # Adiciona o corpo da requisição
         body_elem = self.request_body.to_xml()
         elem.append(body_elem)
-        
+
         return elem
 
     def to_xml_string(self, pretty_print: bool = False) -> str:
@@ -123,8 +125,8 @@ class ServiceRequest(EntityBase):
         """
         element = self.to_xml()
         return etree.tostring(
-            element, 
-            pretty_print=pretty_print, 
+            element,
+            pretty_print=pretty_print,
             encoding="UTF-8",
             xml_declaration=True
         )
@@ -141,17 +143,17 @@ class ServiceRequest(EntityBase):
             Instância de ServiceRequest
         """
         from .xml_serialization import get_element_attr
-        
+
         # Obtém o nome do serviço
         service_name_str = get_element_attr(element, SankhyaConstants.SERVICE_NAME, "")
         service = ServiceName.from_internal_value(service_name_str)
-        
+
         # Obtém o corpo da requisição
         body_elem = element.find(SankhyaConstants.REQUEST_BODY)
         request_body = RequestBody()
         if body_elem is not None:
             request_body = RequestBody.from_xml(body_elem)
-        
+
         return cls(service=service, request_body=request_body)
 
     @classmethod

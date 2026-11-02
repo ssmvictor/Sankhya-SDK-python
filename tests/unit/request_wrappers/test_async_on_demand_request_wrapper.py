@@ -18,18 +18,17 @@ import pytest
 
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
-from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensions
 from sankhya_sdk.exceptions import (
     CanceledOnDemandRequestWrapperException,
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
     ServiceRequestTimeoutException,
 )
+from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensions
 from sankhya_sdk.models.transport.partner import Partner
 from sankhya_sdk.request_wrappers.async_on_demand_request_wrapper import (
     AsyncOnDemandRequestWrapper,
 )
-
 
 # =============================================================================
 # Infraestrutura

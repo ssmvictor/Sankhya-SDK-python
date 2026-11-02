@@ -10,8 +10,8 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/RequestWrappers/PagedRequestWrapper.c
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional, Type, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional, Type
 
 if TYPE_CHECKING:
     from sankhya_sdk.models.base import EntityBase
@@ -44,19 +44,19 @@ class PagedRequestEventArgs:
         >>> print(f"Página {args.current_page}/{args.total_pages}")
         Página 1/10
     """
-    
+
     entity_type: Type["EntityBase"]
     current_page: int
     total_loaded: int
     quantity_loaded: Optional[int] = None
     total_pages: Optional[int] = None
     exception: Optional[Exception] = None
-    
+
     @property
     def has_error(self) -> bool:
         """Verifica se há um erro associado ao evento."""
         return self.exception is not None
-    
+
     @property
     def is_complete(self) -> bool:
         """
@@ -68,7 +68,7 @@ class PagedRequestEventArgs:
         if self.total_pages is None:
             return False
         return self.current_page >= self.total_pages
-    
+
     @property
     def progress_percentage(self) -> Optional[float]:
         """
@@ -80,20 +80,20 @@ class PagedRequestEventArgs:
         if self.total_pages is None or self.total_pages == 0:
             return None
         return (self.current_page / self.total_pages) * 100
-    
+
     def __str__(self) -> str:
         """Representação string do evento."""
         entity_name = (
-            self.entity_type.__name__ 
+            self.entity_type.__name__
             if self.entity_type else "Unknown"
         )
-        
+
         if self.exception:
             return (
                 f"PagedRequestEventArgs(entity={entity_name}, "
                 f"page={self.current_page}, error={self.exception})"
             )
-        
+
         pages_info = f"/{self.total_pages}" if self.total_pages else ""
         return (
             f"PagedRequestEventArgs(entity={entity_name}, "

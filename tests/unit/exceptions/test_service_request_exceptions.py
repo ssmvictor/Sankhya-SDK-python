@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-from typing import Any, Optional
-import pytest
+from typing import Any
+
+from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import (
-    ServiceRequestTimeoutException,
     ServiceRequestPropertyNameException,
     ServiceRequestPropertyValueException,
     ServiceRequestPropertyWidthException,
+    ServiceRequestTimeoutException,
     ServiceRequestUnexpectedResultException,
 )
-from sankhya_sdk.enums.service_name import ServiceName
+
 
 class MockEntity:
     def __init__(self, name: str) -> None:
@@ -31,22 +32,22 @@ def test_service_request_timeout_exception() -> None:
 
 def test_service_request_property_name_exception() -> None:
     mock_request: MockRequest = MockRequest(ServiceName.CRUD_SAVE, entity_name="Partner")
-    
+
     exc: ServiceRequestPropertyNameException = ServiceRequestPropertyNameException("NomeParc", mock_request)
     assert "The call to the service CRUD - Create/Update couldn't find the field NomeParc on entity  in Partner entity request" in str(exc)
-    
+
     exc_with_entity: ServiceRequestPropertyNameException = ServiceRequestPropertyNameException("NomeParc", mock_request, "AD_TEST")
     assert "The call to the service CRUD - Create/Update couldn't find the field NomeParc on entity AD_TEST in Partner entity request" in str(exc_with_entity)
 
 def test_service_request_property_value_exception() -> None:
     mock_request: MockRequest = MockRequest(ServiceName.CRUD_FIND)
-    
+
     exc: ServiceRequestPropertyValueException = ServiceRequestPropertyValueException("Code", "Partner", mock_request)
     assert "The call to the service CRUD - Retrieve couldn't find the field Code on entity Partner" in str(exc)
 
 def test_service_request_property_width_exception() -> None:
     mock_request: MockRequest = MockRequest(ServiceName.CRUD_SAVE, entity_name="Partner")
-    
+
     exc: ServiceRequestPropertyWidthException = ServiceRequestPropertyWidthException("Name", mock_request, 10, 20)
     assert "The call to the service CRUD - Create/Update couldn't be completed because the width of the value for the Name property on entity Partner is above that allowed. Current width: 20. Width allowed: 10" in str(exc)
     assert exc.property_name == "Name"
@@ -54,23 +55,24 @@ def test_service_request_property_width_exception() -> None:
 
 def test_service_request_unexpected_result_exception() -> None:
     mock_request: MockRequest = MockRequest(ServiceName.LOGIN)
-    
+
     exc: ServiceRequestUnexpectedResultException = ServiceRequestUnexpectedResultException(mock_request)
     assert "The call to the Login service resulted in an invalid response" in str(exc)
-    
+
     exc_with_msg: ServiceRequestUnexpectedResultException = ServiceRequestUnexpectedResultException(mock_request, message="Error detail")
     assert "The call to the Login service resulted in the following uncaught error message: Error detail" in str(exc_with_msg)
     assert exc_with_msg.error_message == "Error detail"
 
 from sankhya_sdk.exceptions import (
-    ServiceRequestRepeatedException,
-    ServiceRequestPaginationException,
-    ServiceRequestUnavailableException,
-    ServiceRequestUnbalancedDelimiterException,
     ServiceRequestDuplicatedDocumentException,
     ServiceRequestFullTransactionLogsException,
     ServiceRequestInvalidRelationException,
+    ServiceRequestPaginationException,
+    ServiceRequestRepeatedException,
+    ServiceRequestUnavailableException,
+    ServiceRequestUnbalancedDelimiterException,
 )
+
 
 def test_other_advanced_exceptions() -> None:
     assert "You can not use a managed request object that was already consumed" in str(ServiceRequestRepeatedException())

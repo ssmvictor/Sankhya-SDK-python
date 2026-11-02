@@ -1,11 +1,13 @@
-from typing import Any, Callable, Optional, Type, TypeVar, Dict
-from pydantic import Field, BaseModel
+from typing import Any, Callable, Dict, Optional, Type, TypeVar
+
+from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
+
 from .metadata import (
-    EntityMetadata,
-    EntityElementMetadata,
-    EntityReferenceMetadata,
     EntityCustomDataMetadata,
+    EntityElementMetadata,
+    EntityMetadata,
+    EntityReferenceMetadata,
 )
 from .validators import validate_element_name_format
 

@@ -1,8 +1,9 @@
 """Configurações do SDK carregadas de variáveis de ambiente"""
 
 from typing import Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SankhyaSettings(BaseSettings):

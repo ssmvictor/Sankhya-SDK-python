@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Unit tests for RequestRetryDelay."""
 
-import pytest
 
 from sankhya_sdk.request_helpers import RequestRetryDelay
 

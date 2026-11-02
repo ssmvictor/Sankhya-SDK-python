@@ -6,19 +6,18 @@ Fornece wrappers de alto nível para operações CRUD e outras
 operações de serviço no Sankhya.
 """
 
-from .interfaces import (
-    TEntity,
-    IOnDemandRequestWrapper,
-    IAsyncOnDemandRequestWrapper,
-)
-from .simple_crud_request_wrapper import SimpleCRUDRequestWrapper
-from .paged_request_wrapper import PagedRequestWrapper, PagedRequestException
-from .on_demand_request_wrapper import OnDemandRequestWrapper
-from .async_on_demand_request_wrapper import AsyncOnDemandRequestWrapper
-from .on_demand_request_factory import OnDemandRequestFactory
 from .async_on_demand_request_factory import AsyncOnDemandRequestFactory
+from .async_on_demand_request_wrapper import AsyncOnDemandRequestWrapper
+from .interfaces import (
+    IAsyncOnDemandRequestWrapper,
+    IOnDemandRequestWrapper,
+    TEntity,
+)
 from .know_services_request_wrapper import KnowServicesRequestWrapper
-
+from .on_demand_request_factory import OnDemandRequestFactory
+from .on_demand_request_wrapper import OnDemandRequestWrapper
+from .paged_request_wrapper import PagedRequestException, PagedRequestWrapper
+from .simple_crud_request_wrapper import SimpleCRUDRequestWrapper
 
 __all__ = [
     # Interfaces

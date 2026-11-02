@@ -10,7 +10,6 @@ from typing import Dict, Final
 
 from sankhya_sdk.enums.service_environment import ServiceEnvironment
 
-
 # Timeout padrão para requisições HTTP (segundos)
 DEFAULT_TIMEOUT: Final[int] = 30
 

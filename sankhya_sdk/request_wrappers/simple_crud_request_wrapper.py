@@ -40,7 +40,6 @@ from sankhya_sdk.models.service.entity_types import EntityDynamic
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
 
-
 logger = logging.getLogger(__name__)
 
 # TypeVar para entidades genéricas
@@ -83,13 +82,13 @@ class SimpleCRUDRequestWrapper:
         ...     partner = SimpleCRUDRequestWrapper.find(Partner(code=123))
         ...     print(partner.name)
     """
-    
+
     _context: ClassVar[Optional["SankhyaContext"]] = None
     _session_token: ClassVar[Optional[uuid.UUID]] = None
     _owns_context: ClassVar[bool] = False
     _initialized: ClassVar[bool] = False
     _lock: ClassVar[threading.Lock] = threading.Lock()
-    
+
     def __init__(self) -> None:
         """
         Inicializa o wrapper como context manager.
@@ -98,31 +97,31 @@ class SimpleCRUDRequestWrapper:
         a sessão ao entrar no contexto.
         """
         self._managed = False
-    
+
     def __enter__(self) -> "SimpleCRUDRequestWrapper":
         """Entra no contexto e inicializa a sessão."""
         if not SimpleCRUDRequestWrapper._initialized:
             SimpleCRUDRequestWrapper.initialize()
         self._managed = True
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Sai do contexto e libera recursos."""
         if self._managed:
             SimpleCRUDRequestWrapper.dispose()
-    
+
     async def __aenter__(self) -> "SimpleCRUDRequestWrapper":
         """Entra no contexto assíncrono."""
         return self.__enter__()
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Sai do contexto assíncrono."""
         self.__exit__(exc_type, exc_val, exc_tb)
-    
+
     # =========================================================================
     # Initialization & Lifecycle
     # =========================================================================
-    
+
     @classmethod
     def initialize(
         cls,
@@ -160,7 +159,7 @@ class SimpleCRUDRequestWrapper:
             if cls._initialized:
                 logger.warning("SimpleCRUDRequestWrapper já inicializado")
                 return
-            
+
             if context is not None:
                 # Como no .NET (Context.AcquireNewSession(ServiceRequestType.SimpleCrud)),
                 # o wrapper usa uma sessão dedicada e não a sessão principal do contexto.
@@ -184,12 +183,12 @@ class SimpleCRUDRequestWrapper:
                 cls._context = owned_context
                 cls._session_token = session_token
                 cls._owns_context = True
-            
+
             cls._initialized = True
             logger.info(
                 f"SimpleCRUDRequestWrapper inicializado: token={cls._session_token}"
             )
-    
+
     @classmethod
     def dispose(cls) -> None:
         """
@@ -206,7 +205,7 @@ class SimpleCRUDRequestWrapper:
         with cls._lock:
             if not cls._initialized:
                 return
-            
+
             context = cls._context
             session_token = cls._session_token
             owns_context = cls._owns_context
@@ -214,18 +213,18 @@ class SimpleCRUDRequestWrapper:
             cls._session_token = None
             cls._owns_context = False
             cls._initialized = False
-        
+
         if context and session_token:
             try:
                 context.finalize_session(session_token)
             except Exception as e:
                 logger.warning(f"Erro ao finalizar sessão: {e}")
-        
+
         if owns_context and context:
             cls._release_owned_context(context)
-        
+
         logger.info("SimpleCRUDRequestWrapper descartado")
-    
+
     @staticmethod
     def _release_owned_context(context: "SankhyaContext") -> None:
         """
@@ -248,7 +247,7 @@ class SimpleCRUDRequestWrapper:
             context: Contexto criado pelo próprio wrapper
         """
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         with SankhyaContext._wrappers_lock:
             SankhyaContext._wrappers.pop(context.token, None)
         try:
@@ -257,7 +256,7 @@ class SimpleCRUDRequestWrapper:
             logger.warning(f"Erro ao encerrar a sessão principal do contexto: {e}")
         finally:
             context._disposed = True
-    
+
     @classmethod
     def _ensure_initialized(cls) -> None:
         """Garante que o wrapper está inicializado."""
@@ -266,11 +265,11 @@ class SimpleCRUDRequestWrapper:
                 "SimpleCRUDRequestWrapper não inicializado. "
                 "Chame SimpleCRUDRequestWrapper.initialize() primeiro."
             )
-    
+
     # =========================================================================
     # Find Operations (Sync)
     # =========================================================================
-    
+
     @classmethod
     def try_find(
         cls,
@@ -304,7 +303,7 @@ class SimpleCRUDRequestWrapper:
         """
         cls._ensure_initialized()
         return cls._can_find_internal(entity, options)
-    
+
     @classmethod
     def try_find_with_criteria(
         cls,
@@ -334,7 +333,7 @@ class SimpleCRUDRequestWrapper:
         """
         cls._ensure_initialized()
         return cls._can_find_with_criteria_internal(entity_type, criteria, options)
-    
+
     @classmethod
     def find(
         cls,
@@ -362,7 +361,7 @@ class SimpleCRUDRequestWrapper:
         """
         cls._ensure_initialized()
         return cls._must_find_internal(entity, options)
-    
+
     @classmethod
     def find_with_criteria(
         cls,
@@ -387,7 +386,7 @@ class SimpleCRUDRequestWrapper:
         """
         cls._ensure_initialized()
         return cls._must_find_with_criteria_internal(entity_type, criteria, options)
-    
+
     @classmethod
     def find_all(
         cls,
@@ -412,11 +411,11 @@ class SimpleCRUDRequestWrapper:
         """
         cls._ensure_initialized()
         return cls._find_all_internal(entity, options)
-    
+
     # =========================================================================
     # Find Operations (Async)
     # =========================================================================
-    
+
     @classmethod
     async def try_find_async(
         cls,
@@ -435,7 +434,7 @@ class SimpleCRUDRequestWrapper:
         """
         cls._ensure_initialized()
         return await cls._can_find_internal_async(entity, options)
-    
+
     @classmethod
     async def try_find_async_with_criteria(
         cls,
@@ -458,7 +457,7 @@ class SimpleCRUDRequestWrapper:
         return await cls._can_find_with_criteria_internal_async(
             entity_type, criteria, options
         )
-    
+
     @classmethod
     async def find_async(
         cls,
@@ -480,7 +479,7 @@ class SimpleCRUDRequestWrapper:
         """
         cls._ensure_initialized()
         return await cls._must_find_internal_async(entity, options)
-    
+
     @classmethod
     async def find_async_with_criteria(
         cls,
@@ -506,11 +505,11 @@ class SimpleCRUDRequestWrapper:
         return await cls._must_find_with_criteria_internal_async(
             entity_type, criteria, options
         )
-    
+
     # =========================================================================
     # Update Operations
     # =========================================================================
-    
+
     @classmethod
     def update(cls, entity: T) -> T:
         """
@@ -532,13 +531,13 @@ class SimpleCRUDRequestWrapper:
             >>> updated = SimpleCRUDRequestWrapper.update(partner)
         """
         cls._ensure_initialized()
-        
+
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
         ServiceRequestExtensions.resolve_with_entity(request, entity)
-        
+
         response = cls._invoke_service(request)
         return cls._process_single_response(response, type(entity), request=request)
-    
+
     @classmethod
     async def update_async(cls, entity: T) -> T:
         """
@@ -551,17 +550,17 @@ class SimpleCRUDRequestWrapper:
             Entidade atualizada
         """
         cls._ensure_initialized()
-        
+
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_SAVE)
         ServiceRequestExtensions.resolve_with_entity(request, entity)
-        
+
         response = await cls._invoke_service_async(request)
         return cls._process_single_response(response, type(entity), request=request)
-    
+
     # =========================================================================
     # Remove Operations
     # =========================================================================
-    
+
     @classmethod
     def remove(cls, entity: T) -> None:
         """
@@ -579,13 +578,13 @@ class SimpleCRUDRequestWrapper:
             >>> SimpleCRUDRequestWrapper.remove(partner)
         """
         cls._ensure_initialized()
-        
+
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_REMOVE)
         ServiceRequestExtensions.resolve_with_entity(request, entity)
-        
+
         cls._invoke_service(request)
         logger.debug(f"Entidade removida: {type(entity).__name__}")
-    
+
     @classmethod
     async def remove_async(cls, entity: T) -> None:
         """
@@ -595,17 +594,17 @@ class SimpleCRUDRequestWrapper:
             entity: Entidade com chaves primárias
         """
         cls._ensure_initialized()
-        
+
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_REMOVE)
         ServiceRequestExtensions.resolve_with_entity(request, entity)
-        
+
         await cls._invoke_service_async(request)
         logger.debug(f"Entidade removida: {type(entity).__name__}")
-    
+
     # =========================================================================
     # Internal Methods - Find Logic
     # =========================================================================
-    
+
     @classmethod
     def _build_find_request(
         cls,
@@ -614,14 +613,14 @@ class SimpleCRUDRequestWrapper:
     ) -> ServiceRequest:
         """Monta a requisição de busca pelas chaves da entidade."""
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        
+
         if options:
             ServiceRequestExtensions.resolve_with_options(request, entity, options)
         else:
             ServiceRequestExtensions.resolve_with_entity(request, entity)
-        
+
         return request
-    
+
     @classmethod
     def _build_find_with_criteria_request(
         cls,
@@ -634,12 +633,12 @@ class SimpleCRUDRequestWrapper:
         ServiceRequestExtensions.resolve_with_literal_criteria(
             request, entity_type, criteria
         )
-        
+
         if options:
             ServiceRequestExtensions._apply_options_to_request(request, options)
-        
+
         return request
-    
+
     @classmethod
     def _can_find_internal(
         cls,
@@ -652,7 +651,7 @@ class SimpleCRUDRequestWrapper:
         return cls._process_find_response(
             response, type(entity), optional=True, request=request
         )
-    
+
     @classmethod
     def _can_find_with_criteria_internal(
         cls,
@@ -666,7 +665,7 @@ class SimpleCRUDRequestWrapper:
         return cls._process_find_response(
             response, entity_type, optional=True, request=request
         )
-    
+
     @classmethod
     def _must_find_internal(
         cls,
@@ -685,7 +684,7 @@ class SimpleCRUDRequestWrapper:
         return cls._process_find_response(
             response, type(entity), optional=False, request=request
         )
-    
+
     @classmethod
     def _must_find_with_criteria_internal(
         cls,
@@ -704,7 +703,7 @@ class SimpleCRUDRequestWrapper:
         return cls._process_find_response(
             response, entity_type, optional=False, request=request
         )
-    
+
     @classmethod
     def _find_all_internal(
         cls,
@@ -713,19 +712,19 @@ class SimpleCRUDRequestWrapper:
     ) -> List[T]:
         """Lógica core de busca de múltiplos resultados."""
         request = ServiceRequest(service=ServiceName.CRUD_SERVICE_FIND)
-        
+
         if options:
             ServiceRequestExtensions.resolve_with_options(request, entity, options)
         else:
             ServiceRequestExtensions.resolve_with_entity(request, entity)
-        
+
         response = cls._invoke_service(request)
         return cls._process_find_all_response(response, type(entity))
-    
+
     # =========================================================================
     # Internal Methods - Async Find Logic
     # =========================================================================
-    
+
     @classmethod
     async def _can_find_internal_async(
         cls,
@@ -738,7 +737,7 @@ class SimpleCRUDRequestWrapper:
         return cls._process_find_response(
             response, type(entity), optional=True, request=request
         )
-    
+
     @classmethod
     async def _can_find_with_criteria_internal_async(
         cls,
@@ -752,7 +751,7 @@ class SimpleCRUDRequestWrapper:
         return cls._process_find_response(
             response, entity_type, optional=True, request=request
         )
-    
+
     @classmethod
     async def _must_find_internal_async(
         cls,
@@ -770,7 +769,7 @@ class SimpleCRUDRequestWrapper:
         return cls._process_find_response(
             response, type(entity), optional=False, request=request
         )
-    
+
     @classmethod
     async def _must_find_with_criteria_internal_async(
         cls,
@@ -789,39 +788,39 @@ class SimpleCRUDRequestWrapper:
         return cls._process_find_response(
             response, entity_type, optional=False, request=request
         )
-    
+
     # =========================================================================
     # Internal Methods - Service Invocation
     # =========================================================================
-    
+
     @classmethod
     def _invoke_service(cls, request: ServiceRequest) -> ServiceResponse:
         """Invoca o serviço de forma síncrona."""
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         if cls._session_token is None:
             raise RuntimeError("Token de sessão não disponível")
-        
+
         return SankhyaContext.service_invoker_with_token(
             request, cls._session_token
         )
-    
+
     @classmethod
     async def _invoke_service_async(cls, request: ServiceRequest) -> ServiceResponse:
         """Invoca o serviço de forma assíncrona."""
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         if cls._session_token is None:
             raise RuntimeError("Token de sessão não disponível")
-        
+
         return await SankhyaContext.service_invoker_async_with_token(
             request, cls._session_token
         )
-    
+
     # =========================================================================
     # Internal Methods - Response Processing
     # =========================================================================
-    
+
     @classmethod
     def _process_find_response(
         cls,
@@ -850,7 +849,7 @@ class SimpleCRUDRequestWrapper:
             ServiceRequestUnexpectedResultException: Se não encontrada (quando não optional)
         """
         entities = cls._extract_entities_from_response(response)
-        
+
         if len(entities) == 0:
             if optional:
                 return None
@@ -858,16 +857,16 @@ class SimpleCRUDRequestWrapper:
                 request=request,
                 response=response,
             )
-        
+
         if len(entities) > 1:
             raise ServiceRequestTooManyResultsException(
                 result_length=len(entities),
                 request=request,
                 response=response,
             )
-        
+
         return entities[0].convert_to_type(entity_type)
-    
+
     @classmethod
     def _process_find_all_response(
         cls,
@@ -886,7 +885,7 @@ class SimpleCRUDRequestWrapper:
         """
         entities = cls._extract_entities_from_response(response)
         return [e.convert_to_type(entity_type) for e in entities]
-    
+
     @classmethod
     def _process_single_response(
         cls,
@@ -914,22 +913,22 @@ class SimpleCRUDRequestWrapper:
                 entidade (``Single()`` falha no .NET)
         """
         entities = cls._extract_entities_from_response(response)
-        
+
         if len(entities) == 0:
             raise ServiceRequestUnexpectedResultException(
                 request=request,
                 response=response,
             )
-        
+
         if len(entities) > 1:
             raise ServiceRequestTooManyResultsException(
                 result_length=len(entities),
                 request=request,
                 response=response,
             )
-        
+
         return entities[0].convert_to_type(entity_type)
-    
+
     @classmethod
     def _extract_entities_from_response(
         cls,
@@ -953,10 +952,10 @@ class SimpleCRUDRequestWrapper:
             Lista de EntityDynamicSerialization
         """
         result: List[EntityDynamicSerialization] = []
-        
+
         if response is None or response.response_body is None:
             return result
-        
+
         for entity_data in response.entities:
             if isinstance(entity_data, EntityDynamicSerialization):
                 result.append(entity_data)
@@ -969,9 +968,9 @@ class SimpleCRUDRequestWrapper:
                     f"Entidade de tipo inesperado ignorada na resposta: "
                     f"{type(entity_data).__name__}"
                 )
-        
+
         return result
-    
+
     @classmethod
     def _apply_options_to_request(
         cls,
@@ -987,16 +986,16 @@ class SimpleCRUDRequestWrapper:
         """
         if request.request_body is None:
             return
-        
+
         body = request.request_body
-        
+
         # Aplica max_results
         if options.max_results is not None:
             if body.entity:
                 body.entity.max_results = options.max_results
             if body.data_set:
                 body.data_set.max_results = options.max_results
-        
+
         # Aplica include_presentation_fields
         if options.include_presentation_fields is not None:
             if body.entity:

@@ -1,8 +1,10 @@
 """Unit tests for GatewayClient."""
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock, patch
-from sankhya_sdk.http.gateway_client import GatewayClient, GatewayModule, MODULE_SERVICE_MAP
+
+from sankhya_sdk.http.gateway_client import MODULE_SERVICE_MAP, GatewayClient, GatewayModule
 
 
 class TestGatewayModule:

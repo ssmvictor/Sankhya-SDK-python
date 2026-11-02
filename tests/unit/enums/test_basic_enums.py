@@ -1,7 +1,7 @@
 import pytest
+
 from sankhya_sdk.enums import (
     BillingType,
-    FiscalClassification,
     FiscalPersonType,
     InvoiceStatus,
     MovementType,

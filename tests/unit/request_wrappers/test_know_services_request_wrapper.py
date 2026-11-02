@@ -11,7 +11,7 @@ import threading
 import uuid
 from datetime import datetime
 from typing import List
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import requests
@@ -28,7 +28,6 @@ from sankhya_sdk.enums.sankhya_warning_type import SankhyaWarningType
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_request_type import ServiceRequestType
 from sankhya_sdk.exceptions import (
-    ConfirmInvoiceException,
     MarkAsPaymentPaidException,
     NoItemsConfirmInvoiceException,
     SankhyaException,
@@ -47,7 +46,6 @@ from sankhya_sdk.models.transport.product import Product
 from sankhya_sdk.request_wrappers.know_services_request_wrapper import (
     KnowServicesRequestWrapper,
 )
-
 
 # =============================================================================
 # Fixtures
@@ -181,14 +179,14 @@ def _authenticated_context() -> SankhyaContext:
 def initialized_wrapper(mock_context, mock_response):
     """Initialize wrapper with mocked context and invoke service."""
     KnowServicesRequestWrapper.initialize(mock_context)
-    
+
     with patch.object(
         KnowServicesRequestWrapper,
         "_invoke_service",
         return_value=mock_response,
     ):
         yield KnowServicesRequestWrapper
-    
+
     KnowServicesRequestWrapper.dispose()
 
 
@@ -203,7 +201,7 @@ class TestLifecycle:
     def test_initialize_with_context(self, mock_context):
         """Test initialization with provided context."""
         KnowServicesRequestWrapper.initialize(mock_context)
-        
+
         assert KnowServicesRequestWrapper._initialized is True
         assert KnowServicesRequestWrapper._context is mock_context
         assert KnowServicesRequestWrapper._session_token == mock_context.token
@@ -214,13 +212,13 @@ class TestLifecycle:
         # Skip detailed mocking and just verify the basic behavior
         mock_ctx = MagicMock()
         mock_ctx.acquire_new_session.return_value = uuid.uuid4()
-        
+
         with patch(
             "sankhya_sdk.core.context.SankhyaContext.from_settings",
             return_value=mock_ctx,
         ):
             KnowServicesRequestWrapper.initialize()
-            
+
             assert KnowServicesRequestWrapper._initialized is True
             mock_ctx.acquire_new_session.assert_called_once_with(
                 ServiceRequestType.KNOW_SERVICES
@@ -230,7 +228,7 @@ class TestLifecycle:
         """Test double initialization logs warning."""
         KnowServicesRequestWrapper.initialize(mock_context)
         KnowServicesRequestWrapper.initialize(mock_context)
-        
+
         assert "já inicializado" in caplog.text
 
     def test_dispose(self, mock_context):
@@ -526,7 +524,7 @@ class TestSessionManagement:
             )
         ]
         mock_response.response_body.sessions = mock_sessions
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
@@ -534,7 +532,7 @@ class TestSessionManagement:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             sessions = KnowServicesRequestWrapper.get_sessions()
-            
+
             # Verify request was made with correct service
             KnowServicesRequestWrapper._invoke_service.assert_called_once()
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
@@ -580,7 +578,7 @@ class TestSessionManagement:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             KnowServicesRequestWrapper.kill_session("ABC123XYZ")
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.SESSION_KILL
             assert request.request_body.session.jsession_id == "ABC123XYZ"
@@ -607,7 +605,7 @@ class TestMessaging:
                 description="This is a test",
                 level=SankhyaWarningLevel.WARNING,
             )
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.WARNING_SEND
             assert request.request_body.system_warning.title == "Test Warning"
@@ -685,7 +683,7 @@ class TestMessaging:
             KnowServicesRequestWrapper.send_message(
                 content="Hello World!",
             )
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.MESSAGE_SEND
             assert request.request_body.system_message.content == "Hello World!"
@@ -693,7 +691,7 @@ class TestMessaging:
     def test_receive_messages(self, mock_context, mock_response):
         """Test receive_messages updates timestamp and returns data."""
         mock_response.response_body.model_dump_json.return_value = '{"messages": []}'
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
@@ -701,9 +699,9 @@ class TestMessaging:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             old_time = KnowServicesRequestWrapper._last_time_message_received
-            
+
             result = KnowServicesRequestWrapper.receive_messages()
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.WARNING_RECEIVE
             # Timestamp should be updated
@@ -723,19 +721,19 @@ class TestInvoiceCRUD:
         mock_pk = MagicMock()
         mock_pk.nunota = 12345
         mock_response.response_body.primary_key = mock_pk
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
             return_value=mock_response,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             header = Invoice(partner_code=100, top_code=1)
             items = [InvoiceItem(product_code="PROD1", quantity=10)]
-            
+
             nunota = KnowServicesRequestWrapper.create_invoice(header, items)
-            
+
             assert nunota == 12345
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_INCLUDE
@@ -764,7 +762,7 @@ class TestInvoiceCRUD:
     def test_create_invoice_null_header_raises(self, mock_context):
         """Test create_invoice with None header raises ValueError."""
         KnowServicesRequestWrapper.initialize(mock_context)
-        
+
         with pytest.raises(ValueError, match="invoice_header não pode ser None"):
             KnowServicesRequestWrapper.create_invoice(None)
 
@@ -804,17 +802,17 @@ class TestInvoiceCRUD:
     def test_add_invoice_items(self, mock_context, mock_response):
         """Test add_invoice_items returns sequence."""
         mock_response.response_body.sequence = 5
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
             return_value=mock_response,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             items = [InvoiceItem(product_code="PROD1", quantity=5)]
             seq = KnowServicesRequestWrapper.add_invoice_items(12345, items)
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_ITEM_INCLUDE
 
@@ -826,10 +824,10 @@ class TestInvoiceCRUD:
             return_value=mock_response,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             items = [InvoiceItem(sequence=1), InvoiceItem(sequence=2)]
             KnowServicesRequestWrapper.remove_invoice_items(items)
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_ITEM_REMOVE
 
@@ -837,7 +835,7 @@ class TestInvoiceCRUD:
         """Test remove_invoice_items with empty list logs warning."""
         KnowServicesRequestWrapper.initialize(mock_context)
         KnowServicesRequestWrapper.remove_invoice_items([])
-        
+
         assert "Lista de itens vazia" in caplog.text
 
 
@@ -859,20 +857,20 @@ class TestBilling:
             invoices=Invoices(items=[Invoice(value="12345")]),
             client_events=ClientEvents(items=response_events),
         )
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
             return_value=mock_response,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             nunota, events = KnowServicesRequestWrapper.bill(
                 single_number=12345,
                 code_operation_type=1,
                 billing_type=BillingType.NORMAL,
             )
-            
+
             assert nunota == 12345
             assert events is not None
             assert events == response_events
@@ -1012,28 +1010,28 @@ class TestBilling:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             KnowServicesRequestWrapper.confirm_invoice(12345)
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_CONFIRM
 
     def test_confirm_invoice_no_items_raises(self, mock_context):
         """Test confirm_invoice raises NoItemsConfirmInvoiceException."""
         error = SankhyaException("Não é possível confirmar sem produtos")
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
             side_effect=error,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             with pytest.raises(NoItemsConfirmInvoiceException):
                 KnowServicesRequestWrapper.confirm_invoice(12345)
 
     def test_confirm_invoice_already_confirmed_silent(self, mock_context):
         """Test confirm_invoice ignores already confirmed error."""
         error = SankhyaException("Nota já foi confirmada")
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
@@ -1182,7 +1180,7 @@ class TestInvoiceStatus:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             KnowServicesRequestWrapper.flag_invoices_as_not_pending([123, 456])
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_FLAG_AS_NOT_PENDING
 
@@ -1191,7 +1189,7 @@ class TestInvoiceStatus:
         mock_accomp = MagicMock()
         mock_accomp.invoices = [Invoice(unique_number=123)]
         mock_response.response_body.invoice_accompaniments = mock_accomp
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
@@ -1199,7 +1197,7 @@ class TestInvoiceStatus:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             invoices = KnowServicesRequestWrapper.get_invoice_accompaniments([123])
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_ACCOMPANIMENTS
 
@@ -1229,19 +1227,19 @@ class TestInvoiceStatus:
         """Test cancel_invoices returns cancelled count and not-cancelled list."""
         mock_response.response_body.total_cancelled_invoices = 1
         mock_response.response_body.single_numbers = [456]
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
             return_value=mock_response,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             cancelled, not_cancelled = KnowServicesRequestWrapper.cancel_invoices(
                 single_numbers=[123, 456],
                 justification="Teste",
             )
-            
+
             assert cancelled == 1
             assert not_cancelled == [456]
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
@@ -1260,7 +1258,7 @@ class TestInvoiceStatus:
                 code_partner=100,
                 movement_type=MovementType.SALES,
             )
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_BIND_WITH_ORDER
 
@@ -1282,7 +1280,7 @@ class TestNFe:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             KnowServicesRequestWrapper.get_fiscal_invoice_authorization([123, 456])
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.NFE_GET_AUTHORIZATION
 
@@ -1364,21 +1362,21 @@ class TestFinancial:
                 financial_numbers=[1001, 1002],
                 code_account=123,
             )
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.INVOICE_AUTOMATIC_LOW
 
     def test_flag_as_payments_paid_raises(self, mock_context):
         """Test flag_as_payments_paid raises MarkAsPaymentPaidException."""
         error = SankhyaException("Erro de baixa")
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
             side_effect=error,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             with pytest.raises(MarkAsPaymentPaidException):
                 KnowServicesRequestWrapper.flag_as_payments_paid(
                     financial_numbers=[1001],
@@ -1394,7 +1392,7 @@ class TestFinancial:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             KnowServicesRequestWrapper.reverse_payments([1001, 1002])
-            
+
             # Should be called twice (once per financial number)
             assert KnowServicesRequestWrapper._invoke_service.call_count == 2
 
@@ -1407,21 +1405,21 @@ class TestFinancial:
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
             KnowServicesRequestWrapper.unlink_shipping(1001)
-            
+
             request = KnowServicesRequestWrapper._invoke_service.call_args[0][0]
             assert request.service == ServiceName.UNLINK_SHIPPING
 
     def test_unlink_shipping_raises(self, mock_context):
         """Test unlink_shipping raises UnlinkShippingException."""
         error = SankhyaException("Erro ao desvincular")
-        
+
         with patch.object(
             KnowServicesRequestWrapper,
             "_invoke_service",
             side_effect=error,
         ):
             KnowServicesRequestWrapper.initialize(mock_context)
-            
+
             with pytest.raises(UnlinkShippingException):
                 KnowServicesRequestWrapper.unlink_shipping(1001)
 
@@ -1506,15 +1504,15 @@ class TestFileOperations:
             content_type="application/pdf",
             file_extension="pdf",
         )
-        
+
         KnowServicesRequestWrapper.initialize(mock_context)
-        
+
         with patch(
             "sankhya_sdk.core.context.SankhyaContext.get_file_with_token",
             return_value=mock_file,
         ):
             result = KnowServicesRequestWrapper.get_file("ABC123KEY")
-            
+
             assert result == mock_file
 
     @pytest.mark.asyncio
@@ -1525,16 +1523,16 @@ class TestFileOperations:
             content_type="application/pdf",
             file_extension="pdf",
         )
-        
+
         KnowServicesRequestWrapper.initialize(mock_context)
-        
+
         with patch(
             "sankhya_sdk.core.context.SankhyaContext.get_file_async_with_token",
             new_callable=AsyncMock,
             return_value=mock_file,
         ):
             result = await KnowServicesRequestWrapper.get_file_async("ABC123KEY")
-            
+
             assert result == mock_file
 
 
@@ -1549,7 +1547,7 @@ class TestImageOperations:
     def test_get_image_none_entity_raises(self, mock_context):
         """Test get_image with None entity raises ValueError."""
         KnowServicesRequestWrapper.initialize(mock_context)
-        
+
         with pytest.raises(ValueError, match="entity não pode ser None"):
             KnowServicesRequestWrapper.get_image(None)
 
@@ -1653,7 +1651,7 @@ class TestServiceInvocation:
         """Test _invoke_service without token raises RuntimeError."""
         KnowServicesRequestWrapper._initialized = True
         KnowServicesRequestWrapper._session_token = None
-        
+
         with pytest.raises(RuntimeError, match="Token de sessão não disponível"):
             KnowServicesRequestWrapper._invoke_service(MagicMock())
 
@@ -1662,6 +1660,6 @@ class TestServiceInvocation:
         """Test _invoke_service_async without token raises RuntimeError."""
         KnowServicesRequestWrapper._initialized = True
         KnowServicesRequestWrapper._session_token = None
-        
+
         with pytest.raises(RuntimeError, match="Token de sessão não disponível"):
             await KnowServicesRequestWrapper._invoke_service_async(MagicMock())

@@ -5,7 +5,7 @@ Unit tests for SankhyaContext class with multi-session management.
 
 import threading
 import uuid
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -54,7 +54,7 @@ class TestSankhyaContextInit:
     def test_init_with_wrapper_registers_in_dict(self, mock_wrapper):
         """Test that init registers wrapper in global dictionary."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         with SankhyaContext._wrappers_lock:
             assert ctx.token in SankhyaContext._wrappers
             assert SankhyaContext._wrappers[ctx.token] is mock_wrapper
@@ -67,7 +67,7 @@ class TestSankhyaContextInit:
                 mock_instance = MagicMock()
                 mock_instance._environment = ServiceEnvironment.PRODUCTION
                 mock_instance._database_name = "test"
-                
+
                 with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=mock_instance):
                     ctx = SankhyaContext(
                         host="http://test.com",
@@ -124,24 +124,24 @@ class TestSankhyaContextSessionManagement:
     def test_acquire_new_session_creates_token(self, mock_wrapper):
         """Test that acquire_new_session creates and returns a token."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         with patch.object(SankhyaWrapper, '__init__', return_value=None):
             with patch.object(SankhyaWrapper, 'authenticate'):
                 new_wrapper = MagicMock()
                 with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
                     token = ctx.acquire_new_session()
-        
+
         assert isinstance(token, uuid.UUID)
         assert token != ctx.token
 
     def test_acquire_new_session_stores_wrapper(self, mock_wrapper):
         """Test that acquire_new_session stores wrapper in dict."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         new_wrapper = MagicMock()
         with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
             token = ctx.acquire_new_session()
-        
+
         with SankhyaContext._wrappers_lock:
             assert token in SankhyaContext._wrappers
             assert SankhyaContext._wrappers[token] is new_wrapper
@@ -149,11 +149,11 @@ class TestSankhyaContextSessionManagement:
     def test_acquire_new_session_tracks_on_demand(self, mock_wrapper):
         """Test that ON_DEMAND_CRUD is tracked in _on_demand_tokens."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         new_wrapper = MagicMock()
         with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
             token = ctx.acquire_new_session(ServiceRequestType.ON_DEMAND_CRUD)
-        
+
         assert token in ctx._on_demand_tokens
 
     def test_acquire_new_session_keeps_main_timeout_and_retries(self):
@@ -192,31 +192,31 @@ class TestSankhyaContextSessionManagement:
         """Test that acquire_new_session raises when disposed."""
         ctx = SankhyaContext(mock_wrapper)
         ctx.dispose()
-        
+
         with pytest.raises(RuntimeError, match="já foi descartado"):
             ctx.acquire_new_session()
 
     def test_finalize_session_removes_wrapper(self, mock_wrapper):
         """Test that finalize_session removes wrapper from dict."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         new_wrapper = MagicMock()
         with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
             token = ctx.acquire_new_session()
-        
+
         ctx.finalize_session(token)
-        
+
         with SankhyaContext._wrappers_lock:
             assert token not in SankhyaContext._wrappers
 
     def test_finalize_session_calls_dispose(self, mock_wrapper):
         """Test that finalize_session calls dispose on wrapper."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         new_wrapper = MagicMock()
         with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
             token = ctx.acquire_new_session()
-        
+
         ctx.finalize_session(token)
         new_wrapper.dispose.assert_called_once()
 
@@ -224,39 +224,39 @@ class TestSankhyaContextSessionManagement:
         """Test that finalize_session ignores main session token."""
         ctx = SankhyaContext(mock_wrapper)
         main_token = ctx.token
-        
+
         ctx.finalize_session(main_token)
-        
+
         # Main wrapper should still be in dict
         with SankhyaContext._wrappers_lock:
             assert main_token in SankhyaContext._wrappers
-        
+
         mock_wrapper.dispose.assert_not_called()
 
     def test_finalize_session_removes_from_on_demand(self, mock_wrapper):
         """Test that finalize_session removes from on_demand_tokens."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         new_wrapper = MagicMock()
         with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
             token = ctx.acquire_new_session(ServiceRequestType.ON_DEMAND_CRUD)
-        
+
         assert token in ctx._on_demand_tokens
-        
+
         ctx.finalize_session(token)
-        
+
         assert token not in ctx._on_demand_tokens
 
     def test_detach_on_demand_wrapper(self, mock_wrapper):
         """Test detach_on_demand_request_wrapper calls finalize."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         new_wrapper = MagicMock()
         with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
             token = ctx.acquire_new_session(ServiceRequestType.ON_DEMAND_CRUD)
-        
+
         ctx.detach_on_demand_request_wrapper(token)
-        
+
         assert token not in ctx._on_demand_tokens
         new_wrapper.dispose.assert_called_once()
 
@@ -267,7 +267,7 @@ class TestSankhyaContextStaticMethods:
     def test_get_wrapper_returns_wrapper(self, mock_wrapper):
         """Test _get_wrapper returns registered wrapper."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         result = SankhyaContext._get_wrapper(ctx.token)
         assert result is mock_wrapper
 
@@ -282,23 +282,23 @@ class TestSankhyaContextStaticMethods:
         mock_request = MagicMock(spec=ServiceRequest)
         mock_response = MagicMock(spec=ServiceResponse)
         mock_wrapper.service_invoker.return_value = mock_response
-        
+
         result = SankhyaContext.service_invoker_with_token(mock_request, ctx.token)
-        
+
         assert result is mock_response
         mock_wrapper.service_invoker.assert_called_once_with(mock_request)
 
     def test_service_invoker_with_invalid_token_raises(self):
         """Test service_invoker_with_token raises for invalid token."""
         mock_request = MagicMock(spec=ServiceRequest)
-        
+
         with pytest.raises(ValueError, match="Wrapper não encontrado"):
             SankhyaContext.service_invoker_with_token(mock_request, uuid.uuid4())
 
     def test_service_invoker_with_none_request_raises(self, mock_wrapper):
         """Test service_invoker_with_token raises for None request."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         with pytest.raises(ValueError, match="request não pode ser None"):
             SankhyaContext.service_invoker_with_token(None, ctx.token)
 
@@ -307,9 +307,9 @@ class TestSankhyaContextStaticMethods:
         ctx = SankhyaContext(mock_wrapper)
         mock_file = MagicMock()
         mock_wrapper.get_file.return_value = mock_file
-        
+
         result = SankhyaContext.get_file_with_token("key123", ctx.token)
-        
+
         assert result is mock_file
         mock_wrapper.get_file.assert_called_once_with("key123")
 
@@ -318,9 +318,9 @@ class TestSankhyaContextStaticMethods:
         ctx = SankhyaContext(mock_wrapper)
         mock_file = MagicMock()
         mock_wrapper.get_image.return_value = mock_file
-        
+
         result = SankhyaContext.get_image_with_token("Parceiro", {"CODPARC": 1}, ctx.token)
-        
+
         assert result is mock_file
         mock_wrapper.get_image.assert_called_once_with("Parceiro", {"CODPARC": 1})
 
@@ -334,9 +334,9 @@ class TestSankhyaContextInstanceMethods:
         mock_request = MagicMock(spec=ServiceRequest)
         mock_response = MagicMock(spec=ServiceResponse)
         mock_wrapper.service_invoker.return_value = mock_response
-        
+
         result = ctx.service_invoker(mock_request)
-        
+
         assert result is mock_response
         mock_wrapper.service_invoker.assert_called_once_with(mock_request)
 
@@ -344,14 +344,14 @@ class TestSankhyaContextInstanceMethods:
         """Test service_invoker raises when disposed."""
         ctx = SankhyaContext(mock_wrapper)
         ctx.dispose()
-        
+
         with pytest.raises(RuntimeError, match="já foi descartado"):
             ctx.service_invoker(MagicMock())
 
     def test_service_invoker_raises_for_none_request(self, mock_wrapper):
         """Test service_invoker raises for None request."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         with pytest.raises(ValueError, match="request não pode ser None"):
             ctx.service_invoker(None)
 
@@ -360,9 +360,9 @@ class TestSankhyaContextInstanceMethods:
         ctx = SankhyaContext(mock_wrapper)
         mock_file = MagicMock()
         mock_wrapper.get_file.return_value = mock_file
-        
+
         result = ctx.get_file("key123")
-        
+
         assert result is mock_file
         mock_wrapper.get_file.assert_called_once_with("key123")
 
@@ -371,9 +371,9 @@ class TestSankhyaContextInstanceMethods:
         ctx = SankhyaContext(mock_wrapper)
         mock_file = MagicMock()
         mock_wrapper.get_image.return_value = mock_file
-        
+
         result = ctx.get_image("Parceiro", {"CODPARC": 1})
-        
+
         assert result is mock_file
         mock_wrapper.get_image.assert_called_once_with("Parceiro", {"CODPARC": 1})
 
@@ -384,55 +384,55 @@ class TestSankhyaContextLifecycle:
     def test_dispose_finalizes_all_sessions(self, mock_wrapper):
         """Test dispose finalizes all on-demand sessions."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         new_wrappers = []
         for _ in range(3):
             new_wrapper = MagicMock()
             new_wrappers.append(new_wrapper)
             with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
                 ctx.acquire_new_session(ServiceRequestType.ON_DEMAND_CRUD)
-        
+
         ctx.dispose()
-        
+
         # All on-demand wrappers should be disposed
         for w in new_wrappers:
             w.dispose.assert_called_once()
-        
+
         # Main wrapper should be disposed
         mock_wrapper.dispose.assert_called_once()
 
     def test_dispose_is_idempotent(self, mock_wrapper):
         """Test that multiple dispose calls don't cause errors."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         ctx.dispose()
         ctx.dispose()  # Should not raise
         ctx.dispose()  # Should not raise
-        
+
         # Dispose should only be called once
         mock_wrapper.dispose.assert_called_once()
 
     def test_dispose_clears_on_demand_tokens(self, mock_wrapper):
         """Test dispose clears on_demand_tokens set."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         new_wrapper = MagicMock()
         with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
             ctx.acquire_new_session(ServiceRequestType.ON_DEMAND_CRUD)
-        
+
         assert len(ctx._on_demand_tokens) == 1
-        
+
         ctx.dispose()
-        
+
         assert len(ctx._on_demand_tokens) == 0
 
     def test_dispose_removes_from_global_dict(self, mock_wrapper):
         """Test dispose removes main token from global dict."""
         ctx = SankhyaContext(mock_wrapper)
         main_token = ctx.token
-        
+
         ctx.dispose()
-        
+
         with SankhyaContext._wrappers_lock:
             assert main_token not in SankhyaContext._wrappers
 
@@ -645,7 +645,7 @@ class TestSankhyaContextManager:
         """Test that __exit__ calls dispose."""
         ctx = SankhyaContext(mock_wrapper)
         ctx.__exit__(None, None, None)
-        
+
         mock_wrapper.dispose.assert_called_once()
         assert ctx._disposed is True
 
@@ -653,26 +653,26 @@ class TestSankhyaContextManager:
         """Test that __exit__ calls dispose even on exception."""
         ctx = SankhyaContext(mock_wrapper)
         ctx.__exit__(ValueError, ValueError("test"), None)
-        
+
         mock_wrapper.dispose.assert_called_once()
 
     def test_with_statement_usage(self, mock_wrapper):
         """Test context manager with 'with' statement."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         with ctx as wrapper:
             assert wrapper is mock_wrapper
-        
+
         mock_wrapper.dispose.assert_called_once()
 
     def test_with_statement_exception_cleanup(self, mock_wrapper):
         """Test cleanup happens on exception in 'with' block."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         with pytest.raises(RuntimeError):
             with ctx as wrapper:
                 raise RuntimeError("Test exception")
-        
+
         mock_wrapper.dispose.assert_called_once()
 
 
@@ -691,33 +691,32 @@ class TestSankhyaContextAsync:
         """Test that __aexit__ calls dispose on wrapper."""
         ctx = SankhyaContext(mock_wrapper)
         await ctx.__aexit__(None, None, None)
-        
+
         mock_wrapper.dispose.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_with_statement_usage(self, mock_wrapper):
         """Test async context manager with 'async with' statement."""
         ctx = SankhyaContext(mock_wrapper)
-        
+
         async with ctx as wrapper:
             assert wrapper is mock_wrapper
-        
+
         mock_wrapper.dispose.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_service_invoker(self, mock_wrapper):
         """Test async service_invoker_async."""
-        import asyncio
         ctx = SankhyaContext(mock_wrapper)
         mock_request = MagicMock(spec=ServiceRequest)
         mock_response = MagicMock(spec=ServiceResponse)
-        
+
         # Create async mock
         async def async_invoker(req):
             return mock_response
-        
+
         mock_wrapper.service_invoker_async = async_invoker
-        
+
         result = await ctx.service_invoker_async(mock_request)
         assert result is mock_response
 
@@ -729,9 +728,9 @@ class TestSankhyaContextFromSettings:
     def test_from_settings_creates_wrapper(self, mock_from_settings, mock_wrapper):
         """Test that from_settings creates a wrapper."""
         mock_from_settings.return_value = mock_wrapper
-        
+
         ctx = SankhyaContext.from_settings()
-        
+
         mock_from_settings.assert_called_once_with(None)
         assert ctx.wrapper is mock_wrapper
 
@@ -740,9 +739,9 @@ class TestSankhyaContextFromSettings:
         """Test from_settings with custom settings."""
         mock_from_settings.return_value = mock_wrapper
         mock_settings = MagicMock()
-        
+
         ctx = SankhyaContext.from_settings(mock_settings)
-        
+
         mock_from_settings.assert_called_once_with(mock_settings)
         assert ctx.wrapper is mock_wrapper
 
@@ -750,10 +749,10 @@ class TestSankhyaContextFromSettings:
     def test_from_settings_with_context_manager(self, mock_from_settings, mock_wrapper):
         """Test from_settings used as context manager."""
         mock_from_settings.return_value = mock_wrapper
-        
+
         with SankhyaContext.from_settings() as wrapper:
             assert wrapper is mock_wrapper
-        
+
         mock_wrapper.dispose.assert_called_once()
 
 
@@ -765,7 +764,7 @@ class TestSankhyaContextThreadSafety:
         ctx = SankhyaContext(mock_wrapper)
         tokens = []
         errors = []
-        
+
         def acquire_session():
             try:
                 new_wrapper = MagicMock()
@@ -774,13 +773,13 @@ class TestSankhyaContextThreadSafety:
                     tokens.append(token)
             except Exception as e:
                 errors.append(e)
-        
+
         threads = [threading.Thread(target=acquire_session) for _ in range(10)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        
+
         assert len(errors) == 0
         assert len(tokens) == 10
         assert len(set(tokens)) == 10  # All unique
@@ -790,25 +789,25 @@ class TestSankhyaContextThreadSafety:
         ctx = SankhyaContext(mock_wrapper)
         tokens = []
         errors = []
-        
+
         # Create sessions first
         for _ in range(10):
             new_wrapper = MagicMock()
             with patch('sankhya_sdk.core.context.SankhyaWrapper', return_value=new_wrapper):
                 tokens.append(ctx.acquire_new_session())
-        
+
         def finalize_session(token):
             try:
                 ctx.finalize_session(token)
             except Exception as e:
                 errors.append(e)
-        
+
         threads = [threading.Thread(target=finalize_session, args=(t,)) for t in tokens]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        
+
         assert len(errors) == 0
 
     def test_concurrent_service_invocations(self, mock_wrapper):
@@ -816,10 +815,10 @@ class TestSankhyaContextThreadSafety:
         ctx = SankhyaContext(mock_wrapper)
         mock_response = MagicMock(spec=ServiceResponse)
         mock_wrapper.service_invoker.return_value = mock_response
-        
+
         results = []
         errors = []
-        
+
         def invoke_service():
             try:
                 request = MagicMock(spec=ServiceRequest)
@@ -827,13 +826,13 @@ class TestSankhyaContextThreadSafety:
                 results.append(response)
             except Exception as e:
                 errors.append(e)
-        
+
         threads = [threading.Thread(target=invoke_service) for _ in range(10)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        
+
         assert len(errors) == 0
         assert len(results) == 10
 
@@ -845,20 +844,20 @@ class TestSankhyaContextBackwardCompatibility:
         """Test that old usage pattern still works."""
         # Old pattern: pass wrapper directly
         ctx = SankhyaContext(mock_wrapper)
-        
+
         with ctx as wrapper:
             assert wrapper is mock_wrapper
-        
+
         mock_wrapper.dispose.assert_called_once()
 
     @patch.object(SankhyaWrapper, "from_settings")
     def test_from_settings_still_works(self, mock_from_settings, mock_wrapper):
         """Test from_settings factory method unchanged."""
         mock_from_settings.return_value = mock_wrapper
-        
+
         with SankhyaContext.from_settings() as wrapper:
             assert wrapper is mock_wrapper
-        
+
         mock_wrapper.dispose.assert_called_once()
 
     def test_wrapper_property_still_exists(self, mock_wrapper):
@@ -874,7 +873,7 @@ class TestSankhyaContextRepr:
         """Test that repr contains relevant information."""
         ctx = SankhyaContext(mock_wrapper)
         rep = repr(ctx)
-        
+
         assert "SankhyaContext" in rep
         assert "token=" in rep
         assert "user_code=" in rep

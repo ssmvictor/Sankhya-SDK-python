@@ -10,7 +10,7 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Helpers/StatusMessageHelper.cs
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Dict, Optional, Type
+from typing import TYPE_CHECKING, Callable, Dict
 
 from sankhya_sdk.exceptions import (
     ServiceRequestBusinessRuleRestrictionException,
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
 # Tipo para funções que criam exceções
 ExceptionFactory = Callable[
-    [str, "ServiceName", "ServiceRequest", "ServiceResponse"], 
+    [str, "ServiceName", "ServiceRequest", "ServiceResponse"],
     Exception
 ]
 
@@ -211,7 +211,7 @@ class StatusMessageHelper:
         """
         if not response.status_message:
             return
-        
+
         status_message = response.status_message.decoded_value
         if not status_message:
             return

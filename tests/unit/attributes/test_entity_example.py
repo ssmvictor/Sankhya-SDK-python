@@ -1,12 +1,13 @@
-import pytest
 from typing import Optional
-from pydantic import ValidationError
+
+import pytest
+
 from sankhya_sdk.attributes.decorators import (
     entity,
-    entity_key,
-    entity_element,
     entity_custom_data,
+    entity_element,
     entity_ignore,
+    entity_key,
 )
 from sankhya_sdk.models.base import EntityBase
 
@@ -24,27 +25,27 @@ def test_partner_entity_behavior():
     partner = Partner(code=1, name="Test Partner")
     assert partner.code == 1
     assert partner.name == "Test Partner"
-    
+
     # Test dirty tracking
     assert "code" in partner._fields_set
     assert "name" in partner._fields_set
     assert "document" not in partner._fields_set
-    
+
     partner.document = "12345678901"
     assert "document" in partner._fields_set
-    
+
     # Test modified fields
     modified = partner.get_modified_fields()
     assert modified == {"code": 1, "name": "Test Partner", "document": "12345678901"}
-    
+
     # Test should_serialize_field
     assert partner.should_serialize_field("code") is True
     assert partner.should_serialize_field("internal_notes") is False # Ignored
-    
+
     # Test validation - max length
     with pytest.raises(ValueError, match="Value too long"):
         partner.document = "123456789012345" # 15 chars, max is 14
-        
+
     # Test validation - key may be None (new entities / partial data), as in the
     # .NET SDK, where null keys are just skipped when the keys are extracted
     new_partner = Partner(code=None, name="Test")

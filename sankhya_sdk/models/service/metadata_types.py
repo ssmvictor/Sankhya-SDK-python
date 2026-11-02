@@ -11,25 +11,23 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import BaseModel, ConfigDict, Field as PydanticField
+from pydantic import BaseModel, ConfigDict
+from pydantic import Field as PydanticField
 
-from sankhya_sdk.models.base import EntityBase
+from .basic_types import Field
 from .xml_serialization import (
     create_xml_element,
-    get_element_attr,
-    get_element_text,
-    to_base64,
-    from_base64,
-    serialize_bool,
     deserialize_bool,
     deserialize_optional_int,
+    from_base64,
+    get_element_attr,
+    get_element_text,
+    serialize_bool,
 )
-from .basic_types import Field
-
 
 # ============================================================
 # Decodificação Base64 da mensagem de status
@@ -250,12 +248,12 @@ class Metadata(BaseModel):
             elem.set("pageSize", str(self.page_size))
         if self.current_page is not None:
             elem.set("currentPage", str(self.current_page))
-        
+
         if self.fields:
             fields_elem = etree.SubElement(elem, "fields")
             for field in self.fields:
                 fields_elem.append(field.to_xml())
-        
+
         return elem
 
     @classmethod
@@ -266,29 +264,29 @@ class Metadata(BaseModel):
         if fields_elem is not None:
             for field_elem in fields_elem:
                 fields.append(Field.from_xml(field_elem))
-        
+
         total_records = None
         page_size = None
         current_page = None
-        
+
         if element.get("totalRecords"):
             try:
                 total_records = int(element.get("totalRecords"))
             except (ValueError, TypeError):
                 pass
-        
+
         if element.get("pageSize"):
             try:
                 page_size = int(element.get("pageSize"))
             except (ValueError, TypeError):
                 pass
-        
+
         if element.get("currentPage"):
             try:
                 current_page = int(element.get("currentPage"))
             except (ValueError, TypeError):
                 pass
-        
+
         return cls(
             fields=fields,
             total_records=total_records,
@@ -446,14 +444,14 @@ class Session(BaseModel):
                 user_id = int(user_id_str)
             except ValueError:
                 pass
-        
+
         company_id_str = get_element_attr(element, "companyId")
         if company_id_str:
             try:
                 company_id = int(company_id_str)
             except ValueError:
                 pass
-        
+
         return cls(
             jsession_id=get_element_attr(element, "ID")
             or get_element_attr(element, "jsessionid"),
@@ -495,7 +493,7 @@ class SingleNumber(BaseModel):
                 value = int(text)
             except ValueError:
                 pass
-        
+
         return cls(
             name=get_element_attr(element, "name"),
             value=value,
@@ -583,13 +581,13 @@ class Pager(BaseModel):
     
     Usado em respostas paginadas para controlar o cursor.
     """
-    
+
     model_config = ConfigDict(frozen=False)
 
     total_pages: Optional[int] = None
     total_records: Optional[int] = None
     pager_id: Optional[str] = None
-    
+
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("pager")

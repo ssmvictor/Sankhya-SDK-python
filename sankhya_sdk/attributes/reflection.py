@@ -1,15 +1,14 @@
-from typing import Any, Optional, Type, Dict
+from typing import Any, Optional, Type
+
 from pydantic.fields import FieldInfo
-from .metadata import (
-    EntityMetadata,
-    EntityFieldMetadata,
-    EntityElementMetadata,
-    EntityReferenceMetadata,
-    EntityCustomDataMetadata,
-)
-from ..value_objects.entity_resolver import EntityResolverResult
-from ..models.service.basic_types import FieldValue, Field
+
 from ..models.base import EntityBase
+from ..models.service.basic_types import Field, FieldValue
+from ..value_objects.entity_resolver import EntityResolverResult
+from .metadata import (
+    EntityFieldMetadata,
+    EntityMetadata,
+)
 
 
 def get_entity_name(cls: Type[Any]) -> str:
@@ -55,7 +54,7 @@ def extract_keys(entity: EntityBase) -> EntityResolverResult:
         if metadata.is_key:
             value = getattr(entity, field_name)
             result.keys.append(FieldValue(name=element_name, value=str(value) if value is not None else None))
-        
+
         if not metadata.is_ignored:
             result.fields.append(Field(name=element_name))
 

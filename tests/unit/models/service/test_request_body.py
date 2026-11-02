@@ -26,7 +26,6 @@ from sankhya_sdk.models.service.metadata_types import Session
 from sankhya_sdk.models.service.request_body import RequestBody
 from sankhya_sdk.models.service.service_request import ServiceRequest
 
-
 CLIENT_CONFIRM = "br.com.sankhya.actionbutton.clientconfirm"
 
 

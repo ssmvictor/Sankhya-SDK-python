@@ -27,7 +27,8 @@ from typing import (
 from unittest.mock import MagicMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
-from xml.sax.saxutils import escape as xml_escape, quoteattr
+from xml.sax.saxutils import escape as xml_escape
+from xml.sax.saxutils import quoteattr
 
 import pytest
 import requests
@@ -37,16 +38,15 @@ from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.models.base import EntityBase
+from sankhya_sdk.models.transport.neighborhood import Neighborhood
 from sankhya_sdk.models.transport.partner import Partner
 from sankhya_sdk.models.transport.product import Product
-from sankhya_sdk.models.transport.neighborhood import Neighborhood
 from sankhya_sdk.request_wrappers.know_services_request_wrapper import (
     KnowServicesRequestWrapper,
 )
 from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
     SimpleCRUDRequestWrapper,
 )
-
 
 T = TypeVar("T", bound=EntityBase)
 
@@ -166,13 +166,13 @@ def create_success_response(
         XML serializado como bytes
     """
     entities_xml = ""
-    
+
     if entities:
         entity_strs = [_create_entity_xml(entity) for entity in entities]
         entities_xml = f"<entities>{' '.join(entity_strs)}</entities>"
-    
+
     total_attr = f' totalRecords="{total_records}"' if total_records else ""
-    
+
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <serviceResponse status="1"{total_attr}>
     <responseBody>
@@ -215,7 +215,7 @@ def create_login_response(
     """
     # Encode user_code as base64 like the API does
     user_code_b64 = base64.b64encode(str(user_code).encode()).decode()
-    
+
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <serviceResponse status="1">
     <responseBody>
@@ -254,14 +254,14 @@ def create_sessions_response(sessions: Optional[List[Dict[str, Any]]] = None) ->
     """
     if not sessions:
         sessions = []
-    
+
     session_strs = []
     for sess in sessions:
         attrs = " ".join(f"{k}={quoteattr(str(v))}" for k, v in sess.items())
         session_strs.append(f"<SESSION {attrs}/>")
-    
+
     sessions_xml = "".join(session_strs)
-    
+
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <serviceResponse status="1">
     <responseBody>
@@ -318,9 +318,9 @@ def create_paged_response(
         XML serializado como bytes
     """
     entity_strs = [_create_entity_xml(entity) for entity in entities]
-    
+
     entities_xml = "".join(entity_strs)
-    
+
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <serviceResponse status="1" totalRecords="{total_records}">
     <responseBody>
@@ -540,7 +540,7 @@ def _isolate_shared_sdk_state() -> Iterator[None]:
 @dataclass
 class SamplePartner:
     """Factory para criar Partners de teste."""
-    
+
     @staticmethod
     def create(
         code: int = 1,
@@ -559,7 +559,7 @@ class SamplePartner:
         if email:
             partner.email_address = email
         return partner
-    
+
     @staticmethod
     def to_xml_dict(partner: Partner) -> Dict[str, Any]:
         """Converte Partner para dicionário XML."""
@@ -576,7 +576,7 @@ class SamplePartner:
 @dataclass
 class SampleProduct:
     """Factory para criar Products de teste."""
-    
+
     @staticmethod
     def create(
         code: int = 1,
@@ -591,7 +591,7 @@ class SampleProduct:
             code_volume=code_volume,
         )
         return product
-    
+
     @staticmethod
     def to_xml_dict(product: Product) -> Dict[str, Any]:
         """Converte Product para dicionário XML."""
@@ -603,10 +603,10 @@ class SampleProduct:
         return result
 
 
-@dataclass  
+@dataclass
 class SampleNeighborhood:
     """Factory para criar Neighborhoods de teste."""
-    
+
     @staticmethod
     def create(
         code: int = 1,
@@ -614,7 +614,7 @@ class SampleNeighborhood:
     ) -> Neighborhood:
         """Cria um Neighborhood para testes."""
         return Neighborhood(code=code, name=name)
-    
+
     @staticmethod
     def to_xml_dict(neighborhood: Neighborhood) -> Dict[str, Any]:
         """Converte Neighborhood para dicionário XML."""
@@ -707,13 +707,13 @@ def mock_http_responses():
         Função para adicionar respostas
     """
     responses = []
-    
+
     def add_response(response: Mock):
         responses.append(response)
-    
+
     def get_responses():
         return responses
-    
+
     yield add_response, get_responses
 
 
@@ -739,21 +739,21 @@ def mock_sankhya_server(sample_xml_responses):
     with patch("sankhya_sdk.core.low_level_wrapper.requests.Session") as mock_cls:
         mock_session = MagicMock()
         mock_cls.return_value = mock_session
-        
+
         responses_queue = []
-        
+
         def add_response(response: Mock):
             """Adiciona uma resposta à fila."""
             responses_queue.append(response)
-        
+
         def configure_side_effect():
             """Configura o side_effect do mock."""
             mock_session.request.side_effect = responses_queue
-        
+
         # Inicializa com autenticação bem-sucedida por padrão: authenticate()
         # consome o login e o registro de user agent (DWR)
         responses_queue.extend(create_authentication_responses("SESSION123", 1))
-        
+
         yield mock_session, add_response, configure_side_effect
 
 
@@ -772,22 +772,22 @@ def authenticated_wrapper(mock_sankhya_server, sample_xml_responses):
         SankhyaWrapper autenticado
     """
     mock_session, add_response, configure = mock_sankhya_server
-    
+
     # Adiciona resposta de logout para cleanup
     logout_resp = create_mock_response(200, sample_xml_responses["logout_success"])
     add_response(logout_resp)
-    
+
     configure()
-    
+
     wrapper = SankhyaWrapper(
         host="http://mock.sankhya.local",
         port=8180,
     )
-    
+
     wrapper.authenticate("testuser", "testpass")
-    
+
     yield wrapper
-    
+
     wrapper.dispose()
 
 

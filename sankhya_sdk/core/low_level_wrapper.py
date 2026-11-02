@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -28,7 +28,6 @@ from .constants import (
     SESSION_COOKIE_NAME,
     USER_AGENT_TEMPLATE,
 )
-
 
 logger = logging.getLogger(__name__)
 

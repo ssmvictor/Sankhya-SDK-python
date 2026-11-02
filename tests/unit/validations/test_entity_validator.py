@@ -6,21 +6,21 @@ proper decorators, base class inheritance, and field configuration.
 
 from types import ModuleType
 from typing import Optional
+
 import pytest
 
+from sankhya_sdk.attributes.decorators import entity, entity_element, entity_key
+from sankhya_sdk.models.transport.base import TransportEntityBase
 from sankhya_sdk.validations.entity_validator import EntityValidator
 from sankhya_sdk.validations.exceptions import (
     EntityValidationError,
+    InvalidPropertyAttributeError,
+    MissingBaseClassError,
     MissingConstructorError,
     MissingEntityAttributeError,
-    MissingBaseClassError,
     MissingEqualityMethodsError,
-    InvalidPropertyAttributeError,
     MissingSerializeMethodError,
 )
-from sankhya_sdk.models.transport.base import TransportEntityBase
-from sankhya_sdk.attributes.decorators import entity, entity_key, entity_element
-
 
 # =============================================================================
 # Test fixtures - Valid and Invalid Entity Classes
@@ -68,6 +68,7 @@ class InvalidEntityNoBaseClass:
 
 # Manually set entity metadata to simulate @entity decorator
 from sankhya_sdk.attributes.metadata import EntityMetadata
+
 InvalidEntityNoBaseClass.__entity_metadata__ = EntityMetadata(name="InvalidNoBase")
 
 

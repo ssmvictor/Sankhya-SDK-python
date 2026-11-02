@@ -38,7 +38,6 @@ from .conftest import (
     simple_crud_session,
 )
 
-
 SAVE = ServiceName.CRUD_SERVICE_SAVE
 REMOVE = ServiceName.CRUD_SERVICE_REMOVE
 
@@ -112,7 +111,7 @@ class TestFieldValidation:
             "VALIDATION.REQUIRED",
             "Campo NOMEPARC é obrigatório",
         )
-        
+
         assert "NOMEPARC" in str(error) or "obrigatório" in str(error).lower()
 
     @patch("sankhya_sdk.core.low_level_wrapper.requests.Session")
@@ -194,14 +193,14 @@ class TestBusinessRuleValidation:
             http_response(200, create_error_response("BUSINESS.RULE", message)),
         ])
         _install(mock_session_class, server)
-        
+
         with simple_crud_session():
             # Tentar deletar parceiro com dependências
             partner = Partner(code=1)
-            
+
             with pytest.raises(SankhyaException) as exc_info:
                 SimpleCRUDRequestWrapper.remove(partner)
-        
+
         assert message in str(exc_info.value)
         assert server.calls_to(REMOVE) == 1
 
@@ -230,7 +229,7 @@ class TestValidationSuccess:
             Partner(name="Parceiro Válido", email_address="valid@email.com"),
             {"CODPARC": "1", "NOMEPARC": "Parceiro Válido", "EMAIL": "valid@email.com"},
         )
-        
+
         assert result.code == 1
         assert result.name == "Parceiro Válido"
         assert save_data_row(body) == (
@@ -246,7 +245,7 @@ class TestValidationSuccess:
             Product(name="Produto Válido", code_volume="UN"),
             {"CODPROD": "1", "DESCRPROD": "Produto Válido", "CODVOL": "UN"},
         )
-        
+
         assert result.code == 1
         assert result.name == "Produto Válido"
         assert save_data_row(body) == (
@@ -267,7 +266,7 @@ class TestSpecialCharacterValidation:
             Partner(name="João & Maria Ltda"),
             {"CODPARC": "1", "NOMEPARC": "João & Maria Ltda"},
         )
-        
+
         assert result.code == 1
         assert "João" in result.name
         # O XML enviado é válido e o valor chega intacto ao servidor
@@ -283,7 +282,7 @@ class TestSpecialCharacterValidation:
             Partner(name="Açúcar & Café Gótico"),
             {"CODPARC": "1", "NOMEPARC": "Açúcar & Café Gótico"},
         )
-        
+
         assert result.code == 1
         assert save_data_row(body)[1] == {"NOMEPARC": "Açúcar & Café Gótico"}
 
@@ -301,7 +300,7 @@ class TestNullableFieldValidation:
             Partner(name="Parceiro Sem Email"),
             {"CODPARC": "1", "NOMEPARC": "Parceiro Sem Email"},
         )
-        
+
         assert result.code == 1
         # Campo não preenchido não é enviado
         assert save_data_row(body)[1] == {"NOMEPARC": "Parceiro Sem Email"}

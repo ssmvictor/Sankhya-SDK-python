@@ -4,15 +4,15 @@ Testes de integração para serialização XML.
 Testa serialização/deserialização completa de requests/responses.
 """
 
-from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerialization
-from sankhya_sdk.models.service.service_request import ServiceRequest
-from sankhya_sdk.models.service.service_response import ServiceResponse
-from sankhya_sdk.models.service.entity_types import Entity, DataSet
-from sankhya_sdk.models.service.basic_types import Field, LiteralCriteria, Parameter
-from sankhya_sdk.models.transport.partner import Partner
+from sankhya_sdk.enums.parameter_type import ParameterType
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_response_status import ServiceResponseStatus
-from sankhya_sdk.enums.parameter_type import ParameterType
+from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerialization
+from sankhya_sdk.models.service.basic_types import Field, LiteralCriteria, Parameter
+from sankhya_sdk.models.service.entity_types import DataSet, Entity
+from sankhya_sdk.models.service.service_request import ServiceRequest
+from sankhya_sdk.models.service.service_response import ServiceResponse
+from sankhya_sdk.models.transport.partner import Partner
 
 
 class TestXmlRoundTrip:
@@ -25,10 +25,10 @@ class TestXmlRoundTrip:
             name="Parceiro",
             fields=[Field(name="CODPARC"), Field(name="NOMEPARC")]
         )
-        
+
         xml_str = original.to_xml_string()
         parsed = ServiceRequest.from_xml_string(xml_str)
-        
+
         assert parsed.service == original.service
 
     def test_service_response_round_trip(self):
@@ -46,10 +46,10 @@ class TestXmlRoundTrip:
             </responseBody>
         </serviceResponse>
         """
-        
+
         resp = ServiceResponse.from_xml_string(xml_str)
         new_xml = resp.to_xml_string()
-        
+
         assert resp.service == ServiceName.CRUD_FIND
         assert resp.transaction_id == "TX123"
         assert len(resp.entities) == 1
@@ -98,9 +98,9 @@ class TestComplexXmlStructures:
                 fields=[Field(name="CODPROD"), Field(name="DESCRPROD")]
             )
         )
-        
+
         xml_str = req.to_xml_string()
-        
+
         assert "dataSet" in xml_str
         assert "rowsLimit" in xml_str
 
@@ -129,18 +129,18 @@ class TestComplexXmlStructures:
             </responseBody>
         </serviceResponse>
         """
-        
+
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert len(resp.entities) == 3
         assert resp.response_body.crud_service_entities.total == 3
-        
+
         # Como no .NET (ServiceResponse.ParseDynamic, ServiceResponse.cs:245:
         # ReadElementContentAsString), os campos das entidades dinâmicas são
         # os textos do XML; a conversão de tipo ocorre em convert_to_type
         codes = resp.get_all_entity_fields("CODPARC")
         assert codes == ["1", "2", "3"]
-        
+
         partners = [
             EntityDynamicSerialization(dict(entity.fields)).convert_to_type(Partner)
             for entity in resp.entities
@@ -162,9 +162,9 @@ class TestRealWorldXml:
             </responseBody>
         </serviceResponse>
         """
-        
+
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert resp.status == ServiceResponseStatus.OK
         assert resp.response_body.code_user == 123
         assert resp.response_body.jsession_id == "ABCD1234"
@@ -180,9 +180,9 @@ class TestRealWorldXml:
             </responseBody>
         </serviceResponse>
         """
-        
+
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert resp.transaction_id == "TX999"
         assert resp.response_body.key is not None
 
@@ -195,9 +195,9 @@ class TestRealWorldXml:
             </responseBody>
         </serviceResponse>
         """
-        
+
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert resp.is_error
         assert resp.error_code == "SNK.001"
         assert "Campo obrigatório" in resp.status_message_text
@@ -216,7 +216,7 @@ class TestXmlCompatibility:
             </responseBody>
         </serviceResponse>
         """
-        
+
         # Não deve lançar exceção
         resp = ServiceResponse.from_xml_string(xml_str)
         assert resp.is_success
@@ -229,7 +229,7 @@ class TestXmlCompatibility:
             <responseBody/>
         </serviceResponse>
         """
-        
+
         resp = ServiceResponse.from_xml_string(xml_str)
         assert resp.is_success
         assert resp.status_message_text == ""

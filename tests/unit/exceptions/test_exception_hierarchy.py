@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
+from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import (
+    IXmlServiceException,
     SankhyaException,
+    ServiceRequestExternalException,
     ServiceRequestGeneralException,
+    ServiceRequestInaccessibleException,
     ServiceRequestTemporarilyException,
     ServiceRequestTimeoutException,
-    ServiceRequestExternalException,
     ServiceRequestUnavailableException,
-    ServiceRequestInaccessibleException,
-    IXmlServiceException,
 )
-from sankhya_sdk.enums.service_name import ServiceName
+
 
 def test_exception_hierarchy() -> None:
     exc: ServiceRequestTimeoutException = ServiceRequestTimeoutException(ServiceName.CRUD_FIND)
-    
+
     assert isinstance(exc, ServiceRequestTimeoutException)
     assert isinstance(exc, ServiceRequestTemporarilyException)
     assert isinstance(exc, ServiceRequestGeneralException)

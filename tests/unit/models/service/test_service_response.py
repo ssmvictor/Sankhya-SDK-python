@@ -8,9 +8,10 @@ import base64
 from unittest.mock import Mock, patch
 
 import pytest
-from lxml import etree
 
 from sankhya_sdk.core.wrapper import SankhyaWrapper
+from sankhya_sdk.enums.service_name import ServiceName
+from sankhya_sdk.enums.service_response_status import ServiceResponseStatus
 from sankhya_sdk.exceptions import (
     ServiceRequestDeadlockException,
     ServiceRequestExpiredAuthenticationException,
@@ -21,8 +22,6 @@ from sankhya_sdk.exceptions import (
 from sankhya_sdk.helpers.status_message_helper import StatusMessageHelper
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
-from sankhya_sdk.enums.service_name import ServiceName
-from sankhya_sdk.enums.service_response_status import ServiceResponseStatus
 
 
 def _base64_error_response(
@@ -51,7 +50,7 @@ class TestServiceResponseParsing:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert resp.service == ServiceName.CRUD_FIND
         assert resp.status == ServiceResponseStatus.OK
         assert resp.is_success is True
@@ -67,7 +66,7 @@ class TestServiceResponseParsing:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert resp.status == ServiceResponseStatus.ERROR
         assert resp.is_error is True
         assert resp.error_code == "E001"
@@ -83,7 +82,7 @@ class TestServiceResponseParsing:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert resp.transaction_id == "TX123"
 
     def test_parse_pending_printing(self):
@@ -95,7 +94,7 @@ class TestServiceResponseParsing:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert resp.pending_printing is True
 
 
@@ -191,7 +190,7 @@ class TestServiceResponseEntities:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert len(resp.entities) == 2
         assert resp.first_entity is not None
         # Valores mantidos como texto, como ParseDynamic no .NET
@@ -212,7 +211,7 @@ class TestServiceResponseEntities:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert len(resp.entities) == 1
         assert resp.first_entity.get("CODPROD") == "123"
 
@@ -225,7 +224,7 @@ class TestServiceResponseEntities:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert len(resp.entities) == 0
         assert resp.first_entity is None
 
@@ -244,7 +243,7 @@ class TestServiceResponseEntities:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         assert resp.get_entity_field("CODPARC") == "1"
         assert resp.get_entity_field("NOMEPARC") == "Cliente"
         assert resp.get_entity_field("INEXISTENTE", "default") == "default"
@@ -266,7 +265,7 @@ class TestServiceResponseEntities:
         </serviceResponse>
         """
         resp = ServiceResponse.from_xml_string(xml_str)
-        
+
         codes = resp.get_all_entity_fields("CODPARC")
         assert codes == ["1", "2"]
 
@@ -477,7 +476,7 @@ class TestServiceResponseSerialization:
             transaction_id="TX123",
         )
         xml = resp.to_xml()
-        
+
         assert xml.tag == "serviceResponse"
         assert xml.get("status") == "1"
         assert xml.get("transactionId") == "TX123"
@@ -492,7 +491,7 @@ class TestServiceResponseSerialization:
         """
         resp = ServiceResponse.from_xml_string(original_xml)
         new_xml = resp.to_xml_string()
-        
+
         assert "serviceResponse" in new_xml
 
 
@@ -506,7 +505,7 @@ class TestServiceResponseRepr:
             status=ServiceResponseStatus.OK,
         )
         repr_str = repr(resp)
-        
+
         assert "ServiceResponse" in repr_str
         assert "CRUD_FIND" in repr_str
         assert "OK" in repr_str

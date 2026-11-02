@@ -5,6 +5,7 @@ This module contains exceptions related to specific business operations.
 
 from typing import Any, Optional
 
+from ..enums.service_name import ServiceName
 from .base import ServiceRequestGeneralException
 from .messages import (
     CONFIRM_INVOICE,
@@ -19,7 +20,6 @@ from .messages import (
     SERVICE_RESPONSE_UNEXPECTED_ELEMENT,
     UNLINK_SHIPPING,
 )
-from ..enums.service_name import ServiceName
 
 
 class ConfirmInvoiceException(ServiceRequestGeneralException):

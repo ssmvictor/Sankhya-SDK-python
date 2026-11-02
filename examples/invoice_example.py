@@ -15,7 +15,7 @@ Tabelas Sankhya:
 from __future__ import annotations
 
 import os
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -34,7 +34,7 @@ SANKHYA_X_TOKEN = os.getenv("SANKHYA_TOKEN")
 def _create_client():
     """Cria e retorna um GatewayClient autenticado via OAuth2."""
     from sankhya_sdk.auth.oauth_client import OAuthClient
-    from sankhya_sdk.http import SankhyaSession, GatewayClient
+    from sankhya_sdk.http import GatewayClient, SankhyaSession
 
     oauth = OAuthClient(base_url=SANKHYA_AUTH_BASE_URL, token=SANKHYA_X_TOKEN)
     oauth.authenticate(client_id=SANKHYA_CLIENT_ID, client_secret=SANKHYA_CLIENT_SECRET)
@@ -82,7 +82,7 @@ def listar_notas_fiscais(max_results: int = 100) -> List[Dict[str, Any]]:
         nunota = record.get("NUNOTA", "-")
         numnota = record.get("NUMNOTA", "-")
         valor = float(record.get("VLRNOTA", 0) or 0)
-        
+
         # Garantir que status é string, não dict
         status_raw = record.get("STATUSNFE", "-")
         status = status_raw if isinstance(status_raw, str) else str(status_raw.get("$", "-") if isinstance(status_raw, dict) else "-")
@@ -145,7 +145,7 @@ def buscar_nota_por_nunota(nunota: int) -> Optional[Dict[str, Any]]:
 
     if entities:
         nota = entities[0]
-        print(f"✅ Encontrada:")
+        print("✅ Encontrada:")
         print(f"   NUNOTA: {nota.get('NUNOTA')}")
         print(f"   Número: {nota.get('NUMNOTA')}")
         print(f"   Valor: R$ {float(nota.get('VLRNOTA', 0) or 0):.2f}")
@@ -244,7 +244,7 @@ def listar_itens_nota(nunota: int) -> List[Dict[str, Any]]:
             f"  {seq}. Produto:{cod} | Qtd:{qtd:.2f} | Unit:R$ {vlr_unit:.2f} | Total:R$ {vlr_tot:.2f}"
         )
 
-    print(f"\n📊 Resumo:")
+    print("\n📊 Resumo:")
     print(f"   Total de itens: {len(entities)}")
     print(f"   Quantidade total: {total_qtd:.2f}")
     print(f"   Valor total: R$ {total_valor:.2f}")

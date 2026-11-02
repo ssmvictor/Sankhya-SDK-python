@@ -38,7 +38,6 @@ from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensi
 from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.models.service.service_request import ServiceRequest
 
-
 logger = logging.getLogger(__name__)
 
 # TypeVar para entidades genéricas
@@ -107,38 +106,38 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         self._throughput = throughput
         self._allow_above_throughput = allow_above_throughput
         self._cancel_event = cancel_event
-        
+
         # Filas e eventos de sincronização
         self._queue: asyncio.Queue[TEntity] = asyncio.Queue()
         self._stop_event = asyncio.Event()
         self._flush_event = asyncio.Event()
         self._work_available = asyncio.Event()
-        
+
         # Conclusão do flush: total de entidades adicionadas x processadas
         # (ver flush)
         self._flush_cond = asyncio.Condition()
         self._added_count = 0
         self._processed_count = 0
         self._worker_finished = False
-        
+
         # Sessão e contexto
         self._context = context
         self._session_token = session_token
         self._owns_session = owns_session
         self._session_released = False
-        
+
         # Estatísticas
         self._request_count = 0
         self._entities_sent = 0
         self._entities_sent_successfully = 0
-        
+
         # Estado
         self._disposed = False
         self._lock = asyncio.Lock()
-        
+
         # Task worker (será iniciada no __aenter__)
         self._worker_task: Optional[asyncio.Task] = None
-        
+
         logger.debug(
             f"AsyncOnDemandRequestWrapper criado: service={service.name}, "
             f"throughput={throughput}"
@@ -201,16 +200,16 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         """
         if self._disposed:
             raise ValueError("AsyncOnDemandRequestWrapper já foi descartado")
-        
+
         if self._cancel_event.is_set():
             raise CanceledOnDemandRequestWrapperException()
-        
+
         # Contabiliza depois de enfileirar (sem await entre os dois): o alvo
         # de um flush nunca inclui uma entidade que ainda não está na fila
         await self._queue.put(entity)
         self._added_count += 1
         self._work_available.set()
-        
+
         logger.debug(f"Entidade adicionada à fila: {type(entity).__name__}")
 
     async def flush(self) -> None:
@@ -228,19 +227,19 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         """
         if self._disposed:
             return
-        
+
         target = self._added_count
         if self._processed_count >= target:
             return
-        
+
         # Sem task worker ativa ninguém processaria a fila nem sinalizaria
         # a conclusão do flush
         if not self._is_worker_running():
             await self.start()
-        
+
         self._flush_event.set()
         self._work_available.set()
-        
+
         # Aguarda conclusão do flush. Worker já encerrado (ex.: após
         # cancelamento) não processaria mais nada: ele marca o término antes
         # de notificar os flushes pendentes.
@@ -248,7 +247,7 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
             await self._flush_cond.wait_for(
                 lambda: self._processed_count >= target or self._worker_finished
             )
-        
+
         logger.debug("Flush concluído")
 
     async def dispose(self) -> None:
@@ -259,21 +258,21 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         """
         if self._disposed:
             return
-        
+
         async with self._lock:
             if self._disposed:
                 return
             self._disposed = True
-        
+
         # Sinaliza parada
         self._stop_event.set()
         self._work_available.set()
-        
+
         # Como no .NET, o dispose envia as entidades pendentes: sem task
         # worker ativa, ela é iniciada para drenar a fila
         if not self._is_worker_running() and not self._queue.empty():
             await self.start()
-        
+
         # Aguarda task worker
         if self._worker_task and not self._worker_task.done():
             try:
@@ -285,11 +284,11 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
                     await self._worker_task
                 except asyncio.CancelledError:
                     pass
-        
+
         # Finaliza sessão se for proprietário (o worker já o faz ao terminar;
         # aqui cobre o wrapper cuja task worker nunca foi iniciada)
         await self._release_session()
-        
+
         logger.info(
             f"AsyncOnDemandRequestWrapper finalizado: "
             f"requests={self._request_count}, "
@@ -362,7 +361,7 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         # Marcada antes do await: o fim do worker e o dispose() não liberam
         # a sessão duas vezes
         self._session_released = True
-        
+
         if self._session_token and self._context:
             try:
                 await asyncio.to_thread(
@@ -381,7 +380,7 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         """
         if self._work_available.is_set() or self._cancel_event.is_set():
             return
-        
+
         waiters = [
             asyncio.ensure_future(self._work_available.wait()),
             asyncio.ensure_future(self._cancel_event.wait()),
@@ -412,26 +411,26 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
             True se deve parar, False para continuar.
         """
         await self._wait_for_work()
-        
+
         # Consome o sinal antes de inspecionar o estado: um add() posterior
         # sinaliza de novo, então nenhum aviso se perde
         self._work_available.clear()
-        
+
         is_flushing = self._flush_event.is_set()
         if is_flushing:
             self._flush_event.clear()
-        
+
         is_cancelling = self._cancel_event.is_set()
         is_disposing = self._stop_event.is_set()
-        
+
         if self._queue.empty() and (is_cancelling or is_disposing):
             return True
-        
+
         force_request = is_cancelling or is_disposing or is_flushing
-        
+
         if self._queue.qsize() < self._throughput and not force_request:
             return False
-        
+
         # Coleta itens da fila
         items: List[TEntity] = []
         while (
@@ -443,10 +442,10 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
                 items.append(self._queue.get_nowait())
             except asyncio.QueueEmpty:
                 break
-        
+
         if not items:
             return False
-        
+
         try:
             await self._process_batch(items)
         finally:
@@ -459,7 +458,7 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
             # a fila é reavaliada sem esperar novo add(): se ainda houver
             # throughput, o próximo lote é enviado em seguida
             self._work_available.set()
-        
+
         return False
 
     async def _process_batch(self, items: List[TEntity]) -> None:
@@ -476,9 +475,9 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
         """
         if not items:
             return
-        
+
         self._entities_sent += len(items)
-        
+
         # Cria requisição (Resolve<T>(ICollection<T>) no .NET)
         try:
             request = ServiceRequest(service=self._service)
@@ -489,10 +488,10 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
             logger.error(f"Erro ao montar requisição em lote: {e}", exc_info=True)
             await self._process_items_separately(items)
             return
-        
+
         # Tenta processar em lote
         success, exception = await self._process_request(request)
-        
+
         if success:
             self._entities_sent_successfully += len(items)
             logger.debug(f"Lote processado: {len(items)} entidades")
@@ -522,20 +521,20 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
             self._request_count += 1
             await self._invoke_service_async(request)
             return True, None
-            
+
         except (ServiceRequestTimeoutException, ServiceRequestDeadlockException) as e:
             # .NET (OnDemandRequestWrapper.cs:259-280): timeout e deadlock são
             # tentados novamente uma única vez, de imediato
             if retry:
                 logger.warning(f"Retry falhou: {e}")
                 return False, e
-            
+
             return await self._process_request(request, retry=True)
-            
+
         except SankhyaException as e:
             logger.error(f"Erro na requisição: {e}")
             return False, e
-            
+
         except Exception as e:
             logger.error(f"Erro inesperado: {e}", exc_info=True)
             return False, e
@@ -556,9 +555,9 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
                 logger.error(f"Erro ao montar requisição: {e}", exc_info=True)
                 self._publish_failure(item, e)
                 continue
-            
+
             success, exception = await self._process_request(request)
-            
+
             if success:
                 self._entities_sent_successfully += 1
             elif exception:
@@ -594,7 +593,7 @@ class AsyncOnDemandRequestWrapper(Generic[TEntity]):
             request: Requisição a executar
         """
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         if self._session_token:
             await SankhyaContext.service_invoker_async_with_token(
                 request, self._session_token

@@ -9,22 +9,21 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Service/
 from __future__ import annotations
 
 import re
-from abc import ABC, abstractmethod
 from decimal import Decimal
-from typing import Any, List, Optional, Protocol, Type, runtime_checkable
+from typing import Any, List, Optional, Protocol, runtime_checkable
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import BaseModel, ConfigDict, Field as PydanticField
+from pydantic import BaseModel, ConfigDict
+from pydantic import Field as PydanticField
 
 from sankhya_sdk.enums.parameter_type import ParameterType
+
+from .basic_types import Parameter
 from .xml_serialization import (
-    create_xml_element,
     get_element_attr,
     get_element_text,
 )
-from .basic_types import Parameter
-
 
 #: Literal SQL aceito em uma lista IN: número, texto entre aspas com as
 #: aspas internas duplicadas ou NULL.
@@ -47,14 +46,14 @@ class ILiteralCriteria(Protocol):
     
     Define interface comum para diferentes tipos de critérios SQL.
     """
-    
+
     expression: Optional[str]
     parameters: List[Parameter]
-    
+
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         ...
-    
+
     @classmethod
     def from_xml(cls, element: Element) -> "ILiteralCriteria":
         """Deserializa de elemento XML."""
@@ -185,7 +184,7 @@ class QueryCriteria(BaseModel):
             elif self.operator.upper() == "IS NOT NULL":
                 return f"{self.field} IS NOT NULL"
             return f"{self.field} {self.operator} NULL"
-        
+
         if " ".join(self.operator.split()).upper() in _SQL_SET_OPERATORS:
             # Lista já formatada (QueryBuilder.where_in), por exemplo
             # "(1, 'A')": vai sem aspas externas, mas é validada para não
@@ -199,7 +198,7 @@ class QueryCriteria(BaseModel):
 
         # Escape de valores string
         safe_value = str(self.value).replace("'", "''")
-        
+
         if self.value_type == ParameterType.STRING:
             return f"{self.field} {self.operator} '{safe_value}'"
         elif self.value_type == ParameterType.DATETIME:
@@ -235,7 +234,7 @@ class QueryCriteria(BaseModel):
         """Deserializa de elemento XML."""
         type_str = get_element_attr(element, "type")
         value_type = ParameterType(type_str) if type_str else None
-        
+
         return cls(
             field=get_element_attr(element, "field", ""),
             operator=get_element_attr(element, "operator", "="),
@@ -278,9 +277,9 @@ class QueryBuilder:
         return self
 
     def where(
-        self, 
-        field: str, 
-        value: Any, 
+        self,
+        field: str,
+        value: Any,
         operator: str = "=",
         value_type: Optional[ParameterType] = None
     ) -> "QueryBuilder":
@@ -335,7 +334,7 @@ class QueryBuilder:
         """
         if not values:
             return self
-        
+
         # Formata valores para IN
         formatted = ", ".join(self._format_in_value(v) for v in values)
         self._criteria.append(QueryCriteria(
@@ -394,7 +393,7 @@ class QueryBuilder:
         """
         if not self._criteria:
             return ""
-        
+
         parts = [c.to_sql() for c in self._criteria]
         return " AND ".join(parts)
 

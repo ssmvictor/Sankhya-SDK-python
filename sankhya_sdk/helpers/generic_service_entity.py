@@ -53,25 +53,24 @@ class GenericServiceEntity(EntityBase, ABC):
         """
         from sankhya_sdk.attributes.reflection import (
             get_entity_name,
-            get_field_metadata,
         )
-        
+
         entity_type = type(self)
         entity_name = get_entity_name(entity_type)
         custom_data = self._get_entity_custom_data()
-        
+
         root = etree.Element(entity_name)
-        
+
         for field_name, field_info in entity_type.model_fields.items():
             self._write_xml_element(
-                root, 
-                field_name, 
-                field_info, 
-                entity_type, 
+                root,
+                field_name,
+                field_info,
+                entity_type,
                 entity_name,
                 custom_data,
             )
-        
+
         return root
 
     def _write_xml_element(
@@ -95,20 +94,20 @@ class GenericServiceEntity(EntityBase, ABC):
             custom_data: Dados customizados da entidade
         """
         from sankhya_sdk.attributes.reflection import get_field_metadata
-        
+
         metadata = get_field_metadata(field_info)
-        
+
         # Verifica se deve ignorar
         if metadata.is_ignored:
             return
-        
+
         # Obtém nome do elemento
         property_name = metadata.element_name or field_name
-        
+
         # Verifica se deve serializar
         if not self._validate_should_serialize(field_name, entity_type, entity_name):
             return
-        
+
         # Serializa o valor
         self._serialize_value(parent, property_name, field_name, metadata, custom_data)
 
@@ -133,11 +132,11 @@ class GenericServiceEntity(EntityBase, ABC):
         base_name = field_name
         if field_name.endswith("Internal"):
             base_name = field_name[:-8]
-        
+
         # Usa método should_serialize_field se disponível
         if hasattr(self, "should_serialize_field"):
             return self.should_serialize_field(field_name)
-        
+
         return True
 
     def _serialize_value(
@@ -159,25 +158,25 @@ class GenericServiceEntity(EntityBase, ABC):
             custom_data: Dados customizados
         """
         value = getattr(self, field_name, None)
-        
+
         elem = etree.SubElement(parent, element_name)
-        
+
         if value is None:
             return
-        
+
         # Aplica max_length se configurado
         str_value = str(value)
         max_length = None
-        
+
         if custom_data and hasattr(custom_data, "max_length"):
             max_length = custom_data.max_length
-        
+
         if metadata.custom_data and hasattr(metadata.custom_data, "max_length"):
             max_length = metadata.custom_data.max_length
-        
+
         if max_length and max_length > 0 and len(str_value) > max_length:
             str_value = str_value[:max_length]
-        
+
         elem.text = str_value
 
     def _get_entity_custom_data(self) -> Optional[Any]:
@@ -235,13 +234,13 @@ class GenericServiceEntity(EntityBase, ABC):
             Instância da entidade
         """
         from sankhya_sdk.attributes.reflection import get_field_metadata
-        
+
         data = {}
-        
+
         for field_name, field_info in cls.model_fields.items():
             metadata = get_field_metadata(field_info)
             element_name = metadata.element_name or field_name
-            
+
             # Busca o elemento filho
             child = element.find(element_name)
             if child is None:
@@ -250,20 +249,20 @@ class GenericServiceEntity(EntityBase, ABC):
                     if elem.tag.lower() == element_name.lower():
                         child = elem
                         break
-            
+
             if child is None:
                 continue
-            
+
             # Obtém o texto
             text = child.text
             if text is None:
                 continue
-            
+
             # Converte para o tipo apropriado
             value = cls._convert_value(text.strip(), field_info)
             if value is not None:
                 data[field_name] = value
-        
+
         return cls(**data)
 
     @classmethod
@@ -278,10 +277,10 @@ class GenericServiceEntity(EntityBase, ABC):
         Returns:
             Valor convertido
         """
-        from typing import get_origin, get_args
-        
+        from typing import get_args, get_origin
+
         annotation = field_info.annotation
-        
+
         # Remove Optional
         origin = get_origin(annotation)
         if origin is not None:
@@ -292,7 +291,7 @@ class GenericServiceEntity(EntityBase, ABC):
                     if arg is not type(None):
                         annotation = arg
                         break
-        
+
         try:
             if annotation is str:
                 return text

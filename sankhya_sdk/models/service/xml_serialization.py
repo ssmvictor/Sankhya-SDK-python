@@ -18,7 +18,6 @@ from lxml.etree import Element
 
 from .constants import SankhyaConstants
 
-
 T = TypeVar("T", bound="XmlSerializable")
 
 
@@ -78,12 +77,12 @@ def serialize_bool(value: bool, format_: str = SankhyaConstants.BOOL_FORMAT_TRUE
     parts = format_.split("|")
     if len(parts) != 2:
         parts = ["true", "false"]
-    
+
     return parts[0] if value else parts[1]
 
 
 def deserialize_bool(
-    value: str, 
+    value: str,
     format_: str = SankhyaConstants.BOOL_FORMAT_TRUE_FALSE,
     default: bool = False
 ) -> bool:
@@ -100,17 +99,17 @@ def deserialize_bool(
     """
     if not value:
         return default
-    
+
     normalized = value.strip().lower()
-    
+
     # Verifica valores conhecidos como True
     if normalized in ("true", "1", "s", "sim", "yes", "y"):
         return True
-    
+
     # Verifica valores conhecidos como False
     if normalized in ("false", "0", "n", "nao", "não", "no"):
         return False
-    
+
     return default
 
 
@@ -141,15 +140,15 @@ def create_xml_element(
         element = etree.SubElement(parent, tag)
     else:
         element = etree.Element(tag)
-    
+
     if attributes:
         for key, attr_value in attributes.items():
             if attr_value is not None:
                 element.set(key, str(attr_value))
-    
+
     if value is not None:
         element.text = str(value)
-    
+
     return element
 
 
@@ -168,14 +167,14 @@ def parse_xml_element(element: Element) -> Dict[str, Any]:
         "attributes": dict(element.attrib),
         "text": element.text.strip() if element.text else None,
     }
-    
+
     children = []
     for child in element:
         children.append(parse_xml_element(child))
-    
+
     if children:
         result["children"] = children
-    
+
     return result
 
 
@@ -268,7 +267,7 @@ class XmlSerializable(Protocol):
     
     Similar à interface IXmlSerializable do .NET.
     """
-    
+
     def to_xml(self) -> Element:
         """
         Serializa o objeto para um elemento XML.
@@ -277,7 +276,7 @@ class XmlSerializable(Protocol):
             Elemento XML representando o objeto
         """
         ...
-    
+
     @classmethod
     def from_xml(cls: Type[T], element: Element) -> T:
         """
@@ -298,18 +297,18 @@ class XmlSerializableBase(ABC):
     
     Fornece implementação padrão para alguns métodos auxiliares.
     """
-    
+
     @abstractmethod
     def to_xml(self) -> Element:
         """Serializa o objeto para um elemento XML."""
         ...
-    
+
     @classmethod
     @abstractmethod
     def from_xml(cls: Type[T], element: Element) -> T:
         """Deserializa um elemento XML para um objeto."""
         ...
-    
+
     def to_xml_string(self, pretty_print: bool = False, encoding: str = "unicode") -> str:
         """
         Serializa o objeto para uma string XML.
@@ -323,7 +322,7 @@ class XmlSerializableBase(ABC):
         """
         element = self.to_xml()
         return etree.tostring(element, pretty_print=pretty_print, encoding=encoding)
-    
+
     @classmethod
     def from_xml_string(cls: Type[T], xml_string: str) -> T:
         """

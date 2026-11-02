@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Unit tests for RequestExceptionDetails."""
 
-import pytest
 
 from sankhya_sdk.enums import ServiceName, ServiceType
 from sankhya_sdk.request_helpers import RequestExceptionDetails

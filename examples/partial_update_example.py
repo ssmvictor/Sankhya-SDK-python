@@ -192,7 +192,7 @@ def atualizar_contato_parceiro(
     )
 
     if client.is_success(response):
-        print(f"  Parceiro atualizado com sucesso!")
+        print("  Parceiro atualizado com sucesso!")
     else:
         print(f"  Erro: {client.get_error_message(response)}")
 
@@ -237,7 +237,7 @@ def atualizar_observacao_item_nota(
     )
 
     if client.is_success(response):
-        print(f"  Item atualizado com sucesso!")
+        print("  Item atualizado com sucesso!")
     else:
         print(f"  Erro: {client.get_error_message(response)}")
 
@@ -256,7 +256,7 @@ def demonstrar_diferenca_insert_update():
     - Sem pk: usa CRUDServiceProvider.saveRecord (INSERT/UPSERT)
     - Com pk: usa DatasetSP.save (UPDATE parcial)
     """
-    
+
     print("\n" + "=" * 60)
     print("COMPARACAO: INSERT vs UPDATE PARCIAL")
     print("=" * 60)
@@ -283,7 +283,7 @@ def demonstrar_diferenca_insert_update():
     print('       pk={"CODPARC": 123},')
     print("       use_dataset_for_update=False  # Forca CRUDServiceProvider")
     print("   )")
-    
+
 
 
 
@@ -397,7 +397,7 @@ if __name__ == "__main__":
     print("Configure as variaveis de ambiente SANKHYA_*")
     print("Descomente as chamadas acima para testar")
     print("=" * 60)
-    
+
     print("\n3. teste Financeiro:")
     client = _create_client()
     '''

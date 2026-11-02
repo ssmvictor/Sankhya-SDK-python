@@ -10,15 +10,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from .base import TransportEntityBase
-from .neighborhood import Neighborhood
 from ...attributes.decorators import (
     entity,
-    entity_key,
-    entity_element,
-    entity_reference,
     entity_custom_data,
+    entity_element,
+    entity_key,
+    entity_reference,
 )
+from .base import TransportEntityBase
+from .neighborhood import Neighborhood
 
 if TYPE_CHECKING:
     from .address import Address
@@ -47,56 +47,56 @@ class PartnerComplement(TransportEntityBase):
         neighborhood_delivery: Referência ao bairro de entrega
         city_delivery: Referência à cidade de entrega
     """
-    
+
     code: int = entity_key(
         entity_element("CODPARC", default=0)
     )
-    
+
     zip_code_delivery: Optional[str] = entity_element(
         "CEPENTREGA",
         default=None
     )
-    
+
     code_address_delivery: Optional[int] = entity_element(
         "CODENDENTREGA",
         default=None
     )
-    
+
     address_number_delivery: Optional[str] = entity_element(
         "NUMENTREGA",
         default=None
     )
-    
+
     address_complement_delivery: Optional[str] = entity_custom_data(
         max_length=30,
         field=entity_element("COMPLENTREGA", default=None)
     )
-    
+
     code_neighborhood_delivery: Optional[int] = entity_element(
         "CODBAIENTREGA",
         default=None
     )
-    
+
     code_city_delivery: Optional[int] = entity_element(
         "CODCIDENTREGA",
         default=None
     )
-    
+
     latitude_delivery: Optional[str] = entity_element(
         "LATITUDEENTREGA",
         default=None
     )
-    
+
     longitude_delivery: Optional[str] = entity_element(
         "LONGITUDEENTREGA",
         default=None
     )
-    
+
     # Relacionamentos
     address_delivery: Optional["Address"] = entity_reference(default=None)
     neighborhood_delivery: Optional[Neighborhood] = entity_reference(default=None)
     city_delivery: Optional["City"] = entity_reference(default=None)
-    
+
     @staticmethod
     def _compare_optional_str_ci(a: Optional[str], b: Optional[str]) -> bool:
         """Compara duas strings opcionais de forma case-insensitive."""
@@ -105,7 +105,7 @@ class PartnerComplement(TransportEntityBase):
         if a is None or b is None:
             return False
         return a.lower() == b.lower()
-    
+
     def __eq__(self, other: object) -> bool:
         """
         Compara duas instâncias de PartnerComplement.
@@ -114,13 +114,13 @@ class PartnerComplement(TransportEntityBase):
         """
         if other is None:
             return False
-        
+
         if self is other:
             return True
-        
+
         if not isinstance(other, PartnerComplement):
             return False
-        
+
         return (
             self.code == other.code
             and ("code" in self._fields_set) == ("code" in other._fields_set)
@@ -179,7 +179,7 @@ class PartnerComplement(TransportEntityBase):
                 "city_delivery" in other._fields_set
             )
         )
-    
+
     def __hash__(self) -> int:
         """
         Calcula hash da entidade.
@@ -188,81 +188,81 @@ class PartnerComplement(TransportEntityBase):
         """
         hash_code = self.code
         hash_code = (hash_code * 397) ^ hash("code" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
-            hash(self.zip_code_delivery.lower()) 
+            hash(self.zip_code_delivery.lower())
             if self.zip_code_delivery else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "zip_code_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (self.code_address_delivery or 0)
         hash_code = (hash_code * 397) ^ hash(
             "code_address_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
-            hash(self.address_number_delivery.lower()) 
+            hash(self.address_number_delivery.lower())
             if self.address_number_delivery else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "address_number_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
-            hash(self.address_complement_delivery.lower()) 
+            hash(self.address_complement_delivery.lower())
             if self.address_complement_delivery else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "address_complement_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (self.code_neighborhood_delivery or 0)
         hash_code = (hash_code * 397) ^ hash(
             "code_neighborhood_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (self.code_city_delivery or 0)
         hash_code = (hash_code * 397) ^ hash(
             "code_city_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
-            hash(self.latitude_delivery.lower()) 
+            hash(self.latitude_delivery.lower())
             if self.latitude_delivery else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "latitude_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
-            hash(self.longitude_delivery.lower()) 
+            hash(self.longitude_delivery.lower())
             if self.longitude_delivery else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "longitude_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.address_delivery) if self.address_delivery else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "address_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.neighborhood_delivery) if self.neighborhood_delivery else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "neighborhood_delivery" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.city_delivery) if self.city_delivery else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "city_delivery" in self._fields_set
         )
-        
+
         return hash_code

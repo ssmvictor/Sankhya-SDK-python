@@ -31,7 +31,6 @@ from sankhya_sdk.request_wrappers.simple_crud_request_wrapper import (
     SimpleCRUDRequestWrapper,
 )
 
-
 # =============================================================================
 # Test Entity
 # =============================================================================
@@ -218,11 +217,11 @@ def _authenticated_context() -> SankhyaContext:
 
 class TestInitialization:
     """Testes de inicialização do wrapper."""
-    
+
     def test_initialize_with_context(self, mock_context):
         """Inicializa com contexto existente adquirindo sessão dedicada (.NET)."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         assert SimpleCRUDRequestWrapper._initialized is True
         assert SimpleCRUDRequestWrapper._context is mock_context
         mock_context.acquire_new_session.assert_called_once_with(
@@ -233,7 +232,7 @@ class TestInitialization:
             == mock_context.acquire_new_session.return_value
         )
         assert SimpleCRUDRequestWrapper._session_token != mock_context.token
-    
+
     def test_dispose_finalizes_acquired_session(self, mock_context):
         """dispose finaliza a sessão dedicada, não a sessão principal do contexto."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
@@ -251,9 +250,9 @@ class TestInitialization:
         mock_ctx = MagicMock()
         mock_ctx.acquire_new_session.return_value = uuid.uuid4()
         mock_ctx_class.from_settings.return_value = mock_ctx
-        
+
         SimpleCRUDRequestWrapper.initialize()
-        
+
         assert SimpleCRUDRequestWrapper._initialized is True
         assert SimpleCRUDRequestWrapper._context is mock_ctx
         mock_ctx_class.from_settings.assert_called_once()
@@ -264,30 +263,30 @@ class TestInitialization:
             SimpleCRUDRequestWrapper._session_token
             == mock_ctx.acquire_new_session.return_value
         )
-    
+
     def test_initialize_already_initialized(self, mock_context):
         """Inicialização duplicada é ignorada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
         SimpleCRUDRequestWrapper.initialize(mock_context)  # Segunda chamada
-        
+
         # Não deve lançar exceção
         assert SimpleCRUDRequestWrapper._initialized is True
-    
+
     def test_dispose(self, mock_context):
         """Libera recursos corretamente."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
         SimpleCRUDRequestWrapper.dispose()
-        
+
         assert SimpleCRUDRequestWrapper._initialized is False
         assert SimpleCRUDRequestWrapper._context is None
         assert SimpleCRUDRequestWrapper._session_token is None
-    
+
     def test_dispose_not_initialized(self):
         """Dispose sem inicialização não falha."""
         SimpleCRUDRequestWrapper.dispose()  # Não deve lançar exceção
-        
+
         assert SimpleCRUDRequestWrapper._initialized is False
-    
+
     def test_ensure_initialized_raises(self):
         """Lança exceção se não inicializado."""
         with pytest.raises(RuntimeError, match="não inicializado"):
@@ -500,22 +499,22 @@ class TestConcurrentInitialization:
 
 class TestContextManager:
     """Testes do context manager."""
-    
+
     @patch("sankhya_sdk.core.context.SankhyaContext")
     def test_context_manager_sync(self, mock_ctx_class):
         """Usa como context manager síncrono."""
         mock_ctx = MagicMock()
         mock_ctx.acquire_new_session.return_value = uuid.uuid4()
         mock_ctx_class.from_settings.return_value = mock_ctx
-        
+
         with SimpleCRUDRequestWrapper():
             assert SimpleCRUDRequestWrapper._initialized is True
-        
+
         assert SimpleCRUDRequestWrapper._initialized is False
         mock_ctx.finalize_session.assert_called_once_with(
             mock_ctx.acquire_new_session.return_value
         )
-    
+
     @pytest.mark.asyncio
     @patch("sankhya_sdk.core.context.SankhyaContext")
     async def test_context_manager_async(self, mock_ctx_class):
@@ -523,10 +522,10 @@ class TestContextManager:
         mock_ctx = MagicMock()
         mock_ctx.acquire_new_session.return_value = uuid.uuid4()
         mock_ctx_class.from_settings.return_value = mock_ctx
-        
+
         async with SimpleCRUDRequestWrapper():
             assert SimpleCRUDRequestWrapper._initialized is True
-        
+
         assert SimpleCRUDRequestWrapper._initialized is False
         mock_ctx.finalize_session.assert_called_once_with(
             mock_ctx.acquire_new_session.return_value
@@ -540,11 +539,11 @@ class TestContextManager:
 
 class TestFindOperations:
     """Testes de operações de busca."""
-    
+
     def test_try_find_returns_entity(self, mock_context, mock_entity):
         """try_find retorna entidade quando encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_can_find_internal",
@@ -552,14 +551,14 @@ class TestFindOperations:
         ):
             entity = MockEntity(code=123)
             result = SimpleCRUDRequestWrapper.try_find(entity)
-            
+
             assert result is not None
             assert result.code == 123
-    
+
     def test_try_find_returns_none(self, mock_context):
         """try_find retorna None quando não encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_can_find_internal",
@@ -567,13 +566,13 @@ class TestFindOperations:
         ):
             entity = MockEntity(code=999)
             result = SimpleCRUDRequestWrapper.try_find(entity)
-            
+
             assert result is None
-    
+
     def test_find_returns_entity(self, mock_context, mock_entity):
         """find retorna entidade quando encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         # Como MustFindInternal (.NET), find monta e envia a própria
         # requisição (não passa por try_find): simula-se o transporte.
         with patch.object(
@@ -583,33 +582,33 @@ class TestFindOperations:
         ):
             entity = MockEntity(code=123)
             result = SimpleCRUDRequestWrapper.find(entity)
-            
+
             assert result is not None
             assert result.code == 123
-    
+
     def test_find_raises_when_not_found(self, mock_context):
         """find lança exceção quando não encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
         response = _service_response('<entities total="0"/>')
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_invoke_service",
             return_value=response,
         ) as invoke:
             entity = MockEntity(code=999)
-            
+
             with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
                 SimpleCRUDRequestWrapper.find(entity)
-        
+
         assert exc_info.value.request is invoke.call_args[0][0]
         assert exc_info.value.response is response
-    
+
     def test_find_all_returns_list(self, mock_context, mock_entity):
         """find_all retorna lista de entidades."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
         entities = [mock_entity, MockEntity(code=456, name="Second")]
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_find_all_internal",
@@ -617,14 +616,14 @@ class TestFindOperations:
         ):
             entity = MockEntity(active="S")
             results = SimpleCRUDRequestWrapper.find_all(entity)
-            
+
             assert isinstance(results, list)
             assert len(results) == 2
-    
+
     def test_find_all_returns_empty_list(self, mock_context):
         """find_all retorna lista vazia quando não há resultados."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_find_all_internal",
@@ -632,7 +631,7 @@ class TestFindOperations:
         ):
             entity = MockEntity(active="X")
             results = SimpleCRUDRequestWrapper.find_all(entity)
-            
+
             assert results == []
 
 
@@ -643,11 +642,11 @@ class TestFindOperations:
 
 class TestFindWithCriteria:
     """Testes de busca com critérios literais."""
-    
+
     def test_try_find_with_criteria(self, mock_context, mock_entity):
         """try_find_with_criteria retorna entidade."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_can_find_with_criteria_internal",
@@ -657,24 +656,24 @@ class TestFindWithCriteria:
             result = SimpleCRUDRequestWrapper.try_find_with_criteria(
                 MockEntity, criteria
             )
-            
+
             assert result is not None
-    
+
     def test_find_with_criteria_raises_when_not_found(self, mock_context):
         """find_with_criteria lança exceção quando não encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
         response = _service_response('<entities total="0"/>')
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_invoke_service",
             return_value=response,
         ) as invoke:
             criteria = LiteralCriteria.equals("code", 999)
-            
+
             with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
                 SimpleCRUDRequestWrapper.find_with_criteria(MockEntity, criteria)
-        
+
         assert exc_info.value.request is invoke.call_args[0][0]
         assert exc_info.value.response is response
 
@@ -686,11 +685,11 @@ class TestFindWithCriteria:
 
 class TestUpdateAndRemove:
     """Testes de operações de atualização e remoção."""
-    
+
     def test_update_returns_entity(self, mock_context, mock_entity):
         """update retorna entidade atualizada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_invoke_service",
@@ -705,13 +704,13 @@ class TestUpdateAndRemove:
         ):
             entity = MockEntity(code=123, name="Updated")
             result = SimpleCRUDRequestWrapper.update(entity)
-            
+
             assert result is not None
-    
+
     def test_remove_succeeds(self, mock_context):
         """remove executa sem exceção."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_invoke_service",
@@ -731,12 +730,12 @@ class TestUpdateAndRemove:
 
 class TestAsyncOperations:
     """Testes de operações assíncronas."""
-    
+
     @pytest.mark.asyncio
     async def test_try_find_async(self, mock_context, mock_entity):
         """try_find_async retorna entidade."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_can_find_internal_async",
@@ -745,15 +744,15 @@ class TestAsyncOperations:
         ):
             entity = MockEntity(code=123)
             result = await SimpleCRUDRequestWrapper.try_find_async(entity)
-            
+
             assert result is not None
-    
+
     @pytest.mark.asyncio
     async def test_find_async_raises_when_not_found(self, mock_context):
         """find_async lança exceção quando não encontrada."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
         response = _service_response('<entities total="0"/>')
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_invoke_service_async",
@@ -761,18 +760,18 @@ class TestAsyncOperations:
             return_value=response,
         ) as invoke:
             entity = MockEntity(code=999)
-            
+
             with pytest.raises(ServiceRequestUnexpectedResultException) as exc_info:
                 await SimpleCRUDRequestWrapper.find_async(entity)
-        
+
         assert exc_info.value.request is invoke.call_args[0][0]
         assert exc_info.value.response is response
-    
+
     @pytest.mark.asyncio
     async def test_update_async(self, mock_context, mock_entity):
         """update_async retorna entidade."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_invoke_service_async",
@@ -788,14 +787,14 @@ class TestAsyncOperations:
         ):
             entity = MockEntity(code=123, name="Updated")
             result = await SimpleCRUDRequestWrapper.update_async(entity)
-            
+
             assert result is not None
-    
+
     @pytest.mark.asyncio
     async def test_remove_async(self, mock_context):
         """remove_async executa sem exceção."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         with patch.object(
             SimpleCRUDRequestWrapper,
             "_invoke_service_async",
@@ -816,7 +815,7 @@ class TestAsyncOperations:
 
 class TestResponseProcessing:
     """Testes de processamento de resposta."""
-    
+
     def test_extract_entities_from_entities_field(self, mock_context):
         """
         Extrai entidades de uma ServiceResponse real (ServiceResponse.Entities).
@@ -883,10 +882,10 @@ class TestResponseProcessing:
     def test_extract_entities_from_empty_response(self, mock_context):
         """Retorna lista vazia para resposta sem body."""
         SimpleCRUDRequestWrapper.initialize(mock_context)
-        
+
         response = MagicMock()
         response.response_body = None
-        
+
         entities = SimpleCRUDRequestWrapper._extract_entities_from_response(response)
 
         assert entities == []
@@ -1295,36 +1294,36 @@ class TestParsedServiceResponseErrors:
 
 class TestLiteralCriteria:
     """Testes básicos para LiteralCriteria."""
-    
+
     def test_equals_int(self):
         """equals com inteiro."""
         criteria = LiteralCriteria.equals("CODPARC", 123)
         assert criteria.build_expression() == "CODPARC = 123"
-    
+
     def test_equals_string(self):
         """equals com string."""
         criteria = LiteralCriteria.equals("NOME", "Test")
         assert criteria.build_expression() == "NOME = 'Test'"
-    
+
     def test_and_combinator(self):
         """Combinador AND."""
         c1 = LiteralCriteria.equals("A", 1)
         c2 = LiteralCriteria.equals("B", 2)
         result = c1.and_(c2)
         assert "AND" in result.build_expression()
-    
+
     def test_or_combinator(self):
         """Combinador OR."""
         c1 = LiteralCriteria.equals("A", 1)
         c2 = LiteralCriteria.equals("B", 2)
         result = c1.or_(c2)
         assert "OR" in result.build_expression()
-    
+
     def test_like(self):
         """Operador LIKE."""
         criteria = LiteralCriteria.like("NOME", "%TEST%")
         assert "LIKE" in criteria.build_expression()
-    
+
     def test_in(self):
         """Operador IN."""
         criteria = LiteralCriteria.in_("ID", [1, 2, 3])

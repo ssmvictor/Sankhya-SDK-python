@@ -5,6 +5,7 @@ This module contains exceptions related to service requests.
 
 from typing import Any, Optional
 
+from ..enums.service_name import ServiceName
 from .base import ServiceRequestGeneralException
 from .intermediate import ServiceRequestTemporarilyException
 from .messages import (
@@ -25,7 +26,6 @@ from .messages import (
     SERVICE_REQUEST_PROPERTY_WIDTH,
     SERVICE_REQUEST_TIMEOUT,
 )
-from ..enums.service_name import ServiceName
 
 
 def _get_request_entity_name(request: Optional[Any]) -> str:
@@ -99,7 +99,7 @@ class ServiceRequestPropertyNameException(ServiceRequestGeneralException):
         if request is not None:
             if hasattr(request, "service") and isinstance(request.service, ServiceName):
                 service_name = request.service.metadata.human_readable
-            
+
             # Attempt to extract entity name from request body if available
             if hasattr(request, "request_body"):
                 body = request.request_body
@@ -175,7 +175,7 @@ class ServiceRequestPropertyWidthException(ServiceRequestGeneralException):
         if request is not None:
             if hasattr(request, "service") and isinstance(request.service, ServiceName):
                 service_name = request.service.metadata.human_readable
-            
+
             if hasattr(request, "request_body"):
                 body = request.request_body
                 if hasattr(body, "entity") and body.entity is not None:

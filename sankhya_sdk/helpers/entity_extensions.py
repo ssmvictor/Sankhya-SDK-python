@@ -24,9 +24,9 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from sankhya_sdk.models.base import EntityBase
     from sankhya_sdk.enums.service_name import ServiceName
-    from sankhya_sdk.attributes.metadata import EntityFieldMetadata
+    from sankhya_sdk.models.base import EntityBase
+
     from .entity_query_options import EntityQueryOptions
     from .filter_expression import IFilterExpression
 
@@ -50,7 +50,7 @@ class EntityResolverResult:
         references: Dicionário de referências aninhadas
         literal_criteria: Critério literal SQL-like
     """
-    
+
     def __init__(self, name: str):
         self.name = name
         self.fields: List[Dict[str, str]] = []
@@ -63,7 +63,7 @@ class EntityResolverResult:
 
 class Field:
     """Representa um campo de entidade."""
-    
+
     def __init__(self, name: str):
         self.name = name
 
@@ -144,46 +144,48 @@ def extract_keys(entity: T) -> EntityResolverResult:
     """
     from sankhya_sdk.attributes.reflection import (
         get_entity_name as reflect_get_name,
+    )
+    from sankhya_sdk.attributes.reflection import (
         get_field_metadata,
     )
-    
+
     entity_type = type(entity)
     entity_name = reflect_get_name(entity_type)
     result = EntityResolverResult(entity_name)
-    
+
     for field_name, field_info in entity_type.model_fields.items():
         metadata = get_field_metadata(field_info)
-        
+
         # Obtém nome do elemento XML - acessa element.element_name com fallback
         property_name = (
             metadata.element.element_name if metadata.element else field_name
         )
-        
+
         # Adiciona aos campos
         result.fields.append({"name": property_name})
-        
+
         # Verifica se é chave
         if not metadata.is_key:
             continue
-        
+
         # Verifica se deve serializar
         if not entity.should_serialize_field(field_name):
             continue
-        
+
         # Obtém valor
         value = getattr(entity, field_name, None)
         if value is None:
             continue
-        
+
         # Aplica max_length se configurado
         str_value = str(value)
         if metadata.custom_data and metadata.custom_data.max_length:
             max_len = metadata.custom_data.max_length
             if len(str_value) > max_len:
                 str_value = str_value[:max_len]
-        
+
         result.keys.append({"name": property_name, "value": str_value})
-    
+
     return result
 
 
@@ -218,10 +220,10 @@ def query(
     # Implementação mínima: retorna a própria entidade como resultado
     # Quando o request wrapper estiver disponível, isso será substituído
     results = [entity]
-    
+
     if process_data_on_demand:
         process_data_on_demand(results)
-    
+
     yield from results
 
 
@@ -249,13 +251,13 @@ def query_with_criteria(
     """
     # Constrói expressão de critério para uso futuro
     _criteria_expression = criteria.build_expression() if criteria else None
-    
+
     # Implementação mínima: retorna a própria entidade
     results = [entity]
-    
+
     if process_data_on_demand:
         process_data_on_demand(results)
-    
+
     yield from results
 
 
@@ -280,14 +282,14 @@ def query_with_options(
     """
     # Implementação mínima: retorna a própria entidade
     results = [entity]
-    
+
     # Aplica limite de resultados se configurado
     if options.max_results is not None and options.max_results > 0:
         results = results[:options.max_results]
-    
+
     if process_data_on_demand:
         process_data_on_demand(results)
-    
+
     yield from results
 
 
@@ -315,11 +317,11 @@ def query_light(
     """
     # Implementação mínima: retorna a própria entidade
     results = [entity]
-    
+
     # Aplica limite de resultados se configurado
     if max_results > 0:
         results = results[:max_results]
-    
+
     yield from results
 
 

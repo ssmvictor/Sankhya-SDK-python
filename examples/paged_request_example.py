@@ -9,7 +9,7 @@ usando o GatewayClient com autenticação OAuth2.
 from __future__ import annotations
 
 import os
-from typing import List, Dict, Any, Callable, Optional
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
@@ -28,7 +28,7 @@ SANKHYA_X_TOKEN = os.getenv("SANKHYA_TOKEN")
 def _create_client():
     """Cria e retorna um GatewayClient autenticado via OAuth2."""
     from sankhya_sdk.auth.oauth_client import OAuthClient
-    from sankhya_sdk.http import SankhyaSession, GatewayClient
+    from sankhya_sdk.http import GatewayClient, SankhyaSession
 
     oauth = OAuthClient(base_url=SANKHYA_AUTH_BASE_URL, token=SANKHYA_X_TOKEN)
     oauth.authenticate(client_id=SANKHYA_CLIENT_ID, client_secret=SANKHYA_CLIENT_SECRET)
@@ -267,12 +267,12 @@ def exemplo_tratamento_erros():
 
     Demonstra como tratar erros de forma adequada.
     """
+    from sankhya_sdk.auth import AuthError, AuthNetworkError
     from sankhya_sdk.exceptions import (
-        SankhyaHttpError,
         SankhyaAuthError,
+        SankhyaHttpError,
         SankhyaNotFoundError,
     )
-    from sankhya_sdk.auth import AuthError, AuthNetworkError
 
     print("🔧 Exemplo de tratamento de erros...")
 

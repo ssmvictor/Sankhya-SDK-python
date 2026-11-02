@@ -17,17 +17,14 @@ from datetime import datetime
 from typing import (
     TYPE_CHECKING,
     ClassVar,
-    Dict,
     List,
     Optional,
     Tuple,
-    Type,
     TypeVar,
 )
 
 if TYPE_CHECKING:
     from sankhya_sdk.core.context import SankhyaContext
-    from sankhya_sdk.models.transport.base import TransportEntityBase
 
 from sankhya_sdk.core.types import ServiceFile
 from sankhya_sdk.enums.billing_type import BillingType
@@ -66,7 +63,6 @@ from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
 from sankhya_sdk.models.service.user_types import LowData, SessionInfo
 from sankhya_sdk.models.service.xml_serialization import deserialize_optional_int
-
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +110,7 @@ class KnowServicesRequestWrapper:
         ...     nunota = KnowServicesRequestWrapper.create_invoice(header, items)
         ...     print(f"Nota criada: {nunota}")
     """
-    
+
     _context: ClassVar[Optional["SankhyaContext"]] = None
     _session_token: ClassVar[Optional[uuid.UUID]] = None
     _owns_session: ClassVar[bool] = False
@@ -122,7 +118,7 @@ class KnowServicesRequestWrapper:
     _initialized: ClassVar[bool] = False
     _lock: ClassVar[threading.Lock] = threading.Lock()
     _last_time_message_received: ClassVar[datetime] = datetime.now()
-    
+
     def __init__(self) -> None:
         """
         Inicializa o wrapper como context manager.
@@ -131,31 +127,31 @@ class KnowServicesRequestWrapper:
         a sessão ao entrar no contexto.
         """
         self._managed = False
-    
+
     def __enter__(self) -> "KnowServicesRequestWrapper":
         """Entra no contexto e inicializa a sessão."""
         if not KnowServicesRequestWrapper._initialized:
             KnowServicesRequestWrapper.initialize()
         self._managed = True
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Sai do contexto e libera recursos."""
         if self._managed:
             KnowServicesRequestWrapper.dispose()
-    
+
     async def __aenter__(self) -> "KnowServicesRequestWrapper":
         """Entra no contexto assíncrono."""
         return self.__enter__()
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Sai do contexto assíncrono."""
         self.__exit__(exc_type, exc_val, exc_tb)
-    
+
     # =========================================================================
     # Initialization & Lifecycle
     # =========================================================================
-    
+
     @classmethod
     def initialize(
         cls,
@@ -207,7 +203,7 @@ class KnowServicesRequestWrapper:
             if cls._initialized:
                 logger.warning("KnowServicesRequestWrapper já inicializado")
                 return
-            
+
             if context is not None:
                 cls._context = context
                 cls._session_token = context.token
@@ -229,13 +225,13 @@ class KnowServicesRequestWrapper:
                 cls._session_token = session_token
                 cls._owns_session = True
                 cls._owns_context = True
-            
+
             cls._last_time_message_received = datetime.now()
             cls._initialized = True
             logger.info(
                 f"KnowServicesRequestWrapper inicializado: token={cls._session_token}"
             )
-    
+
     @classmethod
     def dispose(cls) -> None:
         """
@@ -254,7 +250,7 @@ class KnowServicesRequestWrapper:
         with cls._lock:
             if not cls._initialized:
                 return
-            
+
             context = cls._context
             session_token = cls._session_token
             owns_session = cls._owns_session
@@ -265,18 +261,18 @@ class KnowServicesRequestWrapper:
             cls._owns_context = False
             cls._initialized = False
             cls._last_time_message_received = datetime.now()
-        
+
         if owns_session and context and session_token:
             try:
                 context.finalize_session(session_token)
             except Exception as e:
                 logger.warning(f"Erro ao finalizar sessão: {e}")
-        
+
         if owns_context and context:
             cls._release_owned_context(context)
-        
+
         logger.info("KnowServicesRequestWrapper descartado")
-    
+
     @staticmethod
     def _release_owned_context(context: "SankhyaContext") -> None:
         """
@@ -299,7 +295,7 @@ class KnowServicesRequestWrapper:
             context: Contexto criado pelo próprio wrapper
         """
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         with SankhyaContext._wrappers_lock:
             SankhyaContext._wrappers.pop(context.token, None)
         try:
@@ -308,7 +304,7 @@ class KnowServicesRequestWrapper:
             logger.warning(f"Erro ao encerrar a sessão principal do contexto: {e}")
         finally:
             context._disposed = True
-    
+
     @classmethod
     def _ensure_initialized(cls) -> None:
         """Garante que o wrapper está inicializado."""
@@ -317,11 +313,11 @@ class KnowServicesRequestWrapper:
                 "KnowServicesRequestWrapper não inicializado. "
                 "Chame KnowServicesRequestWrapper.initialize() primeiro."
             )
-    
+
     # =========================================================================
     # Session Management
     # =========================================================================
-    
+
     @classmethod
     def get_sessions(cls) -> List[SessionInfo]:
         """
@@ -337,20 +333,20 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info("Obtendo lista de sessões ativas")
-        
+
         request = ServiceRequest(service=ServiceName.SESSION_GET_ALL)
         response = cls._invoke_service(request)
-        
+
         # Extrair sessões da resposta
         sessions: List[SessionInfo] = []
         if response.response_body and hasattr(response.response_body, "sessions"):
             body_sessions = response.response_body.sessions
             if body_sessions and hasattr(body_sessions, "sessions"):
                 sessions = body_sessions.sessions
-        
+
         logger.info(f"Sessões ativas encontradas: {len(sessions)}")
         return sessions
-    
+
     @classmethod
     def kill_session(cls, session_id: str) -> None:
         """
@@ -364,7 +360,7 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Finalizando sessão: {session_id}")
-        
+
         request = ServiceRequest(
             service=ServiceName.SESSION_KILL,
             request_body=RequestBody(
@@ -373,11 +369,11 @@ class KnowServicesRequestWrapper:
         )
         cls._invoke_service(request)
         logger.debug(f"Sessão {session_id} finalizada com sucesso")
-    
+
     # =========================================================================
     # Messaging & Warnings
     # =========================================================================
-    
+
     @classmethod
     def send_warning(
         cls,
@@ -406,13 +402,13 @@ class KnowServicesRequestWrapper:
             ... )
         """
         cls._ensure_initialized()
-        
+
         recipient_count = len(recipients) if recipients else "todos"
         logger.info(
             f"Enviando aviso '{title}' (nível: {level.value}) "
             f"para {recipient_count} destinatário(s)"
         )
-        
+
         # .NET (KnowServicesRequestWrapper.cs:54-74): <aviso importancia>
         # com titulo/descricao; <Dica> só quando não vazia e destinatários
         # só quando informados
@@ -424,14 +420,14 @@ class KnowServicesRequestWrapper:
         )
         if tip is not None and tip.strip():
             warning.tip = tip
-        
+
         request = ServiceRequest(
             service=ServiceName.WARNING_SEND,
             request_body=RequestBody(system_warning=warning),
         )
         cls._invoke_service(request)
         logger.debug("Aviso enviado com sucesso")
-    
+
     @classmethod
     def send_message(
         cls,
@@ -452,23 +448,23 @@ class KnowServicesRequestWrapper:
             ... )
         """
         cls._ensure_initialized()
-        
+
         recipient_count = len(recipients) if recipients else "todos"
         logger.info(f"Enviando mensagem para {recipient_count} destinatário(s)")
-        
+
         target_users = [r.user_id for r in recipients if r.user_id] if recipients else []
         message = SystemMessage(
             content=content,
             target_users=target_users,
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.MESSAGE_SEND,
             request_body=RequestBody(system_message=message),
         )
         cls._invoke_service(request)
         logger.debug("Mensagem enviada com sucesso")
-    
+
     @classmethod
     def receive_messages(cls) -> str:
         """
@@ -485,28 +481,28 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.debug("Verificando novas mensagens")
-        
+
         notification = NotificationElem(
             data={"lastNotification": cls._last_time_message_received.isoformat()}
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.WARNING_RECEIVE,
             request_body=RequestBody(notification_elem=notification),
         )
         response = cls._invoke_service(request)
-        
+
         cls._last_time_message_received = datetime.now()
-        
+
         # Serializar resposta
         if response.response_body:
             return str(response.response_body.model_dump_json())
         return ""
-    
+
     # =========================================================================
     # Invoice CRUD Operations
     # =========================================================================
-    
+
     @classmethod
     def create_invoice(
         cls,
@@ -533,25 +529,25 @@ class KnowServicesRequestWrapper:
             >>> print(f"Nota criada: {nunota}")
         """
         cls._ensure_initialized()
-        
+
         if invoice_header is None:
             raise ValueError("invoice_header não pode ser None")
-        
+
         item_count = len(invoice_items) if invoice_items else 0
         logger.info(f"Criando nota fiscal com {item_count} item(ns)")
-        
+
         # Copiar header e adicionar itens
         invoice = Invoice(
             **invoice_header.model_dump(exclude={"items"}),
             items=invoice_items or [],
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_INCLUDE,
             request_body=RequestBody(invoice=invoice),
         )
         response = cls._invoke_service(request)
-        
+
         # Extrair NUNOTA da resposta (.NET: PrimaryKey.NUNOTA.ToString().ToInt32();
         # <pk><NUNOTA>...</NUNOTA></pk> é lido como Key.values com o texto do XML)
         nunota = 0
@@ -563,10 +559,10 @@ class KnowServicesRequestWrapper:
                 elif hasattr(rb.primary_key, "values"):
                     nunota = rb.primary_key.values.get("NUNOTA") or 0
         nunota = int(nunota)
-        
+
         logger.info(f"Nota fiscal criada: NUNOTA={nunota}")
         return nunota
-    
+
     @classmethod
     def remove_invoice(cls, single_number: int) -> None:
         """
@@ -580,20 +576,20 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Removendo nota fiscal: NUNOTA={single_number}")
-        
+
         # .NET (KnowServicesRequestWrapper.cs:159-170):
         # Invoices.Invoice.SingleNumberDuplication -> <notas><nota NUNOTA="n"/></notas>
         invoices = Invoices(
             items=[Invoice(single_number_duplication=single_number)]
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_REMOVE,
             request_body=RequestBody(invoices=invoices),
         )
         cls._invoke_service(request)
         logger.debug(f"Nota {single_number} removida com sucesso")
-    
+
     @classmethod
     def add_invoice_items(
         cls,
@@ -618,33 +614,33 @@ class KnowServicesRequestWrapper:
         logger.info(
             f"Adicionando {len(invoice_items)} item(ns) à nota {single_number}"
         )
-        
+
         try:
             invoice = Invoice(
                 unique_number=single_number,
                 items=invoice_items,
             )
-            
+
             request = ServiceRequest(
                 service=ServiceName.INVOICE_ITEM_INCLUDE,
                 request_body=RequestBody(invoice=invoice),
             )
             response = cls._invoke_service(request)
-            
+
             # Tentar extrair sequência
             sequence = 0
             if response.response_body:
                 rb = response.response_body
                 if hasattr(rb, "sequence"):
                     sequence = rb.sequence or 0
-            
+
             logger.debug(f"Itens adicionados. Última sequência: {sequence}")
             return sequence
-            
+
         except Exception as e:
             logger.error(f"Erro ao adicionar itens à nota {single_number}: {e}")
             return 0
-    
+
     @classmethod
     def remove_invoice_items(cls, invoice_items: List[InvoiceItem]) -> None:
         """
@@ -663,11 +659,11 @@ class KnowServicesRequestWrapper:
             >>> KnowServicesRequestWrapper.remove_invoice_items(items)
         """
         cls._ensure_initialized()
-        
+
         if not invoice_items:
             logger.warning("Lista de itens vazia para remoção")
             return
-        
+
         # Validar que todos os itens pertencem à mesma nota
         first_single_number = invoice_items[0].extra_data.get("single_number")
         for item in invoice_items:
@@ -676,15 +672,15 @@ class KnowServicesRequestWrapper:
                 raise InvalidServiceRequestOperationException(
                     "Todos os itens devem pertencer à mesma nota fiscal"
                 )
-        
+
         logger.info(f"Removendo {len(invoice_items)} item(ns) de nota fiscal")
-        
+
         # Build invoice items with online_update flag matching .NET
         items_with_flags = InvoiceItems(items=invoice_items)
         # Set online_update flag via extra_data
         for item in items_with_flags.items:
             item.extra_data["onlineUpdate"] = "true"
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_ITEM_REMOVE,
             request_body=RequestBody(
@@ -693,11 +689,11 @@ class KnowServicesRequestWrapper:
         )
         cls._invoke_service(request)
         logger.debug("Itens removidos com sucesso")
-    
+
     # =========================================================================
     # Billing Operations
     # =========================================================================
-    
+
     @classmethod
     def bill(
         cls,
@@ -736,7 +732,7 @@ class KnowServicesRequestWrapper:
             f"Faturando nota {single_number} "
             f"(tipo operação: {code_operation_type}, tipo faturamento: {billing_type})"
         )
-        
+
         # .NET (KnowServicesRequestWrapper.cs:259-286): atributos de <notas>
         # (codTipOper, dataValidada, umaNotaParaCada, dtFaturamento/dtSaida/
         # hrSaida vazios, tipoFaturamento), <notasComMoeda valorMoeda="undefined"/>
@@ -752,26 +748,26 @@ class KnowServicesRequestWrapper:
             items=[Invoice(value=str(single_number))],
             one_invoice_for_each=True,
         )
-        
+
         if series is not None:
             # Com série informada o .NET fatura sempre como direto
             invoices.billing_type = BillingType.DIRECT
             invoices.series = series
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_BILL,
             request_body=RequestBody(invoices=invoices),
         )
-        
+
         if request_events is not None:
             request.request_body.client_events = ClientEvents(items=list(request_events))
-        
+
         response = cls._invoke_service(request)
-        
+
         # Extrair NUNOTA e eventos da resposta (.NET :295-309)
         result_nunota = -1
         response_events: Optional[List[ClientEvent]] = None
-        
+
         if response.response_body:
             rb = response.response_body
             if hasattr(rb, "invoices") and rb.invoices:
@@ -782,10 +778,10 @@ class KnowServicesRequestWrapper:
                     )
             if hasattr(rb, "client_events") and rb.client_events:
                 response_events = rb.client_events.items
-        
+
         logger.info(f"Nota faturada: NUNOTA={result_nunota}")
         return result_nunota, response_events
-    
+
     @classmethod
     def confirm_invoice(cls, single_number: int) -> None:
         """
@@ -803,14 +799,14 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Confirmando nota fiscal: NUNOTA={single_number}")
-        
+
         invoice = Invoice(unique_number=single_number)
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_CONFIRM,
             request_body=RequestBody(invoice=invoice),
         )
-        
+
         try:
             cls._invoke_service(request)
             logger.debug(f"Nota {single_number} confirmada com sucesso")
@@ -831,7 +827,7 @@ class KnowServicesRequestWrapper:
                     request=request,
                     inner_exception=e,
                 )
-    
+
     @classmethod
     def duplicate_invoice(
         cls,
@@ -869,7 +865,7 @@ class KnowServicesRequestWrapper:
             f"(tipo operação: {code_operation_type}, série: {series}, "
             f"data saída: {date_exit}, atualizar preço: {should_update_price})"
         )
-        
+
         # .NET (KnowServicesRequestWrapper.cs:464-482): atributos de <notas>
         # top, serie (se informada), atualizaPreco, duplicarTodosItens="true" e
         # dataSaida (sempre enviado; vazio quando a data não é informada) com
@@ -883,13 +879,13 @@ class KnowServicesRequestWrapper:
         )
         if series is not None:
             invoices.series = series
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_DUPLICATE,
             request_body=RequestBody(invoices=invoices),
         )
         response = cls._invoke_service(request)
-        
+
         # Extrair novo NUNOTA (.NET :492-498:
         # ResponseBody.Invoices.Invoice.SingleNumberDuplicationDestiny, atributo nuNota)
         new_nunota = 0
@@ -910,14 +906,14 @@ class KnowServicesRequestWrapper:
                 elif hasattr(rb.primary_key, "values"):
                     # Key.values guarda o texto do XML (<pk><NUNOTA>...</NUNOTA></pk>)
                     new_nunota = int(rb.primary_key.values.get("NUNOTA") or 0)
-        
+
         logger.info(f"Nota duplicada: novo NUNOTA={new_nunota}")
         return new_nunota
-    
+
     # =========================================================================
     # Invoice Status Operations
     # =========================================================================
-    
+
     @classmethod
     def flag_invoices_as_not_pending(cls, single_numbers: List[int]) -> None:
         """
@@ -934,18 +930,18 @@ class KnowServicesRequestWrapper:
             f"Marcando {len(single_numbers)} nota(s) como não pendente(s): "
             f"{single_numbers}"
         )
-        
+
         invoices = Invoices(
             items=[Invoice(unique_number=n) for n in single_numbers]
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_FLAG_AS_NOT_PENDING,
             request_body=RequestBody(invoices=invoices),
         )
         cls._invoke_service(request)
         logger.debug("Notas marcadas como não pendentes")
-    
+
     @classmethod
     def get_invoice_accompaniments(cls, single_numbers: List[int]) -> List[Invoice]:
         """
@@ -964,27 +960,27 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Obtendo acompanhamentos de {len(single_numbers)} nota(s)")
-        
+
         # .NET (KnowServicesRequestWrapper.cs:375-389): Invoices.SingleNumbers
         # -> <notas><nunota>n</nunota>...</notas>
         invoices = Invoices(single_numbers=list(single_numbers))
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_ACCOMPANIMENTS,
             request_body=RequestBody(invoices=invoices),
         )
         response = cls._invoke_service(request)
-        
+
         result: List[Invoice] = []
         if response.response_body:
             rb = response.response_body
             if hasattr(rb, "invoice_accompaniments") and rb.invoice_accompaniments:
                 if hasattr(rb.invoice_accompaniments, "invoices"):
                     result = rb.invoice_accompaniments.invoices
-        
+
         logger.info(f"Acompanhamentos obtidos: {len(result)} nota(s)")
         return result
-    
+
     @classmethod
     def cancel_invoices(
         cls,
@@ -1013,7 +1009,7 @@ class KnowServicesRequestWrapper:
             f"Cancelando {len(single_numbers)} nota(s) "
             f"(justificativa: {justification[:50]}...)"
         )
-        
+
         invoices = Invoices(
             items=[
                 Invoice(
@@ -1023,29 +1019,29 @@ class KnowServicesRequestWrapper:
                 for n in single_numbers
             ]
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_CANCEL,
             request_body=RequestBody(invoices=invoices),
         )
         response = cls._invoke_service(request)
-        
+
         total_cancelled = 0
         not_cancelled: List[int] = []
-        
+
         if response.response_body:
             rb = response.response_body
             if hasattr(rb, "total_cancelled_invoices"):
                 total_cancelled = rb.total_cancelled_invoices or 0
             if hasattr(rb, "single_numbers"):
                 not_cancelled = rb.single_numbers or []
-        
+
         logger.info(
             f"Notas canceladas: {total_cancelled}, "
             f"não canceladas: {len(not_cancelled)}"
         )
         return total_cancelled, not_cancelled
-    
+
     @classmethod
     def bind_invoice_with_order(
         cls,
@@ -1073,24 +1069,24 @@ class KnowServicesRequestWrapper:
             f"Vinculando nota {single_number} ao pedido "
             f"(parceiro: {code_partner}, tipo: {movement_type})"
         )
-        
+
         invoice = Invoice(
             unique_number=single_number,
             partner_code=code_partner,
             extra_data={"tipoMov": movement_type.internal_value},
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.INVOICE_BIND_WITH_ORDER,
             request_body=RequestBody(invoice=invoice),
         )
         cls._invoke_service(request)
         logger.debug("Nota vinculada ao pedido com sucesso")
-    
+
     # =========================================================================
     # NFe Operations
     # =========================================================================
-    
+
     @classmethod
     def get_fiscal_invoice_authorization(cls, single_numbers: List[int]) -> None:
         """
@@ -1104,18 +1100,18 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Buscando autorização NF-e para {len(single_numbers)} nota(s)")
-        
+
         # .NET (KnowServicesRequestWrapper.cs:501-515): Invoices.SingleNumbers
         # -> <notas><nunota>n</nunota>...</notas>
         invoices = Invoices(single_numbers=list(single_numbers))
-        
+
         request = ServiceRequest(
             service=ServiceName.NFE_GET_AUTHORIZATION,
             request_body=RequestBody(invoices=invoices),
         )
         cls._invoke_service(request)
         logger.debug("Autorização NF-e verificada")
-    
+
     @classmethod
     def generate_lot(cls, single_numbers: List[int]) -> None:
         """
@@ -1129,25 +1125,25 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Gerando lote NF-e para {len(single_numbers)} nota(s)")
-        
+
         # .NET (KnowServicesRequestWrapper.cs:517-538):
         # <notas retNotasReprovadas="N"><nunota>n</nunota>...</notas>
         invoices = Invoices(
             return_disapproved_invoices=False,
             single_numbers=list(single_numbers),
         )
-        
+
         request = ServiceRequest(
             service=ServiceName.NFE_GENERATE_LOT,
             request_body=RequestBody(invoices=invoices),
         )
         cls._invoke_service(request)
         logger.debug("Lote NF-e gerado")
-    
+
     # =========================================================================
     # Financial Operations
     # =========================================================================
-    
+
     @classmethod
     def flag_as_payments_paid(
         cls,
@@ -1175,7 +1171,7 @@ class KnowServicesRequestWrapper:
             f"Marcando {len(financial_numbers)} título(s) como pago(s) "
             f"(conta: {code_account})"
         )
-        
+
         try:
             # Build LowData with all required fields matching .NET implementation:
             # FinancialNumbersList, Empresa, ContaBco, ChkReceita, ChkDespesa,
@@ -1205,21 +1201,21 @@ class KnowServicesRequestWrapper:
                     "ParamImprimeBoleto": "false",
                 }
             )
-            
+
             request = ServiceRequest(
                 service=ServiceName.INVOICE_AUTOMATIC_LOW,
                 request_body=RequestBody(low_data=low_data),
             )
             cls._invoke_service(request)
             logger.debug("Títulos marcados como pagos")
-            
+
         except SankhyaException as e:
             raise MarkAsPaymentPaidException(
                 financial_numbers=",".join(str(n) for n in financial_numbers),
                 request=request,
                 inner_exception=e,
             )
-    
+
     @classmethod
     def reverse_payments(cls, financial_numbers: List[int]) -> None:
         """
@@ -1233,20 +1229,20 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Estornando {len(financial_numbers)} pagamento(s)")
-        
+
         for nufin in financial_numbers:
             logger.debug(f"Estornando título: NUFIN={nufin}")
-            
+
             low_data = LowData(data={"nuFin": str(nufin)})
-            
+
             request = ServiceRequest(
                 service=ServiceName.FINANCIAL_REVERSAL,
                 request_body=RequestBody(low_data=low_data),
             )
             cls._invoke_service(request)
-        
+
         logger.debug("Pagamentos estornados")
-    
+
     @classmethod
     def unlink_shipping(cls, financial_number: int) -> None:
         """
@@ -1263,28 +1259,28 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Desvinculando remessa do título: NUFIN={financial_number}")
-        
+
         try:
             low_data = LowData(data={"nuFin": str(financial_number)})
-            
+
             request = ServiceRequest(
                 service=ServiceName.UNLINK_SHIPPING,
                 request_body=RequestBody(low_data=low_data),
             )
             cls._invoke_service(request)
             logger.debug("Remessa desvinculada")
-            
+
         except SankhyaException as e:
             raise UnlinkShippingException(
                 financial_numbers=str(financial_number),
                 request=request,
                 inner_exception=e,
             )
-    
+
     # =========================================================================
     # File Operations
     # =========================================================================
-    
+
     @classmethod
     def open_file(cls, path: str) -> str:
         """
@@ -1302,25 +1298,25 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Abrindo arquivo: {path}")
-        
+
         # Set path on Config matching .NET: Config = new() { Path = path }
         config = Config(path=path)
-        
+
         request = ServiceRequest(
             service=ServiceName.FILE_OPEN,
             request_body=RequestBody(config=config),
         )
         response = cls._invoke_service(request)
-        
+
         key = ""
         if response.response_body:
             rb = response.response_body
             if hasattr(rb, "key") and rb.key:
                 key = rb.key.value or ""
-        
+
         logger.debug(f"Arquivo aberto, chave: {key[:20]}...")
         return key
-    
+
     @classmethod
     def delete_files(cls, paths: List[str]) -> None:
         """
@@ -1334,13 +1330,13 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.info(f"Deletando {len(paths)} arquivo(s)")
-        
+
         path_objects = [Path(value=p) for p in paths]
-        
+
         # Evento de confirmação, como no .NET (KnowServicesRequestWrapper.cs:641-655):
         # <clientEvent>br.com.sankhya.actionbutton.clientconfirm</clientEvent>
         confirm_event = ClientEvent(text="br.com.sankhya.actionbutton.clientconfirm")
-        
+
         request = ServiceRequest(
             service=ServiceName.FILE_DELETE,
             request_body=RequestBody(
@@ -1350,7 +1346,7 @@ class KnowServicesRequestWrapper:
         )
         cls._invoke_service(request)
         logger.debug("Arquivos deletados")
-    
+
     @classmethod
     def get_file(cls, key: str) -> ServiceFile:
         """
@@ -1369,15 +1365,15 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.debug(f"Obtendo arquivo pela chave: {key[:20]}...")
-        
+
         # Delegar para o contexto
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         if cls._session_token is None:
             raise RuntimeError("Token de sessão não disponível")
-        
+
         return SankhyaContext.get_file_with_token(key, cls._session_token)
-    
+
     @classmethod
     async def get_file_async(cls, key: str) -> ServiceFile:
         """
@@ -1394,19 +1390,19 @@ class KnowServicesRequestWrapper:
         """
         cls._ensure_initialized()
         logger.debug(f"Obtendo arquivo (async) pela chave: {key[:20]}...")
-        
+
         # Delegar para o contexto
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         if cls._session_token is None:
             raise RuntimeError("Token de sessão não disponível")
-        
+
         return await SankhyaContext.get_file_async_with_token(key, cls._session_token)
-    
+
     # =========================================================================
     # Image Operations
     # =========================================================================
-    
+
     @classmethod
     def get_image(cls, entity: T) -> ServiceFile:
         """
@@ -1428,10 +1424,10 @@ class KnowServicesRequestWrapper:
             ...     f.write(image.data)
         """
         cls._ensure_initialized()
-        
+
         if entity is None:
             raise ValueError("entity não pode ser None")
-        
+
         # Como GetImage (.NET, KnowServicesRequestWrapper.cs:664-677): usa o
         # nome da entidade (atributo Entity, ex.: "Produto") e as chaves
         # extraídas como dicionário {nome: valor}
@@ -1439,13 +1435,13 @@ class KnowServicesRequestWrapper:
         result = extract_keys(entity)
         keys = {key["name"]: key["value"] for key in result.keys}
         logger.debug(f"Obtendo imagem da entidade: {result.name}")
-        
+
         # Delegar para o contexto
         if cls._context is None:
             raise RuntimeError("Contexto não disponível")
-        
+
         return cls._context.get_image(result.name, keys)
-    
+
     @classmethod
     async def get_image_async(cls, entity: T) -> ServiceFile:
         """
@@ -1465,46 +1461,46 @@ class KnowServicesRequestWrapper:
             >>> image = await KnowServicesRequestWrapper.get_image_async(product)
         """
         cls._ensure_initialized()
-        
+
         if entity is None:
             raise ValueError("entity não pode ser None")
-        
+
         # Como GetImageAsync (.NET, KnowServicesRequestWrapper.cs:679-692)
         from sankhya_sdk.helpers.entity_extensions import extract_keys
         result = extract_keys(entity)
         keys = {key["name"]: key["value"] for key in result.keys}
         logger.debug(f"Obtendo imagem (async) da entidade: {result.name}")
-        
+
         # Delegar para o contexto
         if cls._context is None:
             raise RuntimeError("Contexto não disponível")
-        
+
         return await cls._context.get_image_async(result.name, keys)
-    
+
     # =========================================================================
     # Internal Methods - Service Invocation
     # =========================================================================
-    
+
     @classmethod
     def _invoke_service(cls, request: ServiceRequest) -> ServiceResponse:
         """Invoca o serviço de forma síncrona."""
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         if cls._session_token is None:
             raise RuntimeError("Token de sessão não disponível")
-        
+
         return SankhyaContext.service_invoker_with_token(
             request, cls._session_token
         )
-    
+
     @classmethod
     async def _invoke_service_async(cls, request: ServiceRequest) -> ServiceResponse:
         """Invoca o serviço de forma assíncrona."""
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         if cls._session_token is None:
             raise RuntimeError("Token de sessão não disponível")
-        
+
         return await SankhyaContext.service_invoker_async_with_token(
             request, cls._session_token
         )

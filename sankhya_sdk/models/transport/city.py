@@ -10,15 +10,15 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .base import TransportEntityBase
-from .state import State
-from .region import Region
 from ...attributes.decorators import (
     entity,
-    entity_key,
     entity_element,
+    entity_key,
     entity_reference,
 )
+from .base import TransportEntityBase
+from .region import Region
+from .state import State
 
 
 @entity("Cidade")
@@ -45,55 +45,55 @@ class City(TransportEntityBase):
         state: Referência ao estado
         region: Referência à região
     """
-    
+
     code: int = entity_key(
         entity_element("CODCID", default=0)
     )
-    
+
     code_state: Optional[int] = entity_element(
         "UF",
         default=None
     )
-    
+
     code_region: Optional[int] = entity_element(
         "CODREG",
         default=None
     )
-    
+
     code_fiscal: Optional[int] = entity_element(
         "CODMUNFIS",
         default=None
     )
-    
+
     name: Optional[str] = entity_element(
         "NOMECID",
         default=None
     )
-    
+
     description_correios: Optional[str] = entity_element(
         "DESCRICAOCORREIO",
         default=None
     )
-    
+
     area_code: Optional[int] = entity_element(
         "DDD",
         default=None
     )
-    
+
     latitude: Optional[str] = entity_element(
         "LATITUDE",
         default=None
     )
-    
+
     longitude: Optional[str] = entity_element(
         "LONGITUDE",
         default=None
     )
-    
+
     # Relacionamentos
     state: Optional[State] = entity_reference(default=None)
     region: Optional[Region] = entity_reference(default=None)
-    
+
     def __eq__(self, other: object) -> bool:
         """
         Compara duas instâncias de City.
@@ -103,13 +103,13 @@ class City(TransportEntityBase):
         """
         if other is None:
             return False
-        
+
         if self is other:
             return True
-        
+
         if not isinstance(other, City):
             return False
-        
+
         return (
             self.code == other.code
             and ("code" in self._fields_set) == ("code" in other._fields_set)
@@ -128,7 +128,7 @@ class City(TransportEntityBase):
             and self._compare_optional_str_ci(self.name, other.name)
             and ("name" in self._fields_set) == ("name" in other._fields_set)
             and self._compare_optional_str_ci(
-                self.description_correios, 
+                self.description_correios,
                 other.description_correios
             )
             and ("description_correios" in self._fields_set) == (
@@ -153,7 +153,7 @@ class City(TransportEntityBase):
                 "longitude" in other._fields_set
             )
         )
-    
+
     @staticmethod
     def _compare_optional_str_ci(a: Optional[str], b: Optional[str]) -> bool:
         """Compara duas strings opcionais de forma case-insensitive."""
@@ -162,7 +162,7 @@ class City(TransportEntityBase):
         if a is None or b is None:
             return False
         return a.lower() == b.lower()
-    
+
     def __hash__(self) -> int:
         """
         Calcula hash da entidade.
@@ -171,50 +171,50 @@ class City(TransportEntityBase):
         """
         hash_code = self.code
         hash_code = (hash_code * 397) ^ hash("code" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_state or 0)
         hash_code = (hash_code * 397) ^ hash("code_state" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_region or 0)
         hash_code = (hash_code * 397) ^ hash("code_region" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_fiscal or 0)
         hash_code = (hash_code * 397) ^ hash("code_fiscal" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.name.lower()) if self.name else 0
         )
         hash_code = (hash_code * 397) ^ hash("name" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
-            hash(self.description_correios.lower()) 
+            hash(self.description_correios.lower())
             if self.description_correios else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "description_correios" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.state) if self.state else 0
         )
         hash_code = (hash_code * 397) ^ hash("state" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.region) if self.region else 0
         )
         hash_code = (hash_code * 397) ^ hash("region" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.area_code or 0)
         hash_code = (hash_code * 397) ^ hash("area_code" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.latitude.lower()) if self.latitude else 0
         )
         hash_code = (hash_code * 397) ^ hash("latitude" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.longitude.lower()) if self.longitude else 0
         )
         hash_code = (hash_code * 397) ^ hash("longitude" in self._fields_set)
-        
+
         return hash_code

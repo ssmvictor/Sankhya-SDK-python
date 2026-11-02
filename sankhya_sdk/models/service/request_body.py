@@ -12,11 +12,13 @@ from typing import Any, Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import ConfigDict, Field as PydanticField
+from pydantic import ConfigDict
+from pydantic import Field as PydanticField
 
 from sankhya_sdk.models.base import EntityBase
-from .xml_serialization import create_xml_element, serialize_bool
+
 from .constants import SankhyaConstants
+from .xml_serialization import create_xml_element, serialize_bool
 
 
 class RequestBody(EntityBase):
@@ -37,41 +39,41 @@ class RequestBody(EntityBase):
     invoice: Optional[Any] = PydanticField(default=None, alias="nota")
     invoices: Optional[Any] = PydanticField(default=None, alias="notas")
     cancelled_invoices: Optional[Any] = PydanticField(default=None, alias="notasCanceladas")
-    
+
     # Campos de entidade
     entity: Optional[Any] = PydanticField(default=None, alias="entity")
     data_set: Optional[Any] = PydanticField(default=None, alias="dataSet")
-    
+
     # Campos de parâmetros
     param: Optional[Any] = PydanticField(default=None, alias="param")
     params: Optional[Any] = PydanticField(default=None, alias="params")
-    
+
     # Campos de sessão
     session: Optional[Any] = PydanticField(default=None, alias="session")
-    
+
     # Campos de dados auxiliares
     low_data: Optional[Any] = PydanticField(default=None, alias="dadosBaixa")
-    
+
     # Campos de mensagens do sistema
     system_warning: Optional[Any] = PydanticField(default=None, alias="avisoSistema")
     system_message: Optional[Any] = PydanticField(default=None, alias="mensagemSistema")
-    
+
     # Campos de configuração
     config: Optional[Any] = PydanticField(default=None, alias="config")
-    
+
     # Campos de autenticação
     username: Optional[str] = PydanticField(default=None, alias="NOMUSU")
     password: Optional[str] = PydanticField(default=None, alias="INTERNO")
-    
+
     # Campos de numeração
     single_numbers: Optional[Any] = PydanticField(default=None, alias="singleNumbers")
-    
+
     # Campos de eventos
     client_events: Optional[Any] = PydanticField(default=None, alias="clientEvents")
-    
+
     # Campos de notificação
     notification_elem: Optional[Any] = PydanticField(default=None, alias="notificacao")
-    
+
     # Campos de caminhos
     paths: Optional[Any] = PydanticField(default=None, alias="paths")
 
@@ -89,7 +91,7 @@ class RequestBody(EntityBase):
             Elemento XML representando o corpo da requisição
         """
         elem = etree.Element(SankhyaConstants.REQUEST_BODY)
-        
+
         # Mapeia campos para suas tags XML
         # (nomes do .NET em Sankhya-SDK-dotnet/Src/Sankhya/Service/RequestBody.cs:
         # [XmlElement("SESSION")], [XmlElement("aviso")],
@@ -115,15 +117,15 @@ class RequestBody(EntityBase):
             "paths": "arquivos",
             "custom_query": "sql",
         }
-        
+
         for field_name, xml_tag in field_mappings.items():
             if not self.should_serialize_field(field_name):
                 continue
-            
+
             value = getattr(self, field_name)
             if value is None:
                 continue
-            
+
             # Se o valor tem método to_xml, usa ele
             if hasattr(value, "to_xml"):
                 child = value.to_xml()
@@ -151,7 +153,7 @@ class RequestBody(EntityBase):
                         child.append(item.to_xml())
                     else:
                         create_xml_element("item", str(item), parent=child)
-        
+
         return elem
 
     @classmethod
@@ -165,21 +167,21 @@ class RequestBody(EntityBase):
         Returns:
             Instância de RequestBody
         """
-        from .xml_serialization import get_element_text
-        from .entity_types import Entity, DataSet
-        from .invoice_types import Invoice, Invoices, CancelledInvoices
+        from .basic_types import Paths
+        from .entity_types import DataSet, Entity
+        from .event_types import ClientEvents, NotificationElem, SystemMessage, SystemWarning
+        from .invoice_types import CancelledInvoices, Invoice, Invoices
         from .metadata_types import Config, Session, SingleNumbers
         from .query_types import Param, Params
-        from .event_types import ClientEvents, SystemMessage, SystemWarning, NotificationElem
         from .user_types import LowData
-        from .basic_types import Paths
-        
+        from .xml_serialization import get_element_text
+
         instance = cls()
-        
+
         # Processa cada elemento filho
         for child in element:
             tag = child.tag
-            
+
             if tag == "nota":
                 instance.invoice = Invoice.from_xml(child)
             elif tag == "notas":
@@ -216,5 +218,5 @@ class RequestBody(EntityBase):
                 instance.notification_elem = NotificationElem.from_xml(child)
             elif tag in ("arquivos", "paths"):
                 instance.paths = Paths.from_xml(child)
-        
+
         return instance

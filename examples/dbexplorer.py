@@ -10,11 +10,12 @@ Este exemplo demonstra como executar SQL nativo no Sankhya via API Gateway.
 """
 
 import os
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
+
 from dotenv import load_dotenv
 
 from sankhya_sdk.auth.oauth_client import OAuthClient
-from sankhya_sdk.http import SankhyaSession, GatewayClient
+from sankhya_sdk.http import GatewayClient, SankhyaSession
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -224,7 +225,7 @@ def exemplo_buscar_viagem(codparc: int, dhemiss: str, num_ciot: str):
         ) WHERE ROWNUM = 1
     """
 
-    print(f"\nBuscando viagem:")
+    print("\nBuscando viagem:")
     print(f"  - Motorista (CODPARC): {codparc}")
     print(f"  - Data emissão: {dhemiss}")
     print(f"  - CIOT: {num_ciot}")
@@ -236,7 +237,7 @@ def exemplo_buscar_viagem(codparc: int, dhemiss: str, num_ciot: str):
 
         if rows:
             record = rows[0]
-            print(f"✅ Viagem encontrada!")
+            print("✅ Viagem encontrada!")
             print(f"   NUVIAG: {record['NUVIAG']}")
             print(f"   CODPARC: {record['CODPARC']}")
             return record

@@ -5,16 +5,12 @@ including integration with the EntityValidator for full entity validation.
 """
 
 import re
-from typing import Any, Optional, Type, TYPE_CHECKING
-
-from pydantic import ValidationError
+from typing import TYPE_CHECKING, Any, Type
 
 from .metadata import EntityCustomDataMetadata
-from .reflection import get_field_metadata, is_entity_key
 
 if TYPE_CHECKING:
-    from ..validations.entity_validator import EntityValidator
-    from ..validations.exceptions import EntityValidationError
+    pass
 
 
 def validate_entity_class(entity_type: Type[Any]) -> None:

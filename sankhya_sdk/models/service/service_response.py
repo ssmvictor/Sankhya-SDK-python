@@ -9,25 +9,24 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Service/ServiceResponse.cs
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import ConfigDict, Field as PydanticField
+from pydantic import ConfigDict
+from pydantic import Field as PydanticField
 
-from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_response_status import ServiceResponseStatus
-from .response_body import ResponseBody
-from .metadata_types import StatusMessage
-from .constants import SankhyaConstants
-from .xml_serialization import (
-    get_element_attr,
-    get_element_text,
-    deserialize_bool,
-    deserialize_optional_int,
-)
+from sankhya_sdk.models.base import EntityBase
 
+from .constants import SankhyaConstants
+from .metadata_types import StatusMessage
+from .response_body import ResponseBody
+from .xml_serialization import (
+    deserialize_bool,
+    get_element_attr,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,15 +121,15 @@ class ServiceResponse(EntityBase):
         """
         if not self.response_body:
             return []
-        
+
         entities = []
-        
+
         if self.response_body.crud_service_entities:
             entities.extend(self.response_body.crud_service_entities.entities)
-        
+
         if self.response_body.crud_service_provider_entities:
             entities.extend(self.response_body.crud_service_provider_entities.entities)
-        
+
         return entities
 
     @property
@@ -147,28 +146,28 @@ class ServiceResponse(EntityBase):
             Elemento XML representando a resposta
         """
         elem = etree.Element(SankhyaConstants.SERVICE_RESPONSE)
-        
+
         # Atributos
         if self.service:
             elem.set(SankhyaConstants.SERVICE_NAME, self.service.internal_value)
         elem.set(SankhyaConstants.STATUS, str(self.status.value))
         elem.set(SankhyaConstants.PENDING_PRINTING, str(self.pending_printing).lower())
-        
+
         if self.transaction_id:
             elem.set(SankhyaConstants.TRANSACTION_ID, self.transaction_id)
         if self.error_code:
             elem.set(SankhyaConstants.ERROR_CODE, self.error_code)
         if self.error_level:
             elem.set(SankhyaConstants.ERROR_LEVEL, self.error_level)
-        
+
         # Mensagem de status
         if self.status_message:
             elem.append(self.status_message.to_xml())
-        
+
         # Corpo da resposta
         if self.response_body:
             elem.append(self.response_body.to_xml())
-        
+
         return elem
 
     def to_xml_string(self, pretty_print: bool = False) -> str:
@@ -196,10 +195,10 @@ class ServiceResponse(EntityBase):
             Instância de ServiceResponse
         """
         instance = cls()
-        
+
         # Parse atributos
         instance._parse_attributes(element)
-        
+
         # Parse elementos filhos
         for child in element:
             if child.tag == SankhyaConstants.STATUS_MESSAGE:
@@ -209,7 +208,7 @@ class ServiceResponse(EntityBase):
             else:
                 # Log elemento não esperado, mas não falha
                 logger.debug(f"Elemento não esperado na resposta: {child.tag}")
-        
+
         return instance
 
     def _parse_attributes(self, element: Element) -> None:
@@ -226,7 +225,7 @@ class ServiceResponse(EntityBase):
                 self.service = ServiceName.from_internal_value(service_name_str)
             except ValueError:
                 logger.warning(f"ServiceName desconhecido: {service_name_str}")
-        
+
         # Status
         status_str = get_element_attr(element, SankhyaConstants.STATUS)
         if status_str:
@@ -234,14 +233,14 @@ class ServiceResponse(EntityBase):
                 self.status = ServiceResponseStatus(int(status_str))
             except (ValueError, TypeError):
                 logger.warning(f"Status inválido: {status_str}")
-        
+
         # Pending printing
         pending_str = get_element_attr(element, SankhyaConstants.PENDING_PRINTING)
         self.pending_printing = deserialize_bool(pending_str or "")
-        
+
         # Transaction ID
         self.transaction_id = get_element_attr(element, SankhyaConstants.TRANSACTION_ID)
-        
+
         # Error code e level
         self.error_code = get_element_attr(element, SankhyaConstants.ERROR_CODE)
         self.error_level = get_element_attr(element, SankhyaConstants.ERROR_LEVEL)

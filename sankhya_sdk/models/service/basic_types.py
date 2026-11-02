@@ -8,22 +8,22 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Service/
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, Dict, List, Optional, TypeVar
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import BaseModel, ConfigDict, Field as PydanticField
+from pydantic import BaseModel, ConfigDict
+from pydantic import Field as PydanticField
 
 from sankhya_sdk.enums.parameter_type import ParameterType
+
 from .xml_serialization import (
-    XmlSerializableBase,
     create_xml_element,
+    deserialize_bool,
     get_element_attr,
     get_element_text,
     serialize_bool,
-    deserialize_bool,
 )
-
 
 T = TypeVar("T")
 
@@ -223,12 +223,12 @@ class LiteralCriteriaSql(BaseModel):
         """Deserializa de elemento XML."""
         expr_elem = element.find("expressao")
         params_elem = element.find("parametros")
-        
+
         parameters = []
         if params_elem is not None:
             for param_elem in params_elem.findall("parameter"):
                 parameters.append(Parameter.from_xml(param_elem))
-        
+
         return cls(
             expression=get_element_text(expr_elem) if expr_elem is not None else None,
             parameters=parameters,
@@ -271,15 +271,15 @@ class DataRow(BaseModel):
     def from_xml(cls, element: Element) -> "DataRow":
         """Deserializa de elemento XML."""
         fields: Dict[str, Any] = {}
-        
+
         # Inclui atributos como campos
         for attr_name, attr_value in element.attrib.items():
             fields[attr_name] = attr_value
-        
+
         # Inclui elementos filhos como campos
         for child in element:
             fields[child.tag] = get_element_text(child) or None
-        
+
         return cls(fields=fields)
 
 

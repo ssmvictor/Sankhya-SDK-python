@@ -11,7 +11,6 @@ from lxml import etree
 from sankhya_sdk.models.service.response_body import ResponseBody
 from sankhya_sdk.models.service.user_types import SessionInfo, SessionsResponse
 
-
 DOTNET_SESSIONS_XML = (
     "<SESSIONS>"
     '<SESSION ID="ABC123" CREATIONTIME="01/02/2024 08:00:00"'

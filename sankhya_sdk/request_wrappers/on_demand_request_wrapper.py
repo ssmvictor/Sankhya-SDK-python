@@ -22,7 +22,6 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
-    Union,
 )
 from uuid import UUID
 
@@ -40,7 +39,6 @@ from sankhya_sdk.exceptions import (
 from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensions
 from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.models.service.service_request import ServiceRequest
-
 
 logger = logging.getLogger(__name__)
 
@@ -122,35 +120,35 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         self._throughput = throughput
         self._allow_above_throughput = allow_above_throughput
         self._cancel_token = cancel_token
-        
+
         # Filas e eventos de sincronização
         self._queue: queue.Queue[TEntity] = queue.Queue()
         self._stop_event = threading.Event()
         self._flush_event = threading.Event()
         self._work_available = threading.Event()
         self._worker_finished = threading.Event()
-        
+
         # Conclusão do flush: total de entidades adicionadas x processadas
         # (ver flush)
         self._flush_cond = threading.Condition()
         self._added_count = 0
         self._processed_count = 0
-        
+
         # Sessão e contexto
         self._context = context
         self._session_token = session_token
         self._owns_session = owns_session
         self._session_released = False
-        
+
         # Estatísticas
         self._request_count = 0
         self._entities_sent = 0
         self._entities_sent_successfully = 0
-        
+
         # Estado
         self._disposed = False
         self._lock = threading.Lock()
-        
+
         # Inicia thread worker
         self._worker = threading.Thread(
             target=self._process,
@@ -158,7 +156,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             daemon=True,
         )
         self._worker.start()
-        
+
         logger.debug(
             f"OnDemandRequestWrapper iniciado: service={service.name}, "
             f"throughput={throughput}"
@@ -211,17 +209,17 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         """
         if self._disposed:
             raise ValueError("OnDemandRequestWrapper já foi descartado")
-        
+
         if self._cancel_token.is_set():
             raise CanceledOnDemandRequestWrapperException()
-        
+
         # Enfileira e contabiliza juntos: o alvo de um flush concorrente
         # nunca inclui uma entidade que ainda não está na fila
         with self._flush_cond:
             self._queue.put(entity)
             self._added_count += 1
         self._work_available.set()
-        
+
         logger.debug(f"Entidade adicionada à fila: {type(entity).__name__}")
 
     def flush(self) -> None:
@@ -244,15 +242,15 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         """
         if self._disposed:
             return
-        
+
         with self._flush_cond:
             target = self._added_count
             if self._processed_count >= target:
                 return
-        
+
         self._flush_event.set()
         self._work_available.set()
-        
+
         # Chamado em uma thread worker (ex.: handler de
         # OnDemandRequestFailureEvent): na própria, só ela processa a fila,
         # então aguardar aqui travaria o wrapper para sempre; na de outro
@@ -266,7 +264,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             or _is_on_demand_worker_thread()
         ):
             return
-        
+
         # Aguarda conclusão do flush. Worker já encerrado (ex.: após
         # cancelamento) não processaria mais nada: ele marca o término antes
         # de notificar os flushes pendentes.
@@ -275,7 +273,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
                 lambda: self._processed_count >= target
                 or self._worker_finished.is_set()
             )
-        
+
         logger.debug("Flush concluído")
 
     def dispose(self) -> None:
@@ -286,22 +284,22 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         """
         if self._disposed:
             return
-        
+
         with self._lock:
             if self._disposed:
                 return
             self._disposed = True
-        
+
         # Sinaliza parada
         self._stop_event.set()
         self._work_available.set()
-        
+
         # Aguarda thread worker (que finaliza a sessão própria ao terminar)
         if self._worker.is_alive():
             self._worker.join(timeout=30.0)
             if self._worker.is_alive():
                 logger.warning("Worker thread não finalizou no tempo esperado")
-        
+
         logger.info(
             f"OnDemandRequestWrapper finalizado: "
             f"requests={self._request_count}, "
@@ -368,7 +366,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             if not self._owns_session or self._session_released:
                 return
             self._session_released = True
-        
+
         if self._session_token and self._context:
             try:
                 self._context.detach_on_demand_request_wrapper(self._session_token)
@@ -407,26 +405,26 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             True se deve parar, False para continuar.
         """
         self._wait_for_work()
-        
+
         # Consome o sinal antes de inspecionar o estado: um add() concorrente
         # sinaliza de novo depois deste clear, então nenhum aviso se perde
         self._work_available.clear()
-        
+
         is_flushing = self._flush_event.is_set()
         if is_flushing:
             self._flush_event.clear()
-        
+
         is_cancelling = self._cancel_token.is_set()
         is_disposing = self._stop_event.is_set()
-        
+
         if self._queue.empty() and (is_cancelling or is_disposing):
             return True
-        
+
         force_request = is_cancelling or is_disposing or is_flushing
-        
+
         if self._queue.qsize() < self._throughput and not force_request:
             return False
-        
+
         # Coleta itens da fila
         items: List[TEntity] = []
         while (
@@ -438,10 +436,10 @@ class OnDemandRequestWrapper(Generic[TEntity]):
                 items.append(self._queue.get_nowait())
             except queue.Empty:
                 break
-        
+
         if not items:
             return False
-        
+
         try:
             self._process_batch(items)
         finally:
@@ -454,7 +452,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             # a fila é reavaliada sem esperar novo add(): se ainda houver
             # throughput, o próximo lote é enviado em seguida
             self._work_available.set()
-        
+
         return False
 
     def _process_batch(self, items: List[TEntity]) -> None:
@@ -471,9 +469,9 @@ class OnDemandRequestWrapper(Generic[TEntity]):
         """
         if not items:
             return
-        
+
         self._entities_sent += len(items)
-        
+
         # Cria requisição (Resolve<T>(ICollection<T>) no .NET)
         try:
             request = ServiceRequest(service=self._service)
@@ -484,10 +482,10 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             logger.error(f"Erro ao montar requisição em lote: {e}", exc_info=True)
             self._process_items_separately(items)
             return
-        
+
         # Tenta processar em lote
         success, exception = self._process_request(request)
-        
+
         if success:
             self._entities_sent_successfully += len(items)
             logger.debug(f"Lote processado: {len(items)} entidades")
@@ -517,20 +515,20 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             self._request_count += 1
             self._invoke_service(request)
             return True, None
-            
+
         except (ServiceRequestTimeoutException, ServiceRequestDeadlockException) as e:
             # .NET (OnDemandRequestWrapper.cs:259-280): timeout e deadlock são
             # tentados novamente uma única vez, de imediato
             if retry:
                 logger.warning(f"Retry falhou: {e}")
                 return False, e
-            
+
             return self._process_request(request, retry=True)
-            
+
         except SankhyaException as e:
             logger.error(f"Erro na requisição: {e}")
             return False, e
-            
+
         except Exception as e:
             logger.error(f"Erro inesperado: {e}", exc_info=True)
             return False, e
@@ -551,9 +549,9 @@ class OnDemandRequestWrapper(Generic[TEntity]):
                 logger.error(f"Erro ao montar requisição: {e}", exc_info=True)
                 self._publish_failure(item, e)
                 continue
-            
+
             success, exception = self._process_request(request)
-            
+
             if success:
                 self._entities_sent_successfully += 1
             elif exception:
@@ -589,7 +587,7 @@ class OnDemandRequestWrapper(Generic[TEntity]):
             request: Requisição a executar
         """
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         if self._session_token:
             SankhyaContext.service_invoker_with_token(request, self._session_token)
         elif self._context:

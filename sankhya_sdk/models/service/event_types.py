@@ -12,17 +12,19 @@ from typing import Any, Dict, List, Optional, Union
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import BaseModel, ConfigDict, Field as PydanticField
+from pydantic import BaseModel, ConfigDict
+from pydantic import Field as PydanticField
 
 from sankhya_sdk.enums.sankhya_warning_level import SankhyaWarningLevel
 from sankhya_sdk.enums.sankhya_warning_type import SankhyaWarningType
+
 from .xml_serialization import (
     create_xml_element,
+    deserialize_bool,
+    deserialize_optional_int,
     get_element_attr,
     get_element_text,
     serialize_bool,
-    deserialize_bool,
-    deserialize_optional_int,
 )
 
 
@@ -43,18 +45,18 @@ class ClientEventInvoiceItem(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("itemNota")
-        
+
         if self.sequence is not None:
             elem.set("sequencia", str(self.sequence))
         if self.product_code:
             elem.set("codProd", self.product_code)
         if self.quantity is not None:
             elem.set("qtd", str(self.quantity))
-        
+
         for key, value in self.data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -63,7 +65,7 @@ class ClientEventInvoiceItem(BaseModel):
         data: Dict[str, Any] = {}
         for child in element:
             data[child.tag] = get_element_text(child)
-        
+
         qty_str = get_element_attr(element, "qtd")
         quantity = None
         if qty_str:
@@ -71,7 +73,7 @@ class ClientEventInvoiceItem(BaseModel):
                 quantity = float(qty_str)
             except ValueError:
                 pass
-        
+
         return cls(
             sequence=deserialize_optional_int(get_element_attr(element, "sequencia")),
             product_code=get_element_attr(element, "codProd"),
@@ -104,7 +106,7 @@ class ClientEvent(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("clientEvent")
-        
+
         if self.text is not None:
             elem.text = self.text
         if self.id is not None:
@@ -115,16 +117,16 @@ class ClientEvent(BaseModel):
             elem.set("code", self.code)
         if self.invoice_number is not None:
             elem.set("nunota", str(self.invoice_number))
-        
+
         if self.items:
             items_elem = etree.SubElement(elem, "itensNota")
             for item in self.items:
                 items_elem.append(item.to_xml())
-        
+
         for key, value in self.data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -132,19 +134,19 @@ class ClientEvent(BaseModel):
         """Deserializa de elemento XML."""
         items: List[ClientEventInvoiceItem] = []
         data: Dict[str, Any] = {}
-        
+
         items_elem = element.find("itensNota")
         if items_elem is not None:
             items = [
-                ClientEventInvoiceItem.from_xml(i) 
+                ClientEventInvoiceItem.from_xml(i)
                 for i in items_elem.findall("itemNota")
             ]
-        
+
         known_elements = {"itensNota"}
         for child in element:
             if child.tag not in known_elements:
                 data[child.tag] = get_element_text(child)
-        
+
         return cls(
             id=get_element_attr(element, "id"),
             text=(element.text or "").strip() or None,
@@ -198,7 +200,7 @@ class Event(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("evento")
-        
+
         if self.type:
             elem.set("tipo", self.type)
         if self.code:
@@ -209,11 +211,11 @@ class Event(BaseModel):
             elem.set("idusu", str(self.user_id))
         if self.description:
             create_xml_element("descricao", self.description, parent=elem)
-        
+
         for key, value in self.data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -221,11 +223,11 @@ class Event(BaseModel):
         """Deserializa de elemento XML."""
         data: Dict[str, Any] = {}
         known_elements = {"descricao"}
-        
+
         for child in element:
             if child.tag not in known_elements:
                 data[child.tag] = get_element_text(child)
-        
+
         return cls(
             type=get_element_attr(element, "tipo"),
             code=get_element_attr(element, "codigo"),
@@ -254,7 +256,7 @@ class Message(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("mensagem")
-        
+
         if self.code:
             elem.set("codigo", self.code)
         if self.type:
@@ -265,7 +267,7 @@ class Message(BaseModel):
             create_xml_element("texto", self.text, parent=elem)
         if self.details:
             create_xml_element("detalhes", self.details, parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -320,7 +322,7 @@ class SystemMessage(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("mensagemSistema")
-        
+
         if self.title:
             create_xml_element("titulo", self.title, parent=elem)
         if self.content:
@@ -335,7 +337,7 @@ class SystemMessage(BaseModel):
             users_elem = etree.SubElement(elem, "usuarios")
             for user_id in self.target_users:
                 create_xml_element("idusu", str(user_id), parent=users_elem)
-        
+
         return elem
 
     @classmethod
@@ -348,7 +350,7 @@ class SystemMessage(BaseModel):
                 user_id = deserialize_optional_int(get_element_text(user_elem))
                 if user_id is not None:
                     target_users.append(user_id)
-        
+
         return cls(
             title=get_element_text(element.find("titulo")),
             content=get_element_text(element.find("conteudo")),
@@ -384,12 +386,12 @@ class SystemWarningRecipient(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("destinatario")
-        
+
         if self.user_id is not None:
             elem.set("id", str(self.user_id))
         if self.type is not None:
             elem.set("tipo", self.type.internal_value)
-        
+
         return elem
 
     @classmethod
@@ -456,7 +458,7 @@ class SystemWarning(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("aviso")
-        
+
         if self.priority is not None:
             importance = (
                 self.priority.internal_value
@@ -472,7 +474,7 @@ class SystemWarning(BaseModel):
             create_xml_element("Dica", self.tip, parent=elem)
         for recipient in self.recipients:
             elem.append(recipient.to_xml())
-        
+
         return elem
 
     @classmethod
@@ -485,10 +487,10 @@ class SystemWarning(BaseModel):
         if dest_elem is not None:
             # Formato legado: destinatários agrupados em <destinatarios>
             recipients.extend(
-                SystemWarningRecipient.from_xml(r) 
+                SystemWarningRecipient.from_xml(r)
                 for r in dest_elem.findall("destinatario")
             )
-        
+
         def optional_text(child: Optional[Element]) -> Optional[str]:
             return get_element_text(child) if child is not None else None
 
@@ -531,15 +533,15 @@ class NotificationElem(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("notificacao")
-        
+
         if self.type:
             elem.set("tipo", self.type)
         elem.set("habilitado", serialize_bool(self.enabled))
-        
+
         for key, value in self.data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -548,7 +550,7 @@ class NotificationElem(BaseModel):
         data: Dict[str, Any] = {}
         for child in element:
             data[child.tag] = get_element_text(child)
-        
+
         return cls(
             type=get_element_attr(element, "tipo"),
             enabled=deserialize_bool(get_element_attr(element, "habilitado", ""), default=True),

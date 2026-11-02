@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from sankhya_sdk.models.base import EntityBase
+    pass
 
 
 @dataclass(frozen=True, slots=True)

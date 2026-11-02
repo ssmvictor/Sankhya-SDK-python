@@ -13,7 +13,6 @@ from typing import Protocol, TypeVar, runtime_checkable
 
 from sankhya_sdk.models.base import EntityBase
 
-
 # Type variable for entity types
 TEntity = TypeVar("TEntity", bound=EntityBase)
 

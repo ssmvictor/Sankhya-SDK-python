@@ -5,6 +5,7 @@ This module contains advanced exceptions related to service requests.
 
 from typing import Any, Optional
 
+from ..enums.service_name import ServiceName
 from .base import ServiceRequestGeneralException
 from .intermediate import ServiceRequestTemporarilyException
 from .messages import (
@@ -20,7 +21,6 @@ from .messages import (
     SERVICE_REQUEST_UNEXPECTED_RESULT,
     SERVICE_REQUEST_UNEXPECTED_RESULT_UNCAUGHT,
 )
-from ..enums.service_name import ServiceName
 
 
 class ServiceRequestRepeatedException(ServiceRequestGeneralException):
@@ -74,7 +74,7 @@ class ServiceRequestTooManyResultsException(ServiceRequestGeneralException):
         if request is not None:
             if hasattr(request, "service") and isinstance(request.service, ServiceName):
                 service_name = request.service.metadata.human_readable
-            
+
             if hasattr(request, "request_body"):
                 body = request.request_body
                 if hasattr(body, "entity") and body.entity is not None:
@@ -167,20 +167,20 @@ class ServiceRequestUnexpectedResultException(ServiceRequestGeneralException):
     def _get_service_name(request: Optional[Any]) -> str:
         if request is None:
             return "Unknown"
-        
+
         service_name = "Unknown"
         if hasattr(request, "service") and isinstance(request.service, ServiceName):
             service_name = request.service.metadata.human_readable
-        
+
         entity = ""
         if hasattr(request, "request_body"):
             body = request.request_body
             if hasattr(body, "data_set") and body.data_set is not None:
                 entity = getattr(body.data_set, "root_entity", "")
-        
+
         if entity:
             service_name += f" ({entity})"
-        
+
         return service_name
 
 

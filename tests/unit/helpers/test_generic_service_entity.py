@@ -3,8 +3,6 @@
 Testes unitários para generic_service_entity.py
 """
 
-import pytest
-from typing import Optional
 
 from sankhya_sdk.helpers.generic_service_entity import GenericServiceEntity
 
@@ -41,61 +39,60 @@ class TestGenericServiceEntity:
 
     def test_convert_value_string(self):
         """Teste conversão de string."""
-        from pydantic.fields import FieldInfo
         from unittest.mock import Mock
-        
+
         field_info = Mock()
         field_info.annotation = str
-        
+
         result = GenericServiceEntity._convert_value("test", field_info)
         assert result == "test"
 
     def test_convert_value_int(self):
         """Teste conversão de int."""
         from unittest.mock import Mock
-        
+
         field_info = Mock()
         field_info.annotation = int
-        
+
         result = GenericServiceEntity._convert_value("123", field_info)
         assert result == 123
 
     def test_convert_value_float(self):
         """Teste conversão de float."""
         from unittest.mock import Mock
-        
+
         field_info = Mock()
         field_info.annotation = float
-        
+
         result = GenericServiceEntity._convert_value("123.45", field_info)
         assert result == 123.45
 
     def test_convert_value_bool_true(self):
         """Teste conversão de bool True."""
         from unittest.mock import Mock
-        
+
         field_info = Mock()
         field_info.annotation = bool
-        
+
         result = GenericServiceEntity._convert_value("true", field_info)
         assert result is True
 
     def test_convert_value_bool_sim(self):
         """Teste conversão de bool 'sim'."""
         from unittest.mock import Mock
-        
+
         field_info = Mock()
         field_info.annotation = bool
-        
+
         result = GenericServiceEntity._convert_value("sim", field_info)
         assert result is True
 
     def test_convert_value_bool_false(self):
         """Teste conversão de bool False."""
         from unittest.mock import Mock
-        
+
         field_info = Mock()
         field_info.annotation = bool
-        
+
         result = GenericServiceEntity._convert_value("no", field_info)
         assert result is False

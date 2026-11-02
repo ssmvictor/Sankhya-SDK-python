@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 import pytest
+
 from sankhya_sdk.exceptions import (
-    InvalidKeyFileException,
-    ServiceRequestInvalidAuthorizationException,
     CanceledOnDemandRequestWrapperException,
+    InvalidKeyFileException,
     ServiceRequestExpiredAuthenticationException,
+    ServiceRequestInvalidAuthorizationException,
     ServiceRequestInvalidCredentialsException,
     TooInnerLevelsException,
 )
+
 
 @pytest.mark.parametrize("key,expected_msg", [
     ("abc123", "The supplied key abc123 is not valid"),
@@ -21,7 +23,7 @@ def test_invalid_key_file_exception(key: str, expected_msg: str) -> None:
 def test_service_request_invalid_authorization_exception() -> None:
     exc: ServiceRequestInvalidAuthorizationException = ServiceRequestInvalidAuthorizationException()
     assert "Attempt of unauthorized/unauthenticated access" in str(exc)
-    
+
     inner: Exception = Exception("Inner error")
     exc_with_inner: ServiceRequestInvalidAuthorizationException = ServiceRequestInvalidAuthorizationException(inner_exception=inner)
     assert exc_with_inner.__cause__ == inner

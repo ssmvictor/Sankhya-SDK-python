@@ -11,12 +11,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from .base import TransportEntityBase
 from ...attributes.decorators import (
     entity,
-    entity_key,
     entity_element,
+    entity_key,
 )
+from .base import TransportEntityBase
 
 
 @entity("CodigoBarras")
@@ -33,31 +33,31 @@ class CodeBars(TransportEntityBase):
         code_volume: Código do volume (CODVOL)
         date_changed: Data de alteração (DHALTER)
     """
-    
+
     code: Optional[str] = entity_key(
         entity_element("CODBARRA", default=None)
     )
-    
+
     code_product: Optional[int] = entity_element(
         "CODPROD",
         default=None
     )
-    
+
     code_user: Optional[int] = entity_element(
         "CODUSU",
         default=None
     )
-    
+
     code_volume: Optional[str] = entity_element(
         "CODVOL",
         default=None
     )
-    
+
     date_changed: Optional[datetime] = entity_element(
         "DHALTER",
         default=None
     )
-    
+
     @staticmethod
     def _compare_optional_str_ci(a: Optional[str], b: Optional[str]) -> bool:
         """Compara duas strings opcionais de forma case-insensitive."""
@@ -66,7 +66,7 @@ class CodeBars(TransportEntityBase):
         if a is None or b is None:
             return False
         return a.lower() == b.lower()
-    
+
     def __eq__(self, other: object) -> bool:
         """
         Compara duas instâncias de CodeBars.
@@ -75,13 +75,13 @@ class CodeBars(TransportEntityBase):
         """
         if other is None:
             return False
-        
+
         if self is other:
             return True
-        
+
         if not isinstance(other, CodeBars):
             return False
-        
+
         return (
             self._compare_optional_str_ci(self.code, other.code)
             and ("code" in self._fields_set) == ("code" in other._fields_set)
@@ -102,7 +102,7 @@ class CodeBars(TransportEntityBase):
                 "date_changed" in other._fields_set
             )
         )
-    
+
     def __hash__(self) -> int:
         """
         Calcula hash da entidade.
@@ -111,21 +111,21 @@ class CodeBars(TransportEntityBase):
         """
         hash_code = hash(self.code.lower()) if self.code else 0
         hash_code = (hash_code * 397) ^ hash("code" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_product or 0)
         hash_code = (hash_code * 397) ^ hash("code_product" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (self.code_user or 0)
         hash_code = (hash_code * 397) ^ hash("code_user" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.code_volume.lower()) if self.code_volume else 0
         )
         hash_code = (hash_code * 397) ^ hash("code_volume" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.date_changed) if self.date_changed else 0
         )
         hash_code = (hash_code * 397) ^ hash("date_changed" in self._fields_set)
-        
+
         return hash_code

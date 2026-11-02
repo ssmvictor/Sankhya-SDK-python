@@ -8,13 +8,13 @@ to test the full integration flow.
 
 import os
 from unittest.mock import MagicMock, Mock, patch
+
 import pytest
 
 from sankhya_sdk.core.context import SankhyaContext
 from sankhya_sdk.core.wrapper import SankhyaWrapper
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.models.service.service_request import ServiceRequest
-
 
 # Skip integration tests if no real server is configured
 SKIP_INTEGRATION = os.getenv("SANKHYA_SKIP_INTEGRATION", "true").lower() == "true"
@@ -150,7 +150,7 @@ class TestWrapperIntegrationMocked:
 
         # First call times out, second succeeds
         timeout_error = requests.exceptions.Timeout("Connection timed out")
-        
+
         success_response = Mock()
         success_response.ok = True
         success_response.status_code = 200

@@ -1,6 +1,6 @@
-from pathlib import Path
-from typing import Optional
 import mimetypes
+from pathlib import Path
+
 from pydantic import BaseModel, Field, field_validator
 
 

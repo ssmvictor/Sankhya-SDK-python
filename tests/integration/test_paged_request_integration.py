@@ -65,25 +65,25 @@ class TestPagedRequestIntegration:
     def sankhya_context(self):
         """Cria contexto Sankhya autenticado."""
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         ctx = SankhyaContext(
             host=os.environ["SANKHYA_URL"],
             port=int(os.environ.get("SANKHYA_PORT") or DEFAULT_PORT),
             username=os.environ["SANKHYA_USERNAME"],
             password=os.environ["SANKHYA_PASSWORD"],
         )
-        
+
         yield ctx
-        
+
         ctx.dispose()
 
     def test_paged_request_real_api(self, sankhya_context):
         """Testa requisição paginada com API real."""
         pages_loaded = []
-        
+
         def on_page_loaded(args):
             pages_loaded.append(args.current_page)
-        
+
         results = list(PagedRequestWrapper.get_paged_results(
             request=_build_partner_request(),
             entity_type=Partner,
@@ -92,7 +92,7 @@ class TestPagedRequestIntegration:
             max_results=100,
             on_page_loaded=on_page_loaded,
         ))
-        
+
         assert len(results) > 0
         assert all(isinstance(partner, Partner) for partner in results)
         assert len(pages_loaded) > 0
@@ -109,21 +109,21 @@ class TestPagedRequestIntegration:
             max_results=50,
         ):
             results.append(item)
-        
+
         assert len(results) > 0
         assert all(isinstance(partner, Partner) for partner in results)
 
     def test_large_dataset_pagination(self, sankhya_context):
         """Testa paginação com dataset grande (>1000 registros)."""
         pages_loaded = []
-        
+
         def on_page_loaded(args):
             pages_loaded.append({
                 "page": args.current_page,
                 "quantity": args.quantity_loaded,
                 "total": args.total_loaded,
             })
-        
+
         results = list(PagedRequestWrapper.get_paged_results(
             request=_build_partner_request(),
             entity_type=Partner,
@@ -132,7 +132,7 @@ class TestPagedRequestIntegration:
             max_results=1500,
             on_page_loaded=on_page_loaded,
         ))
-        
+
         # Verifica que múltiplas páginas foram carregadas
         if len(results) > 300:
             assert len(pages_loaded) > 1
@@ -141,7 +141,7 @@ class TestPagedRequestIntegration:
         """Testa múltiplas requisições paginadas simultâneas."""
         results_1: List[Partner] = []
         results_2: List[Partner] = []
-        
+
         def load_1():
             results_1.extend(PagedRequestWrapper.get_paged_results(
                 request=_build_partner_request(),
@@ -150,7 +150,7 @@ class TestPagedRequestIntegration:
                 max_results=50,
                 timeout=timedelta(minutes=2),
             ))
-        
+
         def load_2():
             results_2.extend(PagedRequestWrapper.get_paged_results(
                 request=_build_partner_request(),
@@ -159,15 +159,15 @@ class TestPagedRequestIntegration:
                 max_results=50,
                 timeout=timedelta(minutes=2),
             ))
-        
+
         t1 = threading.Thread(target=load_1)
         t2 = threading.Thread(target=load_2)
-        
+
         t1.start()
         t2.start()
-        
+
         t1.join()
         t2.join()
-        
+
         assert len(results_1) > 0
         assert len(results_2) > 0

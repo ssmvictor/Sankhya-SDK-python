@@ -24,7 +24,6 @@ from sankhya_sdk.enums.service_category import ServiceCategory
 from sankhya_sdk.enums.service_environment import ServiceEnvironment
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_request_type import ServiceRequestType
-from sankhya_sdk.enums.service_response_status import ServiceResponseStatus
 from sankhya_sdk.enums.service_type import ServiceType
 from sankhya_sdk.exceptions import (
     ServiceRequestCanceledQueryException,
@@ -55,7 +54,6 @@ from .constants import (
 from .lock_manager import LockManager
 from .low_level_wrapper import LowLevelSankhyaWrapper
 from .types import ServiceAttribute, ServiceFile, SessionInfo
-
 
 logger = logging.getLogger(__name__)
 

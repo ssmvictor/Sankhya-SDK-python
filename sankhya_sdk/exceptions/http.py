@@ -9,7 +9,7 @@ from sankhya_sdk.exceptions.base import SankhyaException
 
 class SankhyaHttpError(SankhyaException):
     """Base class for HTTP-related errors."""
-    
+
     def __init__(self, message: str, status_code: int, response_body: str = ""):
         super().__init__(message)
         self.status_code = status_code
@@ -25,7 +25,7 @@ class SankhyaAuthError(SankhyaHttpError):
     
     Token expired, invalid, or missing.
     """
-    
+
     def __init__(self, message: str = "Authentication required", response_body: str = ""):
         super().__init__(message, status_code=401, response_body=response_body)
 
@@ -36,7 +36,7 @@ class SankhyaForbiddenError(SankhyaHttpError):
     
     User authenticated but lacks permission.
     """
-    
+
     def __init__(self, message: str = "Access forbidden", response_body: str = ""):
         super().__init__(message, status_code=403, response_body=response_body)
 
@@ -47,7 +47,7 @@ class SankhyaNotFoundError(SankhyaHttpError):
     
     Requested entity or service does not exist.
     """
-    
+
     def __init__(self, message: str = "Resource not found", response_body: str = ""):
         super().__init__(message, status_code=404, response_body=response_body)
 
@@ -87,7 +87,7 @@ def raise_for_status(status_code: int, response_body: str = "") -> None:
     """
     if 200 <= status_code < 400:
         return
-    
+
     if status_code == 401:
         raise SankhyaAuthError(response_body=response_body)
     elif status_code == 403:
@@ -96,13 +96,13 @@ def raise_for_status(status_code: int, response_body: str = "") -> None:
         raise SankhyaNotFoundError(response_body=response_body)
     elif 400 <= status_code < 500:
         raise SankhyaClientError(
-            f"Client error: {response_body}", 
-            status_code=status_code, 
+            f"Client error: {response_body}",
+            status_code=status_code,
             response_body=response_body
         )
     elif status_code >= 500:
         raise SankhyaServerError(
-            f"Server error: {response_body}", 
-            status_code=status_code, 
+            f"Server error: {response_body}",
+            status_code=status_code,
             response_body=response_body
         )

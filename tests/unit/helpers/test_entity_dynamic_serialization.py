@@ -3,15 +3,14 @@
 Testes unitários para entity_dynamic_serialization.py
 """
 
-import pytest
-from datetime import datetime
-from decimal import Decimal
 
+import pytest
+
+from sankhya_sdk.enums.reference_level import ReferenceLevel
 from sankhya_sdk.helpers.entity_dynamic_serialization import (
     EntityDynamicSerialization,
     Metadata,
 )
-from sankhya_sdk.enums.reference_level import ReferenceLevel
 
 
 class TestMetadata:
@@ -26,7 +25,7 @@ class TestMetadata:
         """Verifica inicialização com campos."""
         fields = [{"name": "CODPARC"}, {"name": "NOMEPARC"}]
         metadata = Metadata(fields=fields)
-        
+
         assert len(metadata.fields) == 2
 
 
@@ -36,21 +35,21 @@ class TestEntityDynamicSerialization:
     def test_initialization_empty(self):
         """Verifica inicialização vazia."""
         serializer = EntityDynamicSerialization()
-        
+
         assert serializer.dictionary == {}
 
     def test_initialization_with_data(self):
         """Verifica inicialização com dados."""
         data = {"CODPARC": "123", "NOMEPARC": "Test"}
         serializer = EntityDynamicSerialization(data)
-        
+
         assert serializer.dictionary == data
 
     def test_get_member(self):
         """Verifica get_member."""
         data = {"CODPARC": "123"}
         serializer = EntityDynamicSerialization(data)
-        
+
         assert serializer.get_member("CODPARC") == "123"
 
     def test_get_member_case_insensitive(self):
@@ -62,7 +61,7 @@ class TestEntityDynamicSerialization:
         """
         data = {"CODPARC": "123"}
         serializer = EntityDynamicSerialization(data)
-        
+
         assert serializer.get_member("codparc") is None
         # O valor continua acessível pela chave exata
         assert serializer.dictionary.get("CODPARC") == "123"
@@ -71,7 +70,7 @@ class TestEntityDynamicSerialization:
         """Verifica que valores falsy (0, "", False) não são descartados."""
         data = {"ativo": False, "vlrdesc": 0, "obs": ""}
         serializer = EntityDynamicSerialization(data)
-        
+
         assert serializer.get_member("ativo") is False
         assert serializer.get_member("vlrdesc") == 0
         assert serializer.get_member("obs") == ""
@@ -80,7 +79,7 @@ class TestEntityDynamicSerialization:
         """Verifica que a chave exata prevalece mesmo com valor falsy."""
         data = {"codparc": 0, "CODPARC": 5}
         serializer = EntityDynamicSerialization(data)
-        
+
         assert serializer.get_member("codparc") == 0
         assert serializer.get_member("CODPARC") == 5
 
@@ -94,7 +93,7 @@ class TestEntityDynamicSerialization:
         """
         serializer = EntityDynamicSerialization(key_filter="uppercase")
         serializer.set_member("codparc", "123")
-        
+
         assert serializer.get_member("codparc") == "123"
         assert serializer.get_member("CODPARC") is None
         assert serializer.to_dict() == {"CODPARC": "123"}
@@ -103,7 +102,7 @@ class TestEntityDynamicSerialization:
         """Verifica que get_member lê o que set_member gravou (lowercase)."""
         serializer = EntityDynamicSerialization(key_filter="lowercase")
         serializer.set_member("CODPARC", "123")
-        
+
         assert serializer.get_member("CODPARC") == "123"
         assert serializer.get_member("codparc") is None
         assert serializer.to_dict() == {"codparc": "123"}
@@ -121,7 +120,7 @@ class TestEntityDynamicSerialization:
         """Verifica set_member."""
         serializer = EntityDynamicSerialization()
         serializer.set_member("CODPARC", "123")
-        
+
         assert serializer.dictionary["CODPARC"] == "123"
 
     def test_set_member_uppercase_filter(self):
@@ -133,7 +132,7 @@ class TestEntityDynamicSerialization:
         """
         serializer = EntityDynamicSerialization(key_filter="uppercase")
         serializer.set_member("codparc", "123")
-        
+
         assert serializer.dictionary == {"codparc": "123"}
         assert "CODPARC" in serializer.to_dict()
 
@@ -141,7 +140,7 @@ class TestEntityDynamicSerialization:
         """Verifica set_member com filtro lowercase."""
         serializer = EntityDynamicSerialization(key_filter="lowercase")
         serializer.set_member("CODPARC", "123")
-        
+
         assert serializer.dictionary == {"CODPARC": "123"}
         assert "codparc" in serializer.to_dict()
 
@@ -159,7 +158,7 @@ class TestEntityDynamicSerialization:
         """Verifica operador __contains__."""
         data = {"CODPARC": "123"}
         serializer = EntityDynamicSerialization(data)
-        
+
         assert "CODPARC" in serializer
 
     def test_contains_is_exact_like_get_member(self):
@@ -173,7 +172,7 @@ class TestEntityDynamicSerialization:
         """Verifica operador __getitem__."""
         data = {"CODPARC": "123"}
         serializer = EntityDynamicSerialization(data)
-        
+
         assert serializer["CODPARC"] == "123"
 
     def test_getitem_returns_falsy_values(self):
@@ -203,14 +202,14 @@ class TestEntityDynamicSerialization:
         """Verifica operador __setitem__."""
         serializer = EntityDynamicSerialization()
         serializer["CODPARC"] = "123"
-        
+
         assert serializer["CODPARC"] == "123"
 
     def test_repr(self):
         """Verifica __repr__."""
         data = {"key": "value"}
         serializer = EntityDynamicSerialization(data)
-        
+
         assert "EntityDynamicSerialization" in repr(serializer)
         assert "key" in repr(serializer)
 
@@ -245,7 +244,7 @@ class TestValueConversion:
         assert dt.day == 25
         assert dt.month == 12
         assert dt.year == 2024
-        
+
         # Formato ISO
         dt = serializer._convert_to_datetime("2024-12-25")
         assert dt.year == 2024
@@ -255,7 +254,7 @@ class TestValueConversion:
     def test_convert_to_datetime_with_time(self, serializer):
         """Verifica conversão de data com hora."""
         dt = serializer._convert_to_datetime("25/12/2024 14:30:45")
-        
+
         assert dt.hour == 14
         assert dt.minute == 30
         assert dt.second == 45
@@ -342,14 +341,14 @@ class TestChangeKeys:
         """Verifica renomeação de chaves."""
         data = {"f0": "123", "f1": "Test"}
         serializer = EntityDynamicSerialization(data)
-        
+
         new_keys = Metadata(fields=[
             {"name": "CODPARC"},
             {"name": "NOMEPARC"},
         ])
-        
+
         serializer.change_keys(new_keys)
-        
+
         assert "CODPARC" in serializer.dictionary
         assert serializer.dictionary["CODPARC"] == "123"
 
@@ -357,19 +356,19 @@ class TestChangeKeys:
         """Verifica erro com contagem de chaves diferente."""
         data = {"f0": "123"}
         serializer = EntityDynamicSerialization(data)
-        
+
         new_keys = Metadata(fields=[
             {"name": "CODPARC"},
             {"name": "NOMEPARC"},
         ])
-        
+
         with pytest.raises(ValueError, match="Key count mismatch"):
             serializer.change_keys(new_keys)
 
     def test_change_keys_none(self):
         """Verifica que None é tratado corretamente."""
         serializer = EntityDynamicSerialization({"key": "value"})
-        
+
         # Não deve lançar exceção
         serializer.change_keys(None)
 

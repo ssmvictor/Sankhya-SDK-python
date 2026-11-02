@@ -14,21 +14,21 @@ from typing import Any, Dict, List, Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import BaseModel, ConfigDict, Field as PydanticField, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import Field as PydanticField
 
 from sankhya_sdk.enums.billing_type import BillingType
+
 from .constants import SankhyaConstants
 from .xml_serialization import (
     create_xml_element,
+    deserialize_bool,
+    deserialize_optional_float,
+    deserialize_optional_int,
     get_element_attr,
     get_element_text,
     serialize_bool,
-    deserialize_bool,
-    deserialize_optional_int,
-    deserialize_optional_float,
 )
-from .basic_types import DataRow
-
 
 # Formato de DateTime.ToString(CultureInfo.InvariantCulture) do .NET
 # (padrão "G" da cultura invariante), usado em Invoices.cs nos atributos
@@ -136,7 +136,7 @@ class InvoiceItem(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("item")
-        
+
         if self.sequence is not None:
             elem.set("sequencia", str(self.sequence))
         if self.product_code:
@@ -155,11 +155,11 @@ class InvoiceItem(BaseModel):
             create_xml_element("ncm", self.ncm, parent=elem)
         if self.cfop:
             create_xml_element("cfop", self.cfop, parent=elem)
-        
+
         for key, value in self.extra_data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -167,14 +167,14 @@ class InvoiceItem(BaseModel):
         """Deserializa de elemento XML."""
         extra_data: Dict[str, Any] = {}
         known_elements = {
-            "codProd", "nomeProd", "qtd", "vlrUnit", 
+            "codProd", "nomeProd", "qtd", "vlrUnit",
             "vlrTotal", "unidade", "ncm", "cfop"
         }
-        
+
         for child in element:
             if child.tag not in known_elements:
                 extra_data[child.tag] = get_element_text(child)
-        
+
         return cls(
             sequence=deserialize_optional_int(get_element_attr(element, "sequencia")),
             product_code=get_element_text(element.find("codProd")),
@@ -229,7 +229,7 @@ class Accompaniment(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("acompanhamento")
-        
+
         if self.code:
             elem.set("codigo", self.code)
         if self.sequence is not None:
@@ -240,11 +240,11 @@ class Accompaniment(BaseModel):
             create_xml_element("valor", str(self.value), parent=elem)
         if self.observation:
             create_xml_element("observacao", self.observation, parent=elem)
-        
+
         for key, value in self.extra_data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -252,11 +252,11 @@ class Accompaniment(BaseModel):
         """Deserializa de elemento XML."""
         extra_data: Dict[str, Any] = {}
         known_elements = {"descricao", "valor", "observacao"}
-        
+
         for child in element:
             if child.tag not in known_elements:
                 extra_data[child.tag] = get_element_text(child)
-        
+
         return cls(
             code=get_element_attr(element, "codigo"),
             sequence=deserialize_optional_int(get_element_attr(element, "sequencia")),
@@ -289,7 +289,7 @@ class InvoiceAccompaniments(BaseModel):
     def from_xml(cls, element: Element) -> "InvoiceAccompaniments":
         """Deserializa de elemento XML."""
         items = [
-            Accompaniment.from_xml(child) 
+            Accompaniment.from_xml(child)
             for child in element.findall("acompanhamento")
         ]
         return cls(items=items)
@@ -345,7 +345,7 @@ class Invoice(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("nota")
-        
+
         if self.value is not None:
             elem.text = str(self.value)
         if self.number is not None:
@@ -366,28 +366,28 @@ class Invoice(BaseModel):
             elem.set("nuNota", str(self.single_number_duplication_destiny))
         if self.single_number_duplication_source is not None:
             elem.set("nuNotaOrig", str(self.single_number_duplication_source))
-        
+
         if self.issue_date:
             create_xml_element("dtEmissao", self.issue_date, parent=elem)
         if self.movement_date:
             create_xml_element("dtMov", self.movement_date, parent=elem)
         if self.total_value is not None:
             create_xml_element("vlrNota", str(self.total_value), parent=elem)
-        
+
         if self.items:
             items_elem = etree.SubElement(elem, "itens")
             for item in self.items:
                 items_elem.append(item.to_xml())
-        
+
         if self.accompaniments:
             acc_elem = etree.SubElement(elem, "acompanhamentos")
             for acc in self.accompaniments:
                 acc_elem.append(acc.to_xml())
-        
+
         for key, value in self.extra_data.items():
             if value is not None:
                 create_xml_element(key, str(value), parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -396,23 +396,23 @@ class Invoice(BaseModel):
         items: List[InvoiceItem] = []
         accompaniments: List[Accompaniment] = []
         extra_data: Dict[str, Any] = {}
-        
+
         items_elem = element.find("itens")
         if items_elem is not None:
             items = [InvoiceItem.from_xml(i) for i in items_elem.findall("item")]
-        
+
         acc_elem = element.find("acompanhamentos")
         if acc_elem is not None:
             accompaniments = [
-                Accompaniment.from_xml(a) 
+                Accompaniment.from_xml(a)
                 for a in acc_elem.findall("acompanhamento")
             ]
-        
+
         known_elements = {"itens", "acompanhamentos", "dtEmissao", "dtMov", "vlrNota"}
         for child in element:
             if child.tag not in known_elements:
                 extra_data[child.tag] = get_element_text(child)
-        
+
         return cls(
             number=deserialize_optional_int(get_element_attr(element, "numero")),
             unique_number=deserialize_optional_int(get_element_attr(element, "nunota")),
@@ -635,24 +635,24 @@ class InvoicesWithCurrency(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("notasComMoeda")
-        
+
         if self.currency_value is not None:
             elem.set("valorMoeda", self.currency_value)
         if self.currency_code:
             elem.set("codMoeda", self.currency_code)
         if self.exchange_rate is not None:
             elem.set("taxaCambio", str(self.exchange_rate))
-        
+
         for invoice in self.invoices:
             elem.append(invoice.to_xml())
-        
+
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "InvoicesWithCurrency":
         """Deserializa de elemento XML."""
         invoices = [Invoice.from_xml(child) for child in element.findall("nota")]
-        
+
         return cls(
             currency_value=get_element_attr(element, "valorMoeda"),
             currency_code=get_element_attr(element, "codMoeda"),
@@ -681,7 +681,7 @@ class CancelledInvoice(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("notaCancelada")
-        
+
         if self.unique_number is not None:
             elem.set("nunota", str(self.unique_number))
         if self.number is not None:
@@ -692,7 +692,7 @@ class CancelledInvoice(BaseModel):
             create_xml_element("dtCancelamento", self.cancellation_date, parent=elem)
         if self.reason:
             create_xml_element("motivo", self.reason, parent=elem)
-        
+
         return elem
 
     @classmethod
@@ -725,7 +725,7 @@ class CancelledInvoices(BaseModel):
     def from_xml(cls, element: Element) -> "CancelledInvoices":
         """Deserializa de elemento XML."""
         items = [
-            CancelledInvoice.from_xml(child) 
+            CancelledInvoice.from_xml(child)
             for child in element.findall("notaCancelada")
         ]
         return cls(items=items)
@@ -745,7 +745,7 @@ class CancellationResult(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("resultadoCancelamento")
-        
+
         elem.set("sucesso", serialize_bool(self.success))
         if self.unique_number is not None:
             elem.set("nunota", str(self.unique_number))
@@ -755,7 +755,7 @@ class CancellationResult(BaseModel):
             create_xml_element("mensagem", self.message, parent=elem)
         if self.error_code:
             create_xml_element("codigoErro", self.error_code, parent=elem)
-        
+
         return elem
 
     @classmethod

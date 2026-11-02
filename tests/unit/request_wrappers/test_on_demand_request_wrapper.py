@@ -5,32 +5,30 @@ Unit tests para OnDemandRequestWrapper e AsyncOnDemandRequestWrapper.
 Testes básicos de inicialização e propriedades, evitando bloqueios de threads.
 """
 
-import asyncio
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
-import pytest
 
+import pytest
 from pydantic import Field
 
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.events import EventBus, OnDemandRequestFailureEvent
-from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensions
 from sankhya_sdk.exceptions import (
     CanceledOnDemandRequestWrapperException,
     ServiceRequestCompetitionException,
     ServiceRequestDeadlockException,
     ServiceRequestTimeoutException,
 )
+from sankhya_sdk.helpers.service_request_extensions import ServiceRequestExtensions
 from sankhya_sdk.models.base import EntityBase
 from sankhya_sdk.models.transport.partner import Partner
 from sankhya_sdk.request_wrappers import on_demand_request_wrapper as wrapper_module
 from sankhya_sdk.request_wrappers.on_demand_request_wrapper import (
     OnDemandRequestWrapper,
 )
-
 
 # =============================================================================
 # Test Entity
@@ -39,7 +37,7 @@ from sankhya_sdk.request_wrappers.on_demand_request_wrapper import (
 
 class TestEntity(EntityBase):
     """Entidade de teste simples."""
-    
+
     id: Optional[int] = Field(default=None)
     name: Optional[str] = Field(default=None)
 
@@ -83,8 +81,8 @@ class TestOnDemandRequestWrapperImports:
     def test_interfaces_imports(self):
         """Verifica que interfaces podem ser importadas."""
         from sankhya_sdk.request_wrappers.interfaces import (
-            IOnDemandRequestWrapper,
             IAsyncOnDemandRequestWrapper,
+            IOnDemandRequestWrapper,
         )
         assert IOnDemandRequestWrapper is not None
         assert IAsyncOnDemandRequestWrapper is not None
@@ -101,12 +99,12 @@ class TestEventPublishing:
     def test_event_bus_publish_subscribe(self):
         """Verifica publicação e recebimento de eventos."""
         received_events: list = []
-        
+
         def handler(event: OnDemandRequestFailureEvent) -> None:
             received_events.append(event)
-        
+
         EventBus.subscribe(OnDemandRequestFailureEvent, handler)
-        
+
         try:
             # Publica evento
             entity = TestEntity(id=1, name="Test")
@@ -116,7 +114,7 @@ class TestEventPublishing:
                 exception=Exception("Test error"),
             )
             EventBus.publish(event)
-            
+
             assert len(received_events) == 1
             assert received_events[0].entity == entity
             assert not received_events[0].is_update
@@ -126,13 +124,13 @@ class TestEventPublishing:
     def test_event_bus_unsubscribe(self):
         """Verifica remoção de handler."""
         received_events: list = []
-        
+
         def handler(event: OnDemandRequestFailureEvent) -> None:
             received_events.append(event)
-        
+
         EventBus.subscribe(OnDemandRequestFailureEvent, handler)
         EventBus.unsubscribe(OnDemandRequestFailureEvent, handler)
-        
+
         # Publica evento
         entity = TestEntity(id=1, name="Test")
         event = OnDemandRequestFailureEvent(
@@ -141,14 +139,14 @@ class TestEventPublishing:
             exception=Exception("Test error"),
         )
         EventBus.publish(event)
-        
+
         assert len(received_events) == 0
 
     def test_failure_event_attributes(self):
         """Verifica atributos do evento de falha."""
         entity = TestEntity(id=42, name="TestName")
         exc = ValueError("Validation failed")
-        
+
         event = OnDemandRequestFailureEvent(
             entity=entity,
             is_update=True,
@@ -156,7 +154,7 @@ class TestEventPublishing:
             error_message="Custom message",
             retry_count=2,
         )
-        
+
         assert event.entity == entity
         assert event.is_update is True
         assert event.exception == exc
@@ -175,10 +173,11 @@ class TestOnDemandRequestInstance:
     def test_instance_creation(self):
         """Verifica criação de instância."""
         from uuid import uuid4
+
         from sankhya_sdk.value_objects.on_demand_request_instance import (
             OnDemandRequestInstance,
         )
-        
+
         key = uuid4()
         instance = OnDemandRequestInstance(
             key=key,
@@ -187,7 +186,7 @@ class TestOnDemandRequestInstance:
             instance=None,  # type: ignore
             is_async=False,
         )
-        
+
         assert instance.key == key
         assert instance.service == ServiceName.CRUD_SAVE
         assert instance.entity_type == TestEntity
@@ -207,7 +206,7 @@ class TestInterfaceProtocols:
         from sankhya_sdk.request_wrappers.on_demand_request_wrapper import (
             OnDemandRequestWrapper,
         )
-        
+
         # Verifica métodos
         assert hasattr(OnDemandRequestWrapper, "add")
         assert hasattr(OnDemandRequestWrapper, "flush")
@@ -220,7 +219,7 @@ class TestInterfaceProtocols:
         from sankhya_sdk.request_wrappers.async_on_demand_request_wrapper import (
             AsyncOnDemandRequestWrapper,
         )
-        
+
         # Verifica métodos
         assert hasattr(AsyncOnDemandRequestWrapper, "add")
         assert hasattr(AsyncOnDemandRequestWrapper, "flush")
@@ -233,7 +232,7 @@ class TestInterfaceProtocols:
         from sankhya_sdk.request_wrappers.on_demand_request_factory import (
             OnDemandRequestFactory,
         )
-        
+
         assert hasattr(OnDemandRequestFactory, "create_instance")
         assert hasattr(OnDemandRequestFactory, "get_instance_by_key")
         assert hasattr(OnDemandRequestFactory, "get_instance_for_service")

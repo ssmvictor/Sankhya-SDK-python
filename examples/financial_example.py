@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
@@ -33,7 +33,7 @@ SANKHYA_X_TOKEN = os.getenv("SANKHYA_TOKEN")
 def _create_client():
     """Cria e retorna um GatewayClient autenticado via OAuth2."""
     from sankhya_sdk.auth.oauth_client import OAuthClient
-    from sankhya_sdk.http import SankhyaSession, GatewayClient
+    from sankhya_sdk.http import GatewayClient, SankhyaSession
 
     oauth = OAuthClient(base_url=SANKHYA_AUTH_BASE_URL, token=SANKHYA_X_TOKEN)
     oauth.authenticate(client_id=SANKHYA_CLIENT_ID, client_secret=SANKHYA_CLIENT_SECRET)
@@ -226,7 +226,7 @@ def listar_titulos_vencidos(max_results: int = 50) -> List[Dict[str, Any]]:
         print(f"  {emoji} NUFIN:{nufin} | Venc:{venc} | R$ {valor:.2f}")
         titulos.append(record)
 
-    print(f"\n📊 Vencidos:")
+    print("\n📊 Vencidos:")
     print(f"   A Receber: R$ {total_receber:.2f}")
     print(f"   A Pagar:   R$ {total_pagar:.2f}")
     print(f"   Total:     {len(titulos)} títulos")

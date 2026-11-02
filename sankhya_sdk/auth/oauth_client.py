@@ -1,6 +1,7 @@
 import logging
+from typing import Optional
+
 import requests
-from typing import Optional, Dict
 
 from sankhya_sdk.auth.exceptions import AuthError, AuthNetworkError, TokenExpiredError
 from sankhya_sdk.auth.token_manager import TokenManager
@@ -24,7 +25,7 @@ class OAuthClient:
         self.token_manager = token_manager or TokenManager()
         self.sankhya_token = token
         self._session = requests.Session()
-        
+
     def authenticate(self, client_id: str, client_secret: str) -> str:
         """
         Performs authentication using client_id and client_secret.
@@ -36,7 +37,7 @@ class OAuthClient:
             "client_secret": client_secret,
             "grant_type": "client_credentials"
         }
-        
+
         headers = {}
         if self.sankhya_token:
             headers["X-Token"] = self.sankhya_token
@@ -44,16 +45,16 @@ class OAuthClient:
         try:
             logger.debug(f"Authenticating against {url} with headers {headers.keys()}")
             response = self._session.post(url, data=payload, headers=headers, timeout=10)
-            
+
             if response.status_code == 200:
                 data = response.json()
                 access_token = data.get("access_token")
                 expires_in = data.get("expires_in", 3600)
                 refresh_token = data.get("refresh_token")
-                
+
                 if not access_token:
                     raise AuthError("Response did not contain access_token", status_code=response.status_code)
-                
+
                 self.token_manager.set_tokens(
                     access_token=access_token,
                     expires_in=expires_in,
@@ -96,7 +97,7 @@ class OAuthClient:
                 return self.token_manager.get_token()
         except TokenExpiredError:
             pass  # Token expired, will refresh below
-        
+
         # Token is expired or close to expiring, refresh automatically
         logger.info("🔄 Token expired or near expiry, refreshing automatically...")
         new_token = self.refresh_token()
@@ -105,13 +106,13 @@ class OAuthClient:
 
     def refresh_token(self) -> str:
         refresh_token = self.token_manager.get_refresh_token()
-        
+
         if not refresh_token:
             return self._attempt_reauth()
 
         url = f"{self.base_url}/token/refresh"
         payload = {"refresh_token": refresh_token}
-        
+
         headers = {}
         if self.sankhya_token:
             headers["X-Token"] = self.sankhya_token
@@ -119,13 +120,13 @@ class OAuthClient:
         try:
             logger.debug(f"Refreshing token at {url}")
             response = self._session.post(url, data=payload, headers=headers, timeout=10)
-            
+
             if response.status_code == 200:
                 data = response.json()
                 access_token = data.get("access_token")
                 expires_in = data.get("expires_in", 3600)
                 new_refresh_token = data.get("refresh_token")
-                
+
                 self.token_manager.set_tokens(
                     access_token=access_token,
                     expires_in=expires_in,
@@ -151,5 +152,5 @@ class OAuthClient:
             message = error_data.get("error_description") or error_data.get("error") or response.text
         except ValueError:
             message = response.text
-            
+
         raise AuthError(f"Authentication failed: {message}", status_code=status)

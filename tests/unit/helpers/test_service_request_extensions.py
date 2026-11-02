@@ -3,18 +3,17 @@
 Testes unitários para service_request_extensions.py
 """
 
-import pytest
-from unittest.mock import Mock, MagicMock
 
-from sankhya_sdk.helpers.service_request_extensions import (
-    ServiceRequestExtensions,
-    ParsePropertyModel,
-    EntityResolverResult,
-    resolve,
-    _reference_level_to_int,
-    _int_to_reference_level,
-)
+import pytest
+
 from sankhya_sdk.enums.reference_level import ReferenceLevel
+from sankhya_sdk.helpers.service_request_extensions import (
+    EntityResolverResult,
+    ParsePropertyModel,
+    ServiceRequestExtensions,
+    _int_to_reference_level,
+    _reference_level_to_int,
+)
 
 
 class TestParsePropertyModel:
@@ -23,7 +22,7 @@ class TestParsePropertyModel:
     def test_initialization(self):
         """Verifica inicialização do modelo."""
         model = ParsePropertyModel()
-        
+
         assert model.property_name == ""
         assert model.is_ignored is False
         assert model.is_entity_key is False
@@ -41,7 +40,7 @@ class TestEntityResolverResult:
     def test_initialization(self):
         """Verifica inicialização do resultado."""
         result = EntityResolverResult("TestEntity")
-        
+
         assert result.name == "TestEntity"
         assert result.fields == []
         assert result.keys == []
@@ -80,7 +79,7 @@ class TestServiceRequestExtensions:
     def test_get_unix_timestamp_returns_string(self):
         """Verifica que _get_unix_timestamp retorna string."""
         timestamp = ServiceRequestExtensions._get_unix_timestamp()
-        
+
         assert isinstance(timestamp, str)
         assert timestamp.isdigit()
 
@@ -103,7 +102,6 @@ from sankhya_sdk.models.service.basic_types import (
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.transport.neighborhood import Neighborhood
 from sankhya_sdk.models.transport.partner import Partner
-
 
 FIXED_TIMESTAMP = "1700000000"
 

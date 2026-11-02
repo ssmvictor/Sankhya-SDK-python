@@ -11,12 +11,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from .base import TransportEntityBase
 from ...attributes.decorators import (
     entity,
-    entity_key,
     entity_element,
+    entity_key,
 )
+from .base import TransportEntityBase
 
 
 @entity("Bairro")
@@ -32,26 +32,26 @@ class Neighborhood(TransportEntityBase):
         description_correios: Descrição do correio (DESCRICAOCORREIO)
         date_changed: Data de alteração (DTALTER)
     """
-    
+
     code: int = entity_key(
         entity_element("CODBAI", default=0)
     )
-    
+
     name: Optional[str] = entity_element(
         "NOMEBAI",
         default=None
     )
-    
+
     description_correios: Optional[str] = entity_element(
         "DESCRICAOCORREIO",
         default=None
     )
-    
+
     date_changed: Optional[datetime] = entity_element(
         "DTALTER",
         default=None
     )
-    
+
     @staticmethod
     def _compare_optional_str_ci(a: Optional[str], b: Optional[str]) -> bool:
         """Compara duas strings opcionais de forma case-insensitive."""
@@ -60,7 +60,7 @@ class Neighborhood(TransportEntityBase):
         if a is None or b is None:
             return False
         return a.lower() == b.lower()
-    
+
     def __eq__(self, other: object) -> bool:
         """
         Compara duas instâncias de Neighborhood.
@@ -70,20 +70,20 @@ class Neighborhood(TransportEntityBase):
         """
         if other is None:
             return False
-        
+
         if self is other:
             return True
-        
+
         if not isinstance(other, Neighborhood):
             return False
-        
+
         return (
             self.code == other.code
             and ("code" in self._fields_set) == ("code" in other._fields_set)
             and self._compare_optional_str_ci(self.name, other.name)
             and ("name" in self._fields_set) == ("name" in other._fields_set)
             and self._compare_optional_str_ci(
-                self.description_correios, 
+                self.description_correios,
                 other.description_correios
             )
             and ("description_correios" in self._fields_set) == (
@@ -94,7 +94,7 @@ class Neighborhood(TransportEntityBase):
                 "date_changed" in other._fields_set
             )
         )
-    
+
     def __hash__(self) -> int:
         """
         Calcula hash da entidade.
@@ -103,25 +103,25 @@ class Neighborhood(TransportEntityBase):
         """
         hash_code = self.code
         hash_code = (hash_code * 397) ^ hash("code" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.name.lower()) if self.name else 0
         )
         hash_code = (hash_code * 397) ^ hash("name" in self._fields_set)
-        
+
         hash_code = (hash_code * 397) ^ (
-            hash(self.description_correios.lower()) 
+            hash(self.description_correios.lower())
             if self.description_correios else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "description_correios" in self._fields_set
         )
-        
+
         hash_code = (hash_code * 397) ^ (
             hash(self.date_changed) if self.date_changed else 0
         )
         hash_code = (hash_code * 397) ^ hash(
             "date_changed" in self._fields_set
         )
-        
+
         return hash_code

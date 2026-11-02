@@ -7,53 +7,52 @@ para manipulação de entidades e requisições de serviço.
 """
 
 # Interfaces e Protocolos
-from .filter_expression import IFilterExpression, ILiteralCriteria, LiteralCriteria
-
-# Dataclasses e Modelos
-from .entity_query_options import EntityQueryOptions
-
-# Helpers de Status
-from .status_message_helper import (
-    StatusMessageHelper,
-    PROPERTY_VALUE_ERROR_PATTERN,
-    PROPERTY_NAME_ERROR_PATTERN,
-    REFERENCE_FIELDS_FIRST_LEVEL_PATTERN,
-    REFERENCE_FIELDS_SECOND_LEVEL_PATTERN,
+from .entity_dynamic_serialization import (
+    EntityDynamicSerialization,
+    Metadata,
 )
 
 # Extensões de Entidade
 from .entity_extensions import (
     EntityResolverResult,
     Field,
-    get_entity_name,
-    get_entity_custom_data,
-    get_service_attribute,
+    clear_on_demand_queues,
     extract_keys,
+    get_entity_custom_data,
+    get_entity_name,
+    get_on_demand_remove_queue,
+    get_on_demand_update_queue,
+    get_service_attribute,
     query,
+    query_light,
     query_with_criteria,
     query_with_options,
-    query_light,
-    update_on_demand,
     remove_on_demand,
-    get_on_demand_update_queue,
-    get_on_demand_remove_queue,
-    clear_on_demand_queues,
+    update_on_demand,
 )
 
-# Extensões de ServiceRequest
-from .service_request_extensions import (
-    ServiceRequestExtensions,
-    ParsePropertyModel,
-    resolve,
-)
+# Dataclasses e Modelos
+from .entity_query_options import EntityQueryOptions
+from .filter_expression import IFilterExpression, ILiteralCriteria, LiteralCriteria
 
 # Serialização
 from .generic_service_entity import GenericServiceEntity
-from .entity_dynamic_serialization import (
-    EntityDynamicSerialization,
-    Metadata,
+
+# Extensões de ServiceRequest
+from .service_request_extensions import (
+    ParsePropertyModel,
+    ServiceRequestExtensions,
+    resolve,
 )
 
+# Helpers de Status
+from .status_message_helper import (
+    PROPERTY_NAME_ERROR_PATTERN,
+    PROPERTY_VALUE_ERROR_PATTERN,
+    REFERENCE_FIELDS_FIRST_LEVEL_PATTERN,
+    REFERENCE_FIELDS_SECOND_LEVEL_PATTERN,
+    StatusMessageHelper,
+)
 
 __all__ = [
     # Interfaces

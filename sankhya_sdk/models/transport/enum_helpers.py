@@ -28,7 +28,7 @@ def serialize_enum(value: Optional[MetadataEnum]) -> Optional[str]:
 
 
 def deserialize_enum(
-    value: Optional[str], 
+    value: Optional[str],
     enum_class: Type[T]
 ) -> Optional[T]:
     """
@@ -43,12 +43,12 @@ def deserialize_enum(
     """
     if value is None or not value:
         return None
-    
+
     return get_enum_by_internal_value(enum_class, value)
 
 
 def get_enum_by_internal_value(
-    enum_class: Type[T], 
+    enum_class: Type[T],
     internal_value: str
 ) -> Optional[T]:
     """
@@ -64,7 +64,7 @@ def get_enum_by_internal_value(
     for member in enum_class:
         if member.internal_value == internal_value:
             return member
-    
+
     # Fallback: tenta pelo value direto
     try:
         for member in enum_class:
@@ -72,5 +72,5 @@ def get_enum_by_internal_value(
                 return member
     except (ValueError, KeyError):
         pass
-    
+
     return None

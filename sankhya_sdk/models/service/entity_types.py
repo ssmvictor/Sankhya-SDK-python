@@ -8,32 +8,31 @@ Migrado de: Sankhya-SDK-dotnet/Src/Sankhya/Service/
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from lxml import etree
 from lxml.etree import Element
-from pydantic import BaseModel, ConfigDict, Field as PydanticField
+from pydantic import BaseModel, ConfigDict
+from pydantic import Field as PydanticField
 
-from sankhya_sdk.models.base import EntityBase
-from .xml_serialization import (
-    create_xml_element,
-    get_element_attr,
-    get_element_text,
-    serialize_bool,
-    deserialize_bool,
-    deserialize_optional_int,
-)
 from .basic_types import (
-    Field,
     Criteria,
+    DataRow,
+    Field,
+    FieldValue,
     LiteralCriteria,
     LiteralCriteriaSql,
-    DataRow,
     ReferenceFetch,
-    FieldValue,
 )
 from .constants import SankhyaConstants
 from .metadata_types import Metadata
+from .xml_serialization import (
+    deserialize_bool,
+    deserialize_optional_int,
+    get_element_attr,
+    get_element_text,
+    serialize_bool,
+)
 
 
 def _dynamic_to_xml(tag: str, values: Dict[str, Any]) -> Element:
@@ -210,7 +209,7 @@ class Entity(BaseModel):
         # definido: entidades de dataSet e de remoção não possuem nome.
         if self.name or "name" in self.model_fields_set:
             elem.set("name", self.name)
-        
+
         if self.root_entity:
             elem.set("rootEntity", self.root_entity)
         if self.include_presentation_fields is not None:
@@ -231,19 +230,19 @@ class Entity(BaseModel):
             elem.set("includeDeleted", serialize_bool(self.include_deleted, SankhyaConstants.BOOL_FORMAT_S_N))
         if self.order_by_expression:
             elem.set("orderByExpression", self.order_by_expression)
-        
+
         # Fields
         if self.fields:
             fields_elem = etree.SubElement(elem, "fields")
             for field in self.fields:
                 fields_elem.append(field.to_xml())
-        
+
         # Field values (para insert/update)
         for fv in self.field_values:
             fv_elem = etree.SubElement(elem, fv.name)
             if fv.value is not None:
                 fv_elem.text = fv.value
-        
+
         # Campos (crud.save / crud.remove): <campo nome="...">valor</campo>
         for campo in self.campos:
             elem.append(campo.to_xml())
@@ -256,21 +255,21 @@ class Entity(BaseModel):
         # (.NET: [XmlElement(ElementName = "criterio")] em um array)
         for crit in self.criteria:
             elem.append(crit.to_xml())
-        
+
         # Literal criteria
         if self.literal_criteria:
             elem.append(self.literal_criteria.to_xml())
-        
+
         if self.literal_criteria_sql:
             elem.append(self.literal_criteria_sql.to_xml())
-        
+
         # Reference fetch (reference_fetch é o campo legado)
         _append_with_legacy(elem, self.reference_fetch, list(self.references_fetch or []))
 
         # Ids (CRUDServiceProvider.removeRecord): <id><CHAVE>valor</CHAVE></id>
         for entity_id in self.ids:
             elem.append(_dynamic_to_xml("id", entity_id))
-        
+
         return elem
 
     @classmethod
@@ -285,12 +284,12 @@ class Entity(BaseModel):
         literal_criteria_sql: Optional[LiteralCriteriaSql] = None
         references_fetch: List[ReferenceFetch] = []
         ids: List[Dict[str, Any]] = []
-        
+
         fields_elem = element.find("fields")
         if fields_elem is not None:
             for child in fields_elem:
                 fields.append(Field.from_xml(child))
-        
+
         for campo_elem in element.findall("campo"):
             campos.append(FieldValue.from_xml(campo_elem))
 
@@ -306,24 +305,24 @@ class Entity(BaseModel):
         if criteria_elem is not None:
             for child in criteria_elem:
                 criteria.append(Criteria.from_xml(child))
-        
+
         lit_crit_elem = element.find("literalCriteria")
         if lit_crit_elem is not None:
             literal_criteria = LiteralCriteria.from_xml(lit_crit_elem)
-        
+
         lit_crit_sql_elem = element.find("criterioLiteral")
         if lit_crit_sql_elem is not None:
             literal_criteria_sql = LiteralCriteriaSql.from_xml(lit_crit_sql_elem)
-        
+
         for ref_fetch_elem in element.findall("referenceFetch"):
             references_fetch.append(ReferenceFetch.from_xml(ref_fetch_elem))
 
         for id_elem in element.findall("id"):
             ids.append(_dynamic_from_xml(id_elem))
-        
+
         # Parse field values from direct child elements
         known_elements = {
-            "fields", "criteria", "literalCriteria", 
+            "fields", "criteria", "literalCriteria",
             "criterioLiteral", "referenceFetch",
             "campo", "fieldset", "criterio", "id",
         }
@@ -333,7 +332,7 @@ class Entity(BaseModel):
                     name=child.tag,
                     value=get_element_text(child) or None,
                 ))
-        
+
         include_presentation_fields_attr = get_element_attr(element, "getPresentations")
         name_attr = get_element_attr(element, "name")
 
@@ -409,7 +408,7 @@ class DataSet(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element("dataSet")
-        
+
         if self.root_entity:
             elem.set("rootEntity", self.root_entity)
         if self.include_presentation:
@@ -443,7 +442,7 @@ class DataSet(BaseModel):
             elem.set("datasetid", self.data_set_id)
         if self.data_source:
             elem.set("dataSource", self.data_source)
-        
+
         # Mesma ordem de declaração do .NET: dataRow, criteria, entity
         for data_row in self.data_rows:
             elem.append(data_row.to_xml())
@@ -460,7 +459,7 @@ class DataSet(BaseModel):
         if self.rows:
             for row in self.rows:
                 elem.append(row.to_xml())
-        
+
         return elem
 
     @classmethod
@@ -470,23 +469,23 @@ class DataSet(BaseModel):
         data_rows: List[DataSetRow] = []
         rows: List[DataRow] = []
         literal_criteria: Optional[LiteralCriteria] = None
-        
+
         for entity_elem in element.findall("entity"):
             entities.append(Entity.from_xml(entity_elem))
 
         for data_row_elem in element.findall("dataRow"):
             data_rows.append(DataSetRow.from_xml(data_row_elem))
-        
+
         for row_elem in element.findall("row"):
             rows.append(DataRow.from_xml(row_elem))
-        
+
         # Formato .NET (<criteria>) e formato legado (<literalCriteria>)
         lit_crit_elem = element.find("criteria")
         if lit_crit_elem is None:
             lit_crit_elem = element.find("literalCriteria")
         if lit_crit_elem is not None:
             literal_criteria = LiteralCriteria.from_xml(lit_crit_elem)
-        
+
         db_fetch_size = deserialize_optional_int(
             get_element_attr(element, "databaseFetchSize")
         )
@@ -504,7 +503,7 @@ class DataSet(BaseModel):
         kwargs: Dict[str, Any] = {}
         if parallel_loader_attr is not None:
             kwargs["parallel_loader"] = deserialize_bool(parallel_loader_attr)
-        
+
         return cls(
             **kwargs,
             root_entity=get_element_attr(element, "rootEntity"),
@@ -558,7 +557,7 @@ class EntityDynamic(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element(self.name or "entity")
-        
+
         for key, value in self.fields.items():
             child = etree.SubElement(elem, key)
             if value is not None:
@@ -566,7 +565,7 @@ class EntityDynamic(BaseModel):
                     child.text = serialize_bool(value)
                 else:
                     child.text = str(value)
-        
+
         return elem
 
     @classmethod
@@ -583,7 +582,7 @@ class EntityDynamic(BaseModel):
         """
         fields: Dict[str, Any] = {}
         metadata: Dict[str, Any] = dict(element.attrib)
-        
+
         for child in element:
             # Ignora comentários/instruções de processamento
             if not isinstance(child.tag, str):
@@ -591,7 +590,7 @@ class EntityDynamic(BaseModel):
             if child.tag == SankhyaConstants.RMD:
                 continue
             fields[child.tag] = child.text
-        
+
         return cls(
             name=element.tag,
             fields=fields,
@@ -649,37 +648,37 @@ class CrudServiceEntities(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element(SankhyaConstants.ENTITIES_PT_BR)
-        
+
         if self.total is not None:
             elem.set(SankhyaConstants.TOTAL, str(self.total))
         if self.total_pages is not None:
             elem.set(SankhyaConstants.TOTAL_PAGES, str(self.total_pages))
         if self.pager_id:
             elem.set(SankhyaConstants.PAGER_ID, self.pager_id)
-        
+
         for entity in self.entities:
             entity_elem = entity.to_xml()
             entity_elem.tag = SankhyaConstants.ENTITY_PT_BR
             elem.append(entity_elem)
-        
+
         return elem
 
     @classmethod
     def from_xml(cls, element: Element) -> "CrudServiceEntities":
         """Deserializa de elemento XML."""
         entities: List[EntityDynamic] = []
-        
+
         # Procura por elementos 'entidade'
         for child in element.findall(SankhyaConstants.ENTITY_PT_BR):
             entities.append(EntityDynamic.from_xml(child))
-        
+
         total = deserialize_optional_int(
             get_element_attr(element, SankhyaConstants.TOTAL)
         )
         total_pages = deserialize_optional_int(
             get_element_attr(element, SankhyaConstants.TOTAL_PAGES)
         )
-        
+
         return cls(
             entities=entities,
             total=total,
@@ -711,14 +710,14 @@ class CrudServiceProviderEntities(BaseModel):
     def to_xml(self) -> Element:
         """Serializa para elemento XML."""
         elem = etree.Element(SankhyaConstants.ENTITIES_EN)
-        
+
         if self.total is not None:
             elem.set(SankhyaConstants.TOTAL, str(self.total))
         if self.total_pages is not None:
             elem.set(SankhyaConstants.TOTAL_PAGES, str(self.total_pages))
         if self.pager_id:
             elem.set(SankhyaConstants.PAGER_ID, self.pager_id)
-        
+
         if self.metadata is not None:
             elem.append(self.metadata.to_xml())
 
@@ -726,7 +725,7 @@ class CrudServiceProviderEntities(BaseModel):
             entity_elem = entity.to_xml()
             entity_elem.tag = SankhyaConstants.ENTITY_EN
             elem.append(entity_elem)
-        
+
         return elem
 
     @classmethod
@@ -744,21 +743,21 @@ class CrudServiceProviderEntities(BaseModel):
         metadata_elem = element.find(SankhyaConstants.METADATA)
         if metadata_elem is not None:
             metadata = Metadata.from_xml(metadata_elem)
-        
+
         # Procura por elementos 'entity'
         for child in element.findall(SankhyaConstants.ENTITY_EN):
             entity = EntityDynamic.from_xml(child)
             if metadata is not None:
                 entity.fields = _change_keys(entity.fields, metadata)
             entities.append(entity)
-        
+
         total = deserialize_optional_int(
             get_element_attr(element, SankhyaConstants.TOTAL)
         )
         total_pages = deserialize_optional_int(
             get_element_attr(element, SankhyaConstants.TOTAL_PAGES)
         )
-        
+
         return cls(
             entities=entities,
             total=total,

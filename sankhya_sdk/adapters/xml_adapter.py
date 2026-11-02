@@ -5,10 +5,8 @@ Provides conversion between XML and JSON formats to support existing
 integrations that still use the old XML-based API.
 """
 
-import json
 import logging
-import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from xml.etree import ElementTree as ET
 
 logger = logging.getLogger(__name__)
@@ -48,8 +46,8 @@ class XmlAdapter:
             raise ValueError(f"Malformed XML: {e}") from e
 
     def json_to_xml(
-        self, 
-        json_data: Dict[str, Any], 
+        self,
+        json_data: Dict[str, Any],
         root_name: str = "serviceRequest"
     ) -> str:
         """
@@ -86,7 +84,7 @@ class XmlAdapter:
         }
 
     def extract_legacy_response(
-        self, 
+        self,
         json_response: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
@@ -104,32 +102,32 @@ class XmlAdapter:
         # Handle common response structures
         if "responseBody" in json_response:
             return json_response["responseBody"]
-        
+
         if "entities" in json_response:
             return {"entities": json_response["entities"]}
-        
+
         return json_response
 
     def _element_to_dict(self, element: ET.Element) -> Dict[str, Any]:
         """Recursively convert XML element to dictionary."""
         result: Dict[str, Any] = {}
-        
+
         # Add element attributes
         if element.attrib:
             result["@attributes"] = dict(element.attrib)
-        
+
         # Handle text content
         if element.text and element.text.strip():
             text = element.text.strip()
             if len(element) == 0:  # No children
                 return {"$": text} if result else text
             result["$"] = text
-        
+
         # Process children
         children: Dict[str, Any] = {}
         for child in element:
             child_dict = self._element_to_dict(child)
-            
+
             if child.tag in children:
                 # Convert to list if multiple elements with same tag
                 if not isinstance(children[child.tag], list):
@@ -137,20 +135,20 @@ class XmlAdapter:
                 children[child.tag].append(child_dict)
             else:
                 children[child.tag] = child_dict
-        
+
         if children:
             result.update(children)
-        
+
         return result if result else {}
 
     def _dict_to_element(
-        self, 
-        data: Any, 
+        self,
+        data: Any,
         tag_name: str
     ) -> ET.Element:
         """Recursively convert dictionary to XML element."""
         element = ET.Element(tag_name)
-        
+
         if isinstance(data, dict):
             for key, value in data.items():
                 if key == "@attributes":
@@ -172,7 +170,7 @@ class XmlAdapter:
                 element.append(child)
         else:
             element.text = str(data) if data is not None else ""
-        
+
         return element
 
     def convert_field_format(

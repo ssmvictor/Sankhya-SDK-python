@@ -1,13 +1,14 @@
-from pydantic import Field, BaseModel
-from sankhya_sdk.value_objects.parse_property_model import ParsePropertyModel
-from sankhya_sdk.attributes.metadata import EntityCustomDataMetadata
+from pydantic import BaseModel
+
 from sankhya_sdk.attributes.decorators import (
+    entity_custom_data,
     entity_element,
+    entity_ignore,
     entity_key,
     entity_reference,
-    entity_ignore,
-    entity_custom_data,
 )
+from sankhya_sdk.attributes.metadata import EntityCustomDataMetadata
+from sankhya_sdk.value_objects.parse_property_model import ParsePropertyModel
 
 
 def test_parse_property_model_defaults():

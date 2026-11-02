@@ -8,21 +8,20 @@ import threading
 from typing import Optional
 from unittest.mock import MagicMock, call, patch
 from uuid import uuid4
+
 import pytest
 import pytest_asyncio
-
 from pydantic import Field
 
 from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.enums.service_request_type import ServiceRequestType
 from sankhya_sdk.models.base import EntityBase
-from sankhya_sdk.request_wrappers.on_demand_request_factory import (
-    OnDemandRequestFactory,
-)
 from sankhya_sdk.request_wrappers.async_on_demand_request_factory import (
     AsyncOnDemandRequestFactory,
 )
-
+from sankhya_sdk.request_wrappers.on_demand_request_factory import (
+    OnDemandRequestFactory,
+)
 
 # =============================================================================
 # Test Entity
@@ -31,7 +30,7 @@ from sankhya_sdk.request_wrappers.async_on_demand_request_factory import (
 
 class FactoryTestEntity(EntityBase):
     """Entidade de teste simples."""
-    
+
     id: Optional[int] = Field(default=None)
     name: Optional[str] = Field(default=None)
 
@@ -56,46 +55,46 @@ class TestOnDemandRequestFactory:
     def test_create_instance_returns_uuid(self):
         """Verifica que create_instance retorna UUID."""
         cancel_token = threading.Event()
-        
+
         key = OnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_token=cancel_token,
         )
-        
+
         assert key is not None
         assert OnDemandRequestFactory.get_instance_count() == 1
 
     def test_get_instance_by_key(self):
         """Verifica busca de instância por chave."""
         cancel_token = threading.Event()
-        
+
         key = OnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_token=cancel_token,
         )
-        
+
         wrapper = OnDemandRequestFactory.get_instance_by_key(key)
-        
+
         assert wrapper is not None
         assert not wrapper.is_disposed
 
     def test_get_instance_for_service(self):
         """Verifica busca de instância por serviço e tipo."""
         cancel_token = threading.Event()
-        
+
         OnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_token=cancel_token,
         )
-        
+
         wrapper = OnDemandRequestFactory.get_instance_for_service(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
         )
-        
+
         assert wrapper is not None
 
     def test_get_instance_for_service_returns_none_if_not_found(self):
@@ -104,28 +103,28 @@ class TestOnDemandRequestFactory:
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
         )
-        
+
         assert wrapper is None
 
     def test_finalize_by_key(self):
         """Verifica finalização de instância específica."""
         cancel_token = threading.Event()
-        
+
         key = OnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_token=cancel_token,
         )
-        
+
         OnDemandRequestFactory.finalize_by_key(key)
-        
+
         wrapper = OnDemandRequestFactory.get_instance_by_key(key)
         assert wrapper is None
 
     def test_finalize_all(self):
         """Verifica finalização de todas as instâncias."""
         cancel_token = threading.Event()
-        
+
         # Cria múltiplas instâncias
         for i in range(3):
             OnDemandRequestFactory.create_instance(
@@ -133,26 +132,26 @@ class TestOnDemandRequestFactory:
                 service=ServiceName.CRUD_SAVE,
                 cancel_token=cancel_token,
             )
-        
+
         assert OnDemandRequestFactory.get_instance_count() == 3
-        
+
         OnDemandRequestFactory.finalize_all()
-        
+
         assert OnDemandRequestFactory.get_instance_count() == 0
 
     def test_flush_by_key(self):
         """Verifica flush de instância específica."""
         cancel_token = threading.Event()
-        
+
         key = OnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_token=cancel_token,
         )
-        
+
         wrapper = OnDemandRequestFactory.get_instance_by_key(key)
         assert wrapper is not None
-        
+
         # Não deve lançar exceção
         OnDemandRequestFactory.flush_by_key(key)
 
@@ -177,13 +176,13 @@ class TestAsyncOnDemandRequestFactory:
     async def test_create_instance_returns_uuid(self):
         """Verifica que create_instance retorna UUID."""
         cancel_event = asyncio.Event()
-        
+
         key = await AsyncOnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_event=cancel_event,
         )
-        
+
         assert key is not None
         assert await AsyncOnDemandRequestFactory.get_instance_count() == 1
 
@@ -191,15 +190,15 @@ class TestAsyncOnDemandRequestFactory:
     async def test_get_instance_by_key(self):
         """Verifica busca de instância por chave."""
         cancel_event = asyncio.Event()
-        
+
         key = await AsyncOnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_event=cancel_event,
         )
-        
+
         wrapper = await AsyncOnDemandRequestFactory.get_instance_by_key(key)
-        
+
         assert wrapper is not None
         assert not wrapper.is_disposed
 
@@ -207,18 +206,18 @@ class TestAsyncOnDemandRequestFactory:
     async def test_get_instance_for_service(self):
         """Verifica busca de instância por serviço e tipo."""
         cancel_event = asyncio.Event()
-        
+
         await AsyncOnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_event=cancel_event,
         )
-        
+
         wrapper = await AsyncOnDemandRequestFactory.get_instance_for_service(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
         )
-        
+
         assert wrapper is not None
 
     @pytest.mark.asyncio
@@ -228,22 +227,22 @@ class TestAsyncOnDemandRequestFactory:
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
         )
-        
+
         assert wrapper is None
 
     @pytest.mark.asyncio
     async def test_finalize_by_key(self):
         """Verifica finalização de instância específica."""
         cancel_event = asyncio.Event()
-        
+
         key = await AsyncOnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_event=cancel_event,
         )
-        
+
         await AsyncOnDemandRequestFactory.finalize_by_key(key)
-        
+
         wrapper = await AsyncOnDemandRequestFactory.get_instance_by_key(key)
         assert wrapper is None
 
@@ -251,7 +250,7 @@ class TestAsyncOnDemandRequestFactory:
     async def test_finalize_all(self):
         """Verifica finalização de todas as instâncias."""
         cancel_event = asyncio.Event()
-        
+
         # Cria múltiplas instâncias
         for i in range(3):
             await AsyncOnDemandRequestFactory.create_instance(
@@ -259,27 +258,27 @@ class TestAsyncOnDemandRequestFactory:
                 service=ServiceName.CRUD_SAVE,
                 cancel_event=cancel_event,
             )
-        
+
         assert await AsyncOnDemandRequestFactory.get_instance_count() == 3
-        
+
         await AsyncOnDemandRequestFactory.finalize_all()
-        
+
         assert await AsyncOnDemandRequestFactory.get_instance_count() == 0
 
     @pytest.mark.asyncio
     async def test_flush_by_key(self):
         """Verifica flush de instância específica."""
         cancel_event = asyncio.Event()
-        
+
         key = await AsyncOnDemandRequestFactory.create_instance(
             entity_type=FactoryTestEntity,
             service=ServiceName.CRUD_SAVE,
             cancel_event=cancel_event,
         )
-        
+
         wrapper = await AsyncOnDemandRequestFactory.get_instance_by_key(key)
         assert wrapper is not None
-        
+
         # Não deve lançar exceção
         await AsyncOnDemandRequestFactory.flush_by_key(key)
 

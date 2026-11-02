@@ -51,7 +51,7 @@ class TokenManager:
             self._expires_at = datetime.now() + timedelta(seconds=expires_in)
             if refresh_token:
                 self._refresh_token = refresh_token
-            
+
             if client_id:
                 self._client_id = client_id
             if client_secret:
@@ -79,7 +79,7 @@ class TokenManager:
             # Check expiration WITHOUT calling is_expired() to avoid nested lock
             if not self._expires_at:
                 raise TokenExpiredError("Access token expired.")
-            
+
             if datetime.now() >= (self._expires_at - timedelta(seconds=60)):
                 raise TokenExpiredError("Access token expired.")
 
@@ -113,7 +113,7 @@ class TokenManager:
         """Returns stored credentials. Thread-safe."""
         with self._lock:
             return self._client_id, self._client_secret
-    
+
     def clear(self):
         """Clears all stored tokens and credentials. Thread-safe."""
         with self._lock:

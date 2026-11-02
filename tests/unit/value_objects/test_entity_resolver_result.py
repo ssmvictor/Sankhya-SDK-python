@@ -1,6 +1,6 @@
-from sankhya_sdk.value_objects.entity_resolver import EntityResolverResult
-from sankhya_sdk.models.service.basic_types import LiteralCriteria, Parameter
 from sankhya_sdk.enums.parameter_type import ParameterType
+from sankhya_sdk.models.service.basic_types import LiteralCriteria, Parameter
+from sankhya_sdk.value_objects.entity_resolver import EntityResolverResult
 
 
 def test_entity_resolver_result_creation():

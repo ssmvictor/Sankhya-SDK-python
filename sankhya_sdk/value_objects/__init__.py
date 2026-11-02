@@ -1,8 +1,8 @@
-from .service_file import ServiceFile
-from .parse_property_model import ParsePropertyModel
+from ..models.service.basic_types import Field, FieldValue
 from .entity_resolver import EntityResolverResult
 from .paged_request_event_args import PagedRequestEventArgs
-from ..models.service.basic_types import FieldValue, Field
+from .parse_property_model import ParsePropertyModel
+from .service_file import ServiceFile
 
 __all__ = [
     "ServiceFile",

@@ -34,20 +34,20 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from sankhya_sdk.core.context import SankhyaContext
+    pass
 
-from sankhya_sdk.enums.service_name import ServiceName
 from sankhya_sdk.exceptions import (
     PagedRequestException as _SdkPagedRequestException,
+)
+from sankhya_sdk.exceptions import (
     ServiceRequestGeneralException,
 )
 from sankhya_sdk.helpers.entity_dynamic_serialization import EntityDynamicSerialization
 from sankhya_sdk.models.base import EntityBase
+from sankhya_sdk.models.service.entity_types import EntityDynamic
 from sankhya_sdk.models.service.service_request import ServiceRequest
 from sankhya_sdk.models.service.service_response import ServiceResponse
-from sankhya_sdk.models.service.entity_types import EntityDynamic
 from sankhya_sdk.value_objects.paged_request_event_args import PagedRequestEventArgs
-
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class PagedRequestException(_SdkPagedRequestException):
     mensagem informada (``str(exc) == message``), a página e a exceção
     interna, que também é a causa (``__cause__``).
     """
-    
+
     def __init__(
         self,
         message: str,
@@ -136,15 +136,15 @@ class PagedRequestWrapper:
         ... ):
         ...     await process_async(partner)
     """
-    
+
     # Cache simples em memória para evitar carregamentos duplicados
     _cache: ClassVar[Dict[str, Tuple[int, float]]] = {}
     _cache_lock: ClassVar[threading.Lock] = threading.Lock()
-    
+
     # Tamanhos de página padrão do Sankhya
     PAGE_SIZE_SMALL = 150
     PAGE_SIZE_LARGE = 300
-    
+
     def __init__(
         self,
         request: ServiceRequest,
@@ -165,7 +165,7 @@ class PagedRequestWrapper:
         self._entity_type = entity_type
         self._token = token
         self._max_results = max_results
-        
+
         # Estado interno
         self._results_loaded = 0
         self._items: queue.Queue[EntityDynamicSerialization] = queue.Queue()
@@ -176,21 +176,21 @@ class PagedRequestWrapper:
         self._all_pages_loaded = threading.Event()
         self._load_error: Optional[Exception] = None
         self._results_lock = threading.Lock()
-        
+
         # Callbacks
         self._on_page_loaded: List[PageLoadedCallback] = []
         self._on_page_error: List[PageErrorCallback] = []
         self._on_page_processed: List[PageProcessedCallback] = []
-        
+
         # Estado de paginação
         self._pager_id: Optional[str] = None
         self._total_pages: Optional[int] = None
         self._total_records: Optional[int] = None
-    
+
     # =========================================================================
     # Callback Registration
     # =========================================================================
-    
+
     def on_page_loaded(self, callback: PageLoadedCallback) -> "PagedRequestWrapper":
         """
         Registra callback para quando uma página é carregada com sucesso.
@@ -203,7 +203,7 @@ class PagedRequestWrapper:
         """
         self._on_page_loaded.append(callback)
         return self
-    
+
     def on_page_error(self, callback: PageErrorCallback) -> "PagedRequestWrapper":
         """
         Registra callback para quando ocorre erro no carregamento.
@@ -216,7 +216,7 @@ class PagedRequestWrapper:
         """
         self._on_page_error.append(callback)
         return self
-    
+
     def on_page_processed(self, callback: PageProcessedCallback) -> "PagedRequestWrapper":
         """
         Registra callback para quando uma página é processada.
@@ -229,11 +229,11 @@ class PagedRequestWrapper:
         """
         self._on_page_processed.append(callback)
         return self
-    
+
     # =========================================================================
     # Private Methods - Callback Dispatching
     # =========================================================================
-    
+
     def _dispatch_page_loaded(
         self,
         page: int,
@@ -248,13 +248,13 @@ class PagedRequestWrapper:
             quantity_loaded=quantity,
             total_pages=total_pages,
         )
-        
+
         for callback in self._on_page_loaded:
             try:
                 callback(args)
             except Exception as e:
                 logger.warning(f"Erro em callback on_page_loaded: {e}")
-    
+
     def _dispatch_page_error(
         self,
         page: int,
@@ -267,13 +267,13 @@ class PagedRequestWrapper:
             total_loaded=self._results_loaded,
             exception=exception,
         )
-        
+
         for callback in self._on_page_error:
             try:
                 callback(args)
             except Exception as e:
                 logger.warning(f"Erro em callback on_page_error: {e}")
-    
+
     def _dispatch_page_processed(
         self,
         page: int,
@@ -290,13 +290,13 @@ class PagedRequestWrapper:
             quantity_loaded=quantity,
             total_pages=pages,
         )
-        
+
         for callback in self._on_page_processed:
             try:
                 callback(args)
             except Exception as e:
                 logger.warning(f"Erro em callback on_page_processed: {e}")
-    
+
     # =========================================================================
     # Private Methods - Pagination State
     # =========================================================================
@@ -340,7 +340,7 @@ class PagedRequestWrapper:
     # =========================================================================
     # Private Methods - Page Loading (Sync)
     # =========================================================================
-    
+
     def _load_page(self, page: int) -> Tuple[bool, int, Optional[int]]:
         """
         Carrega uma página específica de resultados.
@@ -352,24 +352,24 @@ class PagedRequestWrapper:
             Tuple de (sucesso, quantidade_carregada, total_páginas)
         """
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         # Atualiza número da página na requisição
         if self._request.request_body and self._request.request_body.data_set:
             self._request.request_body.data_set.page_number = page
-            
+
             # Adiciona pager_id se disponível
             self._apply_pager_id_to_request()
-        
+
         try:
             # Invoca serviço
             response = SankhyaContext.service_invoker_with_token(
                 self._request, self._token
             )
-            
+
             # Extrai informações de paginação
             entities = self._extract_entities_from_response(response)
             quantity_loaded = len(entities)
-            
+
             # Atualiza pager_id e total_pages se disponíveis
             if response.response_body:
                 self._update_pagination_from_entities(response)
@@ -381,26 +381,26 @@ class PagedRequestWrapper:
                         self._total_pages = pager.total_pages
                     if pager.total_records is not None:
                         self._total_records = pager.total_records
-            
+
             # Adiciona entidades à fila
             for entity in entities:
                 self._items.put(entity)
             self._page_sizes.put(quantity_loaded)
-            
+
             # Atualiza contador (thread-safe)
             with self._results_lock:
                 self._results_loaded += quantity_loaded
-            
+
             # Dispara callback de sucesso
             self._dispatch_page_loaded(page, quantity_loaded, self._total_pages)
-            
+
             logger.debug(
                 f"Página {page} carregada: {quantity_loaded} itens, "
                 f"total: {self._results_loaded}"
             )
-            
+
             return (True, quantity_loaded, self._total_pages)
-            
+
         except Exception as e:
             logger.error(f"Erro ao carregar página {page}: {e}")
             # Comment 2: Set _load_error when _load_page catches an exception
@@ -412,7 +412,7 @@ class PagedRequestWrapper:
             )
             self._dispatch_page_error(page, e)
             return (False, 0, None)
-    
+
     def _load_all_pages(self, cancel_event: threading.Event) -> None:
         """
         Carrega todas as páginas em uma thread separada.
@@ -421,12 +421,12 @@ class PagedRequestWrapper:
             cancel_event: Evento para sinalizar cancelamento
         """
         current_page = 1
-        
+
         try:
             while not cancel_event.is_set():
                 # Carrega página atual
                 success, quantity, total_pages = self._load_page(current_page)
-                
+
                 if not success:
                     # Comment 2: Ensure _load_error is set when success is False
                     if not self._load_error:
@@ -436,10 +436,10 @@ class PagedRequestWrapper:
                             request=self._request,
                         )
                     break
-                
+
                 # Comment 3: Invoke _dispatch_page_processed after page items are enqueued
                 self._dispatch_page_processed(current_page, quantity, total_pages)
-                
+
                 # Verifica se atingiu max_results
                 if self._max_results > 0 and self._results_loaded >= self._max_results:
                     logger.debug(
@@ -447,7 +447,7 @@ class PagedRequestWrapper:
                         f"{self._results_loaded}"
                     )
                     break
-                
+
                 # Verifica se há mais páginas
                 # Sankhya retorna 150 ou 300 itens por página quando há mais.
                 # Como no .NET (LoadResponseInternal), só a quantidade da
@@ -459,24 +459,24 @@ class PagedRequestWrapper:
                         f"(esperado {self.PAGE_SIZE_SMALL} ou {self.PAGE_SIZE_LARGE})"
                     )
                     break
-                
+
                 current_page += 1
-                
+
         except Exception as e:
             logger.error(f"Erro durante carregamento de páginas: {e}")
             self._load_error = e
-            
+
         finally:
             self._all_pages_loaded.set()
             logger.debug(
                 f"Carregamento finalizado: {self._results_loaded} itens em "
                 f"{current_page} páginas"
             )
-    
+
     # =========================================================================
     # Private Methods - Response Processing
     # =========================================================================
-    
+
     def _extract_entities_from_response(
         self, response: ServiceResponse
     ) -> List[EntityDynamicSerialization]:
@@ -499,7 +499,7 @@ class PagedRequestWrapper:
             Lista de EntityDynamicSerialization
         """
         entities: List[EntityDynamicSerialization] = []
-        
+
         for entity_data in response.entities:
             if isinstance(entity_data, EntityDynamicSerialization):
                 entities.append(entity_data)
@@ -512,13 +512,13 @@ class PagedRequestWrapper:
                     f"Entidade de tipo inesperado ignorada na resposta: "
                     f"{type(entity_data).__name__}"
                 )
-        
+
         return entities
-    
+
     # =========================================================================
     # Public Methods - Sync Generator
     # =========================================================================
-    
+
     @classmethod
     def get_paged_results(
         cls,
@@ -579,7 +579,7 @@ class PagedRequestWrapper:
             token=token,
             max_results=max_results,
         )
-        
+
         # Registra callbacks
         if on_page_loaded:
             wrapper.on_page_loaded(on_page_loaded)
@@ -587,10 +587,10 @@ class PagedRequestWrapper:
             wrapper.on_page_error(on_page_error)
         if on_page_processed:
             wrapper.on_page_processed(on_page_processed)
-        
+
         # Evento de cancelamento
         cancel_event = threading.Event()
-        
+
         # Inicia thread de carregamento
         loader_thread = threading.Thread(
             target=wrapper._load_all_pages,
@@ -598,13 +598,13 @@ class PagedRequestWrapper:
             daemon=True,
         )
         loader_thread.start()
-        
+
         # Comment 1: Track start time for timeout handling
         timeout_seconds = timeout.total_seconds()
         start_time = time.time()
-        
+
         items_yielded = 0
-        
+
         try:
             while True:
                 try:
@@ -620,7 +620,7 @@ class PagedRequestWrapper:
                         raise TimeoutError(
                             f"Paged request timeout exceeded: {elapsed:.1f}s > {timeout_seconds}s"
                         )
-                    
+
                     # Fila vazia - verifica se carregamento finalizou
                     if wrapper._all_pages_loaded.is_set():
                         # A última página pode ter chegado depois da espera
@@ -634,7 +634,7 @@ class PagedRequestWrapper:
                                 request=wrapper._request,
                             )
                         break
-                    
+
                     # Verifica se thread morreu
                     if not loader_thread.is_alive():
                         # Thread morreu - verifica erro
@@ -646,7 +646,7 @@ class PagedRequestWrapper:
                             )
                         break
                     continue
-                
+
                 # Como HandlePageLoaded/LoadOnDemandData (.NET): converte a
                 # página inteira e a processa antes de entregar qualquer item
                 page = [
@@ -657,26 +657,26 @@ class PagedRequestWrapper:
                     page = page[: max_results - items_yielded]
                 if process_data and page:
                     process_data(page)
-                
+
                 for entity in page:
                     yield entity
                     items_yielded += 1
-                
+
                 # Verifica max_results
                 if max_results > 0 and items_yielded >= max_results:
                     cancel_event.set()
                     break
-        
+
         except GeneratorExit:
             # Generator foi fechado prematuramente
             cancel_event.set()
             raise
-            
+
         finally:
             # Garante que thread é finalizada
             cancel_event.set()
             loader_thread.join(timeout=5.0)
-            
+
             # Propaga erro se houver
             if wrapper._load_error:
                 raise PagedRequestException(
@@ -684,13 +684,13 @@ class PagedRequestWrapper:
                     inner_exception=wrapper._load_error,
                     request=wrapper._request,
                 )
-        
+
         logger.info(f"Paginação completa: {items_yielded} itens retornados")
-    
+
     # =========================================================================
     # Private Methods - Page Loading (Async)
     # =========================================================================
-    
+
     async def _load_page_async(self, page: int) -> Tuple[bool, int, Optional[int]]:
         """
         Carrega uma página específica de forma assíncrona.
@@ -702,23 +702,23 @@ class PagedRequestWrapper:
             Tuple de (sucesso, quantidade_carregada, total_páginas)
         """
         from sankhya_sdk.core.context import SankhyaContext
-        
+
         # Atualiza número da página na requisição
         if self._request.request_body and self._request.request_body.data_set:
             self._request.request_body.data_set.page_number = page
-            
+
             self._apply_pager_id_to_request()
-        
+
         try:
             # Invoca serviço de forma assíncrona
             response = await SankhyaContext.service_invoker_async_with_token(
                 self._request, self._token
             )
-            
+
             # Extrai entidades
             entities = self._extract_entities_from_response(response)
             quantity_loaded = len(entities)
-            
+
             # Atualiza paginação
             if response.response_body:
                 self._update_pagination_from_entities(response)
@@ -730,19 +730,19 @@ class PagedRequestWrapper:
                         self._total_pages = pager.total_pages
                     if pager.total_records is not None:
                         self._total_records = pager.total_records
-            
+
             # Atualiza contador
             self._results_loaded += quantity_loaded
-            
+
             # Dispara callback
             self._dispatch_page_loaded(page, quantity_loaded, self._total_pages)
-            
+
             logger.debug(
                 f"Página {page} carregada (async): {quantity_loaded} itens"
             )
-            
+
             return (True, quantity_loaded, self._total_pages, entities)
-            
+
         except Exception as e:
             logger.error(f"Erro ao carregar página {page} (async): {e}")
             # Comment 2: Set _load_error when _load_page_async catches an exception
@@ -754,7 +754,7 @@ class PagedRequestWrapper:
             )
             self._dispatch_page_error(page, e)
             return (False, 0, None, [])
-    
+
     async def _load_all_pages_async(
         self,
         cancel_event: asyncio.Event,
@@ -772,13 +772,13 @@ class PagedRequestWrapper:
                 (``None`` ao final do carregamento)
         """
         current_page = 1
-        
+
         try:
             while not cancel_event.is_set():
                 result = await self._load_page_async(current_page)
                 success, quantity, total_pages = result[:3]
                 entities = result[3] if len(result) > 3 else []
-                
+
                 if not success:
                     # Comment 2: Ensure _load_error is set when success is False
                     if not self._load_error:
@@ -788,41 +788,41 @@ class PagedRequestWrapper:
                             request=self._request,
                         )
                     break
-                
+
                 # Adiciona entidades à fila assíncrona
                 for entity in entities:
                     await items_queue.put(entity)
                 if page_sizes is not None:
                     await page_sizes.put(len(entities))
-                
+
                 # Comment 3: Invoke _dispatch_page_processed after page items are enqueued
                 self._dispatch_page_processed(current_page, quantity, total_pages)
-                
+
                 # Verifica max_results
                 if self._max_results > 0 and self._results_loaded >= self._max_results:
                     break
-                
+
                 # Verifica se há mais páginas
                 # totalPages não encerra a paginação (como no .NET)
                 if quantity not in (self.PAGE_SIZE_SMALL, self.PAGE_SIZE_LARGE):
                     break
-                
+
                 current_page += 1
-                
+
         except Exception as e:
             logger.error(f"Erro durante carregamento async: {e}")
             self._load_error = e
-            
+
         finally:
             # Sinaliza fim do carregamento
             await items_queue.put(None)  # Sentinel value
             if page_sizes is not None:
                 await page_sizes.put(None)
-    
+
     # =========================================================================
     # Public Methods - Async Generator
     # =========================================================================
-    
+
     @classmethod
     async def get_paged_results_async(
         cls,
@@ -877,7 +877,7 @@ class PagedRequestWrapper:
             token=token,
             max_results=max_results,
         )
-        
+
         # Registra callbacks
         if on_page_loaded:
             wrapper.on_page_loaded(on_page_loaded)
@@ -885,23 +885,23 @@ class PagedRequestWrapper:
             wrapper.on_page_error(on_page_error)
         if on_page_processed:
             wrapper.on_page_processed(on_page_processed)
-        
+
         # Filas assíncronas (itens e tamanho de cada página) e evento de cancelamento
         items_queue: asyncio.Queue = asyncio.Queue()
         page_sizes: asyncio.Queue = asyncio.Queue()
         cancel_event = asyncio.Event()
-        
+
         # Inicia task de carregamento
         loader_task = asyncio.create_task(
             wrapper._load_all_pages_async(cancel_event, items_queue, page_sizes)
         )
-        
+
         # Comment 1: Track start time for timeout handling
         timeout_seconds = timeout.total_seconds()
         start_time = time.time()
-        
+
         items_yielded = 0
-        
+
         try:
             while True:
                 try:
@@ -914,7 +914,7 @@ class PagedRequestWrapper:
                         raise TimeoutError(
                             f"Paged request timeout exceeded (async): {elapsed:.1f}s > {timeout_seconds}s"
                         )
-                    
+
                     # Aguarda a próxima página com timeout parcial (máximo 10 segundos)
                     remaining = timeout_seconds - elapsed
                     wait_timeout = min(remaining, 10.0)
@@ -935,7 +935,7 @@ class PagedRequestWrapper:
                         break
                     # Continua aguardando (timeout parcial expirou)
                     continue
-                
+
                 # Verifica sentinel (fim do carregamento)
                 if quantity is None:
                     # Comment 2: Check for load error and raise if present
@@ -946,7 +946,7 @@ class PagedRequestWrapper:
                             request=wrapper._request,
                         )
                     break
-                
+
                 # Como HandlePageLoaded/LoadOnDemandData (.NET): converte a
                 # página inteira e a processa antes de entregar qualquer item
                 page = [
@@ -957,20 +957,20 @@ class PagedRequestWrapper:
                     page = page[: max_results - items_yielded]
                 if process_data and page:
                     await process_data(page)
-                
+
                 for entity in page:
                     yield entity
                     items_yielded += 1
-                
+
                 # Verifica max_results
                 if max_results > 0 and items_yielded >= max_results:
                     cancel_event.set()
                     break
-        
+
         except GeneratorExit:
             cancel_event.set()
             raise
-            
+
         finally:
             # Cancela task se ainda estiver rodando
             cancel_event.set()
@@ -980,7 +980,7 @@ class PagedRequestWrapper:
                     await loader_task
                 except asyncio.CancelledError:
                     pass
-            
+
             # Propaga erro se houver
             if wrapper._load_error:
                 raise PagedRequestException(
@@ -988,13 +988,13 @@ class PagedRequestWrapper:
                     inner_exception=wrapper._load_error,
                     request=wrapper._request,
                 )
-        
+
         logger.info(f"Paginação async completa: {items_yielded} itens")
-    
+
     # =========================================================================
     # Cache Methods (Optional)
     # =========================================================================
-    
+
     @classmethod
     def _get_cache_key(cls, entity_type: Type[T], user_code: int) -> str:
         """
@@ -1011,7 +1011,7 @@ class PagedRequestWrapper:
         entity_name = entity_type.__name__
         process_id = os.getpid()
         return f"{entity_name}:{user_code}:{process_id}"
-    
+
     @classmethod
     def _acquire_cache_lock(cls, key: str, timeout: float = 30.0) -> bool:
         """
@@ -1024,12 +1024,12 @@ class PagedRequestWrapper:
         Returns:
             True se lock adquirido
         """
-        import time
         import os
-        
+        import time
+
         process_id = os.getpid()
         current_time = time.time()
-        
+
         with cls._cache_lock:
             if key in cls._cache:
                 cached_pid, cached_time = cls._cache[key]
@@ -1038,10 +1038,10 @@ class PagedRequestWrapper:
                     cls._cache[key] = (process_id, current_time)
                     return True
                 return False
-            
+
             cls._cache[key] = (process_id, current_time)
             return True
-    
+
     @classmethod
     def _release_cache_lock(cls, key: str) -> None:
         """

@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
+
 from sankhya_sdk.models.service.basic_types import (
-    FieldValue,
-    Field,
     Criteria,
+    Field,
+    FieldValue,
     LiteralCriteria,
 )
 

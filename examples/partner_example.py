@@ -13,7 +13,7 @@ Tabela Sankhya: TGFPAR
 from __future__ import annotations
 
 import os
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -33,7 +33,7 @@ SANKHYA_X_TOKEN = os.getenv("SANKHYA_TOKEN")  # Token de Integração obrigatór
 def _create_client():
     """Cria e retorna um GatewayClient autenticado."""
     from sankhya_sdk.auth.oauth_client import OAuthClient
-    from sankhya_sdk.http import SankhyaSession, GatewayClient
+    from sankhya_sdk.http import GatewayClient, SankhyaSession
 
     oauth = OAuthClient(
         base_url=SANKHYA_AUTH_BASE_URL,
@@ -84,7 +84,7 @@ def listar_parceiros(max_results: int = 100) -> List[Dict[str, Any]]:
             parceiro = ParceiroListDTO.model_validate(record)
             parceiros.append(parceiro.model_dump())
             print(f"  {i}. [{parceiro.codigo}] {parceiro.nome}")
-        except Exception as e:
+        except Exception:
             # Fallback para dados brutos se validação falhar
             codigo = record.get("CODPARC", "?")
             nome = record.get("NOMEPARC", "?")
@@ -225,7 +225,6 @@ def criar_ou_atualizar_parceiro(
     Returns:
         Dados do parceiro salvo ou None em caso de erro
     """
-    from sankhya_sdk.models.dtos import ParceiroCreateDTO
 
     client = _create_client()
 
@@ -254,7 +253,7 @@ def criar_ou_atualizar_parceiro(
         # Verifica sucesso
         status = response.get("status", response.get("responseBody", {}).get("status"))
         if status == "1" or status == 1:
-            print(f"✅ Parceiro salvo com sucesso!")
+            print("✅ Parceiro salvo com sucesso!")
             return response
         else:
             error_msg = response.get("statusMessage", "Erro desconhecido")
