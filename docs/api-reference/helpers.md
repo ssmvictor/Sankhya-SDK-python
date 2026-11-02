@@ -53,8 +53,14 @@ options = options.with_max_results(10).with_references(True, max_depth=2)
 | `include_references` | `bool \| None` | `None` | `False` remove as entidades referenciadas da requisição |
 | `max_reference_depth` | `int \| None` (0 a 6) | `None` | Profundidade das referências (sem a opção, o `loadRecords` usa o 3º nível) |
 | `include_presentation_fields` | `bool \| None` | `None` | Campos de apresentação |
-| `use_wildcard_fields` | `bool \| None` | `None` | Usar `*` na lista de campos |
-| `timeout` | `timedelta` | 30 minutos | Tempo limite da consulta |
+| `use_wildcard_fields` | `bool \| None` | `None` | Aceito por paridade com o .NET; ignorado pelo SDK Python (sem efeito na requisição) |
+| `timeout` | `timedelta` | 30 minutos | Aceito por paridade com o .NET; ignorado pelo SDK Python (sem efeito na requisição) |
+
+`use_wildcard_fields` e `timeout` são validados e copiados (`with_timeout`,
+`get_timeout_seconds`), mas nenhuma operação os lê: a requisição continua
+listando os campos explicitamente e o tempo limite é o `timeout` HTTP do
+`SankhyaWrapper`. Só `max_results`, `include_references`,
+`max_reference_depth` e `include_presentation_fields` alteram a requisição.
 
 Não há seleção de campos nem ordenação; para isso, monte o `DataSet` à mão
 (veja [Queries Avançadas](../examples/advanced-queries.md#requisicao-manual)).
@@ -144,8 +150,8 @@ Funções de `sankhya_sdk.helpers` para inspecionar entidades:
 |--------|---------|-----------|
 | `get_entity_name(entity_type)` | `str` | Nome da entidade no Sankhya (`@entity`) |
 | `extract_keys(entity)` | `EntityResolverResult` | Nome da entidade e chaves preenchidas |
-| `get_entity_custom_data(entity_type)` | `dict \| None` | Dados customizados da entidade |
-| `get_service_attribute(service)` | `dict \| None` | Atributos do serviço (`ServiceName`) |
+| `get_entity_custom_data(entity_type)` | `None` na prática | Retorna o atributo `__entity_custom_data__` da classe, se existir; nenhum decorador nem entidade do SDK o define, então sempre retorna `None` |
+| `get_service_attribute(service)` | `EnumMetadata \| None` | Metadados do membro de `ServiceName` (`internal_value`, `human_readable`, `service_module`, `service_category`, `service_type`); é um objeto com atributos, não um `dict` |
 
 ```python
 from sankhya_sdk.helpers import extract_keys, get_entity_name

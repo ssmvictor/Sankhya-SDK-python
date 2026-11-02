@@ -126,10 +126,12 @@ print(criteria.build_expression())
 
 `EntityQueryOptions` (`sankhya_sdk.helpers`) é aceito por `try_find`,
 `find`, `find_all` e pelos métodos `*_with_criteria` do
-`SimpleCRUDRequestWrapper`. Os campos são `max_results`,
-`include_references`, `max_reference_depth`, `include_presentation_fields`,
-`use_wildcard_fields` e `timeout`. Não há opções de seleção de campos ou de
-ordenação; para isso, monte a requisição à mão (próxima seção).
+`SimpleCRUDRequestWrapper`. Os campos com efeito são `max_results`,
+`include_references`, `max_reference_depth` e `include_presentation_fields`.
+`use_wildcard_fields` e `timeout` são aceitos por paridade com o .NET, mas
+ignorados pelo SDK Python (sem efeito na requisição). Não há opções de
+seleção de campos ou de ordenação; para isso, monte a requisição à mão
+(próxima seção).
 
 ### Limite de Resultados
 

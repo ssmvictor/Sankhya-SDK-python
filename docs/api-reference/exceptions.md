@@ -217,10 +217,11 @@ Sessão não autorizada: o servidor respondeu `não autorizado` ou a
 requisição foi feita sem autenticação. Deriva de `Exception`.
 
 O `SankhyaWrapper` trata essa exceção sozinho: invalida a sessão,
-autentica de novo com as mesmas credenciais e repete a requisição. Ela só
-chega ao seu código quando a sessão já tinha sido invalidada ou quando o
-wrapper não tem credenciais. A mensagem é `str(e)`; não há atributos
-adicionais.
+autentica de novo com as mesmas credenciais e repete a requisição. Ela
+chega ao seu código quando o servidor continua recusando a sessão depois
+de `max_retries` reautenticações (padrão 3; cada uma abre uma sessão nova),
+quando a sessão já tinha sido invalidada ou quando o wrapper não tem
+credenciais. A mensagem é `str(e)`; não há atributos adicionais.
 
 ---
 

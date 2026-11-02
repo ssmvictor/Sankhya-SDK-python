@@ -26,9 +26,16 @@ servidor valida as regras de negócio (os erros viram exceções, veja
 ## Validação de Valores (Pydantic)
 
 As entidades de transporte (`sankhya_sdk.models.transport`) são modelos
-Pydantic com `validate_assignment`: tipos inválidos e limites de tamanho
-lançam `pydantic.ValidationError` (subclasse de `ValueError`) antes de
-qualquer requisição.
+Pydantic com `validate_assignment`, validados antes de qualquer requisição:
+
+- **Na construção**, tipos inválidos e limites de tamanho lançam
+  `pydantic.ValidationError` (subclasse de `ValueError`).
+- **Na atribuição**, tipo inválido lança `pydantic.ValidationError`, mas o
+  limite de tamanho lança um `ValueError` comum (verificado por
+  `EntityBase.__setattr__` depois da atribuição, então o valor longo já
+  ficou gravado no campo). `except ValidationError` não o captura.
+
+Use `except ValueError` para cobrir os dois casos.
 
 ```python
 from pydantic import ValidationError
@@ -43,9 +50,15 @@ except ValidationError as e:
 
 partner = Partner(code=1)
 try:
-    partner.code = "não é número"  # Também validado na atribuição
+    partner.code = "não é número"  # Tipo validado na atribuição
 except ValidationError as e:
     print(f"Inválido: {e.errors()[0]['type']}")
+
+try:
+    # Tamanho na atribuição: ValueError comum, não ValidationError
+    partner.address_complement = "x" * 40
+except ValueError as e:
+    print(f"Inválido: {e}")  # Value too long. Max length is 30
 ```
 
 ---
